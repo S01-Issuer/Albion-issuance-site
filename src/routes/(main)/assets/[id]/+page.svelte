@@ -41,8 +41,14 @@
 	const assetDetailState = assetDetailComposable.state;
 	const loadAssetData = assetDetailComposable.loadAssetData;
 	
+	// Track if we've loaded data for the current asset
+	let loadedAssetId: string | null = null;
+	
 	// Load data when asset ID changes and SFT data is available
-	$: if (assetId && $sftMetadata && $sfts) {
+	// Only load if we haven't already loaded for this asset
+	$: if (assetId && $sftMetadata && $sfts && loadedAssetId !== assetId) {
+		console.log(`[AssetDetailPage] Loading data for asset: ${assetId}`);
+		loadedAssetId = assetId;
 		loadAssetData(assetId);
 	}
 	const { exportProductionData: exportDataFunc, exportPaymentHistory } = useDataExport();

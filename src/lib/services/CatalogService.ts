@@ -19,26 +19,73 @@ export interface CatalogData {
 
 export class CatalogService {
   private catalog: CatalogData | null = null;
+  private buildPromise: Promise<CatalogData> | null = null;
+  private lastBuildHash: string | null = null;
+
+  private computeDataHash(sftsData: any[], metaData: any[]): string {
+    // Simple hash to detect data changes
+    return JSON.stringify({
+      sftsCount: sftsData?.length || 0,
+      metaCount: metaData?.length || 0,
+      sftsIds: sftsData?.map(s => s.id).sort().join(',') || '',
+      metaIds: metaData?.map(m => m.contractAddress).sort().join(',') || ''
+    });
+  }
 
   async build(): Promise<CatalogData> {
+    // If a build is already in progress, return that promise
+    if (this.buildPromise) {
+      console.log('[CatalogService] Build already in progress, returning existing promise');
+      return this.buildPromise;
+    }
+
     const $sfts = get(sfts);
     const $sftMetadata = get(sftMetadata);
 
+    // Check if data has changed
+    const currentHash = this.computeDataHash($sfts, $sftMetadata);
+    if (this.catalog && this.lastBuildHash === currentHash) {
+      console.log('[CatalogService] Data unchanged, returning cached catalog');
+      return this.catalog;
+    }
+
+    console.log('[CatalogService] Starting new catalog build');
+    
+    // Start new build
+    this.buildPromise = this._buildInternal($sfts, $sftMetadata, currentHash);
+    
+    try {
+      const result = await this.buildPromise;
+      return result;
+    } finally {
+      this.buildPromise = null;
+    }
+  }
+
+  private async _buildInternal(
+    $sfts: any,
+    $sftMetadata: any,
+    currentHash: string
+  ): Promise<CatalogData> {
     if (!$sfts || $sfts.length === 0 || !$sftMetadata) {
       this.catalog = { assets: {}, tokens: {} };
+      this.lastBuildHash = currentHash;
       return this.catalog;
     }
 
     const decodedMeta = $sftMetadata.map((m) => decodeSftInformation(m));
 
     // Collect authorizer addresses for a batched read
-    const authorizers: Hex[] = [] as unknown as Hex[];
+    const authorizers: Hex[] = [];
     for (const sft of $sfts) {
       if (sft.activeAuthorizer?.address) {
         authorizers.push(sft.activeAuthorizer.address as Hex);
       }
     }
 
+    console.log(`[CatalogService] Reading max supply from ${authorizers.length} authorizers`);
+    
+    // Read max supply from authorizers using multicall (not vaults!)
     const maxSupplyByAuthorizer = await getMaxSharesSupplyMap(authorizers, authorizerAbi);
 
     const assets: Record<string, Asset> = {};
@@ -50,15 +97,29 @@ export class CatalogService {
       );
       if (!pinnedMetadata) continue;
 
-      const authAddress = (sft.activeAuthorizer?.address || "0x").toLowerCase();
-      const maxSupply = maxSupplyByAuthorizer[authAddress] || "0";
+      const authAddress = (sft.activeAuthorizer?.address || "").toLowerCase();
+      // Get max supply from authorizer contract
+      let maxSupply = maxSupplyByAuthorizer[authAddress];
+      
+      if (!maxSupply || maxSupply === "0") {
+        // If we can't read from authorizer, use totalShares as fallback
+        // This is reasonable since totalShares represents what's been minted
+        maxSupply = sft.totalShares;
+        console.log(`[CatalogService] Using totalShares as max supply for ${sft.id}: ${maxSupply}`);
+      }
 
-      const tokenInstance = generateTokenMetadataInstanceFromSft(
-        sft,
-        pinnedMetadata,
-        maxSupply
-      );
-      const assetInstance = generateAssetInstanceFromSftMeta(sft, pinnedMetadata);
+      let tokenInstance, assetInstance;
+      try {
+        tokenInstance = generateTokenMetadataInstanceFromSft(
+          sft,
+          pinnedMetadata,
+          maxSupply
+        );
+        assetInstance = generateAssetInstanceFromSftMeta(sft, pinnedMetadata);
+      } catch (error) {
+        console.error(`[CatalogService] Failed to process SFT ${sft.id}:`, error);
+        continue; // Skip this SFT and continue with the next one
+      }
 
       tokens[sft.id.toLowerCase()] = tokenInstance;
       // Asset ID canonicalization via ENERGY_FIELDS name → kebab-case (consistent with existing pages)
@@ -72,6 +133,8 @@ export class CatalogService {
     }
 
     this.catalog = { assets, tokens };
+    this.lastBuildHash = currentHash;
+    console.log(`[CatalogService] Build complete: ${Object.keys(assets).length} assets, ${Object.keys(tokens).length} tokens`);
     return this.catalog;
   }
 

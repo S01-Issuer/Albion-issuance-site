@@ -1,30 +1,58 @@
-import { readContract } from "@wagmi/core";
+import { readContract, multicall } from "@wagmi/core";
 import { wagmiConfig } from "svelte-wagmi";
 import { get } from "svelte/store";
 import type { Hex } from "viem";
 
-// Minimal on-chain helper; can be extended to multicall later if desired
+// Use multicall to batch read max supply from authorizer contracts efficiently
 export async function getMaxSharesSupplyMap(
   authorizerAddresses: Array<Hex>,
   authorizerAbi: any
 ): Promise<Record<string, string>> {
   const cfg = get(wagmiConfig);
-
-  const results: Record<string, string> = {};
-  for (const addr of authorizerAddresses) {
-    try {
-      const value = (await readContract(cfg, {
-        abi: authorizerAbi,
-        address: addr,
-        functionName: "maxSharesSupply",
-        args: []
-      })) as bigint;
-      results[(addr as string).toLowerCase()] = value.toString();
-    } catch {
-      // Default to 0 if read fails
-      results[(addr as string).toLowerCase()] = "0";
-    }
+  
+  if (authorizerAddresses.length === 0) {
+    console.log('[onchain] No authorizer addresses to query');
+    return {};
   }
-  return results;
+
+  console.log(`[onchain] Preparing multicall for ${authorizerAddresses.length} authorizers`);
+  
+  // Prepare multicall contracts array for maxSharesSupply
+  const contracts = authorizerAddresses.map(addr => ({
+    address: addr,
+    abi: authorizerAbi,
+    functionName: "maxSharesSupply",
+    args: []
+  }));
+
+  try {
+    console.log('[onchain] Executing multicall RPC request...');
+    // Single RPC call for all authorizer contracts
+    const results = await multicall(cfg, {
+      contracts,
+      allowFailure: true // Allow individual calls to fail
+    });
+    console.log('[onchain] Multicall RPC request completed');
+
+    const resultMap: Record<string, string> = {};
+    
+    for (let i = 0; i < authorizerAddresses.length; i++) {
+      const addr = authorizerAddresses[i];
+      const result = results[i];
+      
+      if (result.status === 'success' && result.result) {
+        resultMap[addr.toLowerCase()] = result.result.toString();
+      } else {
+        // Some authorizers might not have maxSharesSupply
+        // Don't set a value - let the calling code use totalShares as fallback
+        console.warn(`Authorizer ${addr} doesn't have maxSharesSupply or it reverted`);
+      }
+    }
+    
+    return resultMap;
+  } catch (error) {
+    console.error('Multicall failed:', error);
+    return {};
+  }
 }
 

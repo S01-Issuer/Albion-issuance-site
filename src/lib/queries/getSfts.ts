@@ -10,6 +10,7 @@ export const getSfts = async (): Promise<any> => {
         address
         name
         symbol
+        deployTimestamp
         activeAuthorizer { address }
         tokenHolders { address balance }
     } }
