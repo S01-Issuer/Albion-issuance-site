@@ -4,22 +4,11 @@
  */
 
 import { writable, type Writable, get } from "svelte/store";
-import { readContract } from "@wagmi/core";
-import { wagmiConfig } from "svelte-wagmi";
 import { sftMetadata, sfts } from "$lib/stores";
-import { decodeSftInformation } from "$lib/decodeMetadata/helpers";
-import {
-  generateAssetInstanceFromSftMeta,
-  generateTokenInstanceFromSft,
-  generateTokenMetadataInstanceFromSft,
-} from "$lib/decodeMetadata/addSchemaToReceipts";
-import authorizerAbi from "$lib/abi/authorizer.json";
-import type { Hex } from "viem";
-import type { MetaV1S } from "$lib/types/sftMetadataTypes";
-import type { OffchainAssetReceiptVault } from "$lib/types/offchainAssetReceiptVaultTypes";
 import type { Asset, Token } from "$lib/types/uiTypes";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
 import { ENERGY_FIELDS, type SftToken } from "$lib/network";
+import { useCatalogService } from "$lib/services";
 
 interface AssetDetailState {
   asset: Asset | null;
@@ -47,98 +36,29 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
     state.update((s) => ({ ...s, loading: true, error: null }));
 
     try {
-      const currentSftMetadata = get(sftMetadata);
-      const currentSfts = get(sfts);
-      const currentWagmiConfig = get(wagmiConfig);
+      const catalog = useCatalogService();
+      await catalog.build();
 
-      if (!currentSftMetadata || !currentSfts) {
-        throw new Error("SFT data not available");
-      }
+      // Find field by ID and collect tokens from catalog
+      const field = ENERGY_FIELDS.find((f) => (
+        f.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') === id
+      ));
+      if (!field) throw new Error("Energy field not found");
 
-      const decodedMeta = currentSftMetadata.map((metaV1: MetaV1S) => {
-        const decoded = decodeSftInformation(metaV1);
-        return decoded;
-      });
-
-      // Find the energy field by ID
-      const energyField = ENERGY_FIELDS.find((field: any) => {
-        const fieldId = field.name
-          .toLowerCase()
-          .replace(/\s+/g, "-")
-          .replace(/[^a-z0-9-]/g, "");
-        return fieldId === id;
-      });
-
-      if (!energyField) {
-        throw new Error("Energy field not found");
-      }
-
-      // Find all SFTs that belong to this energy field
-      const energyFieldSfts = currentSfts.filter(
-        (sft: OffchainAssetReceiptVault) =>
-          energyField.sftTokens.some(
-            (token: SftToken) =>
-              token.address.toLowerCase() === sft.id.toLowerCase(),
-          ),
+      const allTokens = Object.values(catalog.getCatalog()?.tokens || {});
+      const fieldTokens: TokenMetadata[] = allTokens.filter((t) =>
+        field.sftTokens.some((s) => s.address.toLowerCase() === t.contractAddress.toLowerCase())
       );
+      const assetId = field.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+      const asset = catalog.getCatalog()?.assets[assetId] || null;
 
-      if (energyFieldSfts.length === 0) {
-        throw new Error("No SFTs found for this energy field");
-      }
-
-      // Load all tokens for this energy field
-      const tokens: TokenMetadata[] = [];
-      let assetInstance: Asset | null = null;
-
-      for (const sft of energyFieldSfts) {
-        const pinnedMetadata: any = decodedMeta.find(
-          (meta: any) =>
-            meta?.contractAddress?.toLowerCase() ===
-            `0x000000000000000000000000${sft.id.slice(2).toLowerCase()}`,
-        );
-
-        if (pinnedMetadata) {
-          try {
-            const sftMaxSharesSupply = (await readContract(currentWagmiConfig, {
-              abi: authorizerAbi,
-              address: sft.activeAuthorizer?.address as Hex,
-              functionName: "maxSharesSupply",
-              args: [],
-            })) as bigint;
-
-            const tokenInstance = generateTokenMetadataInstanceFromSft(
-              sft,
-              pinnedMetadata,
-              sftMaxSharesSupply.toString(),
-            );
-            tokens.push(tokenInstance);
-
-            // Use the first token's asset instance (they should all be the same)
-            if (!assetInstance) {
-              assetInstance = generateAssetInstanceFromSftMeta(
-                sft,
-                pinnedMetadata,
-              );
-            }
-          } catch (error) {
-            console.error(`Failed to load token data for SFT ${sft.id}:`, error);
-            // Continue with next token instead of breaking the entire load
-          }
-        }
-      }
-
-      if (tokens.length === 0) {
-        throw new Error("No tokens found for this energy field");
-      }
-
-      if (!assetInstance) {
-        throw new Error("Asset data not found");
-      }
+      if (fieldTokens.length === 0) throw new Error("No tokens found for this energy field");
+      if (!asset) throw new Error("Asset data not found");
 
       state.update((s) => ({
         ...s,
-        asset: assetInstance,
-        tokens,
+        asset,
+        tokens: fieldTokens,
         loading: false,
       }));
     } catch (err) {
