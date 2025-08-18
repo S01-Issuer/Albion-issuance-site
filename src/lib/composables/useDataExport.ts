@@ -4,7 +4,6 @@
  */
 
 import type { Asset, Token } from "$lib/types/uiTypes";
-import { useTokenService } from "$lib/services";
 import { withSyncErrorHandling } from "$lib/utils/errorHandling";
 import { formatCurrency, formatNumber } from "$lib/utils/formatters";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { createEventDispatcher, onMount, onDestroy } from 'svelte';
 	import type { Asset, Token } from '$lib/types/uiTypes';
-	import { useTokenService } from '$lib/services';
 	import { Card, CardImage, CardContent, CardActions, PrimaryButton, SecondaryButton } from '$lib/components/components';
 	import { formatCurrency, formatEndDate, formatSmartNumber } from '$lib/utils/formatters';
     import { getTokenReturns } from '$lib/utils';
@@ -13,7 +12,6 @@
 	export let energyFieldId: string | undefined = undefined; // Add energy field ID for navigation
 	
 	const dispatch = createEventDispatcher();
-	const tokenService = useTokenService();
 	
 	// Scroll state management for token list
 	let scrollContainer: HTMLDivElement;
