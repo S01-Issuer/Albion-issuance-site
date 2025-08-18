@@ -3,6 +3,7 @@ import {
   BASE_SFT_SUBGRAPH_URL,
   ENERGY_FIELDS,
 } from "$lib/network";
+import { executeGraphQL } from "$lib/data/clients/graphqlClient";
 
 export const getTradesForClaims = async (
   orderHash: string,
@@ -47,24 +48,11 @@ export const getTradesForClaims = async (
     `;
 
   try {
-    const response = await fetch(BASE_ORDERBOOK_SUBGRAPH_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const result = await response.json();
-
-    if (result.errors) {
-      console.error("GraphQL errors:", result.errors);
-      return null;
-    }
-
-    return result.data?.trades || [];
+    const data = await executeGraphQL<{ trades: any[] }>(
+      BASE_ORDERBOOK_SUBGRAPH_URL,
+      query
+    );
+    return data.trades || [];
   } catch (error) {
     console.error("Error fetching trades:", error);
     return null;

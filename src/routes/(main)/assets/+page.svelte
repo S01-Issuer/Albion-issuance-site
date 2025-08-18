@@ -1,18 +1,14 @@
 <script lang="ts">
-	import { readContract } from '@wagmi/core';
-	import { wagmiConfig } from 'svelte-wagmi';
 	import { sfts, sftMetadata } from '$lib/stores';
 	import type { Asset } from '$lib/types/uiTypes';
 	import AssetCard from '$lib/components/patterns/assets/AssetCard.svelte';
 	import TokenPurchaseWidget from '$lib/components/patterns/TokenPurchaseWidget.svelte';
 	import { SecondaryButton, SectionTitle, Card, CardContent } from '$lib/components/components';
 	import { PageLayout, HeroSection } from '$lib/components/layout';
-    import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
-	import type { Hex } from 'viem';
-    import { generateAssetInstanceFromSftMeta, generateTokenMetadataInstanceFromSft } from '$lib/decodeMetadata/addSchemaToReceipts';
-	import authorizerAbi from '$lib/abi/authorizer.json';
-    import type { TokenMetadata } from '$lib/types/MetaboardTypes';
+	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import { groupSftsByEnergyField, type GroupedEnergyField } from '$lib/utils/energyFieldGrouping';
+	import { useCatalogService } from '$lib/services';
+	import { ENERGY_FIELDS } from '$lib/network';
 
 	let loading = true;
 	let showSoldOutAssets = false;
@@ -28,29 +24,21 @@
 		try {
 			loading = true;
 			if($sftMetadata && $sfts) {
-				const decodedMeta = $sftMetadata.map((metaV1) => decodeSftInformation(metaV1));
-				for(const sft of $sfts) {
-					const targetAddress = `0x000000000000000000000000${sft.id.slice(2).toLowerCase()}`;
-					const pinnedMetadata: any = decodedMeta.find(
-						(meta) => meta?.contractAddress?.toLowerCase() === targetAddress
-					);
-					if(pinnedMetadata) {
-	
-						const sftMaxSharesSupply = await readContract($wagmiConfig, {
-							abi: authorizerAbi,
-							address: sft.activeAuthorizer?.address as Hex,
-							functionName: 'maxSharesSupply',
-							args: []
-						}) as bigint;
-						
-						const tokenInstance = generateTokenMetadataInstanceFromSft(sft, pinnedMetadata, sftMaxSharesSupply.toString());
-						const assetInstance = generateAssetInstanceFromSftMeta(sft, pinnedMetadata);
-	
-						featuredTokensWithAssets.push({ token: tokenInstance, asset: assetInstance });
-					}
-				}
-				
-				// Group the tokens and assets by energy field
+				const catalog = useCatalogService();
+				await catalog.build();
+
+				const tokens = Object.values(catalog.getCatalog()?.tokens || {});
+				const assetsMap = catalog.getCatalog()?.assets || {};
+
+				featuredTokensWithAssets = tokens.map((t) => {
+					const field = ENERGY_FIELDS.find((f) => f.sftTokens.some(s => s.address.toLowerCase() === t.contractAddress.toLowerCase()));
+					const assetId = field
+						? field.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+						: '';
+					const asset = assetId ? assetsMap[assetId] : undefined;
+					return asset ? { token: t, asset } : null;
+				}).filter(Boolean) as Array<{ token: TokenMetadata; asset: Asset }>;
+
 				groupedEnergyFields = groupSftsByEnergyField(featuredTokensWithAssets);
 			}
 			loading = false;
@@ -185,4 +173,3 @@
 	on:purchaseSuccess={handlePurchaseSuccess}
 	on:close={handleWidgetClose}
 />
-

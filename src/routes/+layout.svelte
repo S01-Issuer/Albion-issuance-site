@@ -1,7 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
-	import { PUBLIC_WALLETCONNECT_ID } from '$env/static/public';
+	import { env as publicEnv } from '$env/dynamic/public';
 	import { defaultConfig } from 'svelte-wagmi';
 	import { base } from '@wagmi/core/chains';
 	import { injected, walletConnect } from '@wagmi/connectors';
@@ -52,6 +52,7 @@
 	});
 
 	const initWallet = async () => {
+		const PUBLIC_WALLETCONNECT_ID = publicEnv.PUBLIC_WALLETCONNECT_ID || '';
 		const erckit = defaultConfig({
 			autoConnect: true,
 			appName: 'base',

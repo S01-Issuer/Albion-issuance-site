@@ -2,6 +2,7 @@ import {
     BASE_SFT_SUBGRAPH_URL,
     ENERGY_FIELDS,
   } from "$lib/network";
+import { executeGraphQL } from "$lib/data/clients/graphqlClient";
   
   export const getAllDeposits = async (
     ownerAddress: string,
@@ -33,23 +34,11 @@ import {
       `;
   
     try {
-      const response = await fetch(BASE_SFT_SUBGRAPH_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
-      });
-  
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-  
-      const result = await response.json();
-  
-      if (result.errors) {
-        return null;
-      }
-  
-      return result.data?.depositWithReceipts || [];
+      const data = await executeGraphQL<{ depositWithReceipts: any[] }>(
+        BASE_SFT_SUBGRAPH_URL,
+        query
+      );
+      return data.depositWithReceipts || [];
     } catch {
       return null;
     }

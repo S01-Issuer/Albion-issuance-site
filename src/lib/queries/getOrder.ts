@@ -1,4 +1,5 @@
 import { BASE_ORDERBOOK_SUBGRAPH_URL } from "$lib/network";
+import { executeGraphQL } from "$lib/data/clients/graphqlClient";
 
 export const getOrder = async (orderHash: string): Promise<any> => {
   // Clean and validate the orderHash
@@ -26,23 +27,11 @@ export const getOrder = async (orderHash: string): Promise<any> => {
     `;
 
   try {
-    const response = await fetch(BASE_ORDERBOOK_SUBGRAPH_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const result = await response.json();
-
-    if (result.errors) {
-      return null;
-    }
-
-    return result.data?.orders || [];
+    const data = await executeGraphQL<{ orders: any[] }>(
+      BASE_ORDERBOOK_SUBGRAPH_URL,
+      query
+    );
+    return data.orders || [];
   } catch {
     return null;
   }

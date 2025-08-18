@@ -1,8 +1,9 @@
 import type { MetaV1S } from "$lib/types/sftMetadataTypes";
 import { BASE_METADATA_SUBGRAPH_URL, ENERGY_FIELDS } from "$lib/network";
-import { PUBLIC_METABOARD_ADMIN } from '$env/static/public';
+import { env as publicEnv } from '$env/dynamic/public';
+import { executeGraphQL } from "$lib/data/clients/graphqlClient";
 
-const METABOARD_ADMIN = PUBLIC_METABOARD_ADMIN || "0x0000000000000000000000000000000000000000";
+const METABOARD_ADMIN = publicEnv.PUBLIC_METABOARD_ADMIN || "0x0000000000000000000000000000000000000000";
 export const getSftMetadata = async (): Promise<MetaV1S[]> => {
   try {
     // Extract all SFT addresses from ENERGY_FIELDS
@@ -34,20 +35,11 @@ export const getSftMetadata = async (): Promise<MetaV1S[]> => {
 }
     `;
 
-    const response = await fetch(BASE_METADATA_SUBGRAPH_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
-    });
-
-    const json = await response.json();
-
-    if (!json.data || !json.data.metaV1S) {
-      console.error("No metadata found in response:", json);
-      return [];
-    }
-
-    return json.data.metaV1S as MetaV1S[];
+    const data = await executeGraphQL<{ metaV1S: MetaV1S[] }>(
+      BASE_METADATA_SUBGRAPH_URL,
+      query
+    );
+    return data.metaV1S as MetaV1S[];
   } catch (error) {
     console.error("Error fetching metadata:", error);
     throw error;
