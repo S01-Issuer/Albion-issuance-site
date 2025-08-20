@@ -1,6 +1,6 @@
 import { MAGIC_NUMBERS } from "./helpers";
 import { cborDecode, bytesToMeta } from "./helpers";
-import type { OffchainAssetReceiptVault } from "$lib/types/offchainAssetReceiptVaultTypes";
+import type { OffchainAssetReceiptVault } from "$lib/types/graphql";
 import type { Asset, PlannedProduction, Token } from "$lib/types/uiTypes";
 import type { ISODateTimeString } from "$lib/types/sharedTypes";
 import { PINATA_GATEWAY } from "$lib/network";
@@ -9,7 +9,7 @@ import type { TokenMetadata } from "$lib/types/MetaboardTypes";
 export const addSchemaToReceipts = (vault: OffchainAssetReceiptVault) => {
   let tempSchema: { displayName: string; hash: string }[] = [];
 
-  const receiptVaultInformations = vault.receiptVaultInformations;
+  const receiptVaultInformations = vault.receiptVaultInformations || [];
 
   if (receiptVaultInformations.length) {
     receiptVaultInformations.map(async (data) => {

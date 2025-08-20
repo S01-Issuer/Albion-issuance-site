@@ -105,7 +105,7 @@ export function useDataExport() {
       payout.tokenPayout.payoutPerToken.toFixed(4),
     ]);
 
-    const filename = `${currentToken.assetId}-payment-history.csv`;
+    const filename = `${currentToken.contractAddress}-payment-history.csv`;
     exportToCSV(data, headers, filename);
   }
 

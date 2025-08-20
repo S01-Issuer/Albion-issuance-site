@@ -76,12 +76,13 @@ export interface ErrorReporter {
 class ErrorReporterImpl implements ErrorReporter {
   report(error: AppError): void {
     // Log to console in development
-    if (import.meta.env.DEV) {
+    const isDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+    if (isDev) {
       console.error("AppError:", error.toJSON());
     }
 
     // In production, send to telemetry service
-    if (import.meta.env.PROD && error.severity === ErrorSeverity.CRITICAL) {
+    if (!isDev && error.severity === ErrorSeverity.CRITICAL) {
       // TODO: Implement telemetry reporting
       console.error("Critical error:", error.toJSON());
     }

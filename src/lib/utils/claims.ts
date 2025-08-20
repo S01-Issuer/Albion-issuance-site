@@ -289,13 +289,14 @@ export async function sortClaimsData(
   const decodedLogs = logs
     .map((log) => {
       const decodedData = decodeLogData(log.data);
-      return {
-        ...decodedData,
-      };
+      return decodedData;
     })
-    .filter(
-      (log) => log.address !== "0x0000000000000000000000000000000000000000",
-    );
+    .filter((log) => {
+      // Filter out null results and zero addresses
+      return log && 
+             log.address && 
+             log.address !== "0x0000000000000000000000000000000000000000";
+    });
 
   // Filter by owner address (required parameter)
   const normalizedOwnerAddress = ownerAddress.toLowerCase();
@@ -307,7 +308,7 @@ export async function sortClaimsData(
 
   // Filter decoded logs by owner address
   const filteredDecodedLogs = decodedLogs.filter(
-    (log) => log.address.toLowerCase() === normalizedOwnerAddress,
+    (log) => log?.address && log.address.toLowerCase() === normalizedOwnerAddress,
   );
 
   // Filter into claimed and unclaimed arrays
@@ -666,7 +667,7 @@ export function signContext(
 
   // 5. Sign the digest
   const signature = wallet.signingKey.sign(digest);
-  // In ethers v6, sign() already returns a Signature object
+  // In ethers v6, sign returns a Signature object directly
   const signatureBytes = concat([
     getBytes(signature.r),
     getBytes(signature.s),

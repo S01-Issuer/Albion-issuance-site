@@ -10,7 +10,7 @@
 	import { formatCurrency, formatTokenSupply } from '$lib/utils/formatters';
     import { sftMetadata, sfts } from '$lib/stores';
     import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
-    import type { OffchainAssetReceiptVault } from '$lib/types/offchainAssetReceiptVaultTypes';
+    import type { OffchainAssetReceiptVault } from '$lib/types/graphql';
     import { generateAssetInstanceFromSftMeta, generateTokenInstanceFromSft } from '$lib/decodeMetadata/addSchemaToReceipts';
 	import authorizerAbi from '$lib/abi/authorizer.json';
 	import OffchainAssetReceiptVaultAbi from '$lib/abi/OffchainAssetReceiptVault.json';

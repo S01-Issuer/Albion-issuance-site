@@ -4,7 +4,7 @@
 	import { Card, CardContent, PrimaryButton, SecondaryButton, StatsCard, SectionTitle, CollapsibleSection } from '$lib/components/components';
 	import { PageLayout, HeroSection, ContentSection } from '$lib/components/layout';
 	import { formatCurrency } from '$lib/utils/formatters';
-	import { getAllDeposits } from '$lib/queries/getAllDeposits';
+	import { sftRepository } from '$lib/data/repositories/sftRepository';
 	import { formatEther } from 'viem';
 
 	let pageLoading = true;
@@ -31,7 +31,7 @@
 		totalPayoutsEarned = result.totals.earned;
 		activeAssetsCount = holdings.length;
 
-		const deposits = await getAllDeposits($signerAddress || '');
+		const deposits = await sftRepository.getDepositsForOwner($signerAddress || '');
 		totalInvested = deposits ? deposits.reduce((sum: number, d: any) => sum + Number(formatEther(BigInt(d.amount))), 0) : 0;
 
 		pageLoading = false;

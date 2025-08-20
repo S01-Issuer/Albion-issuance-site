@@ -1,14 +1,13 @@
 import { get } from "svelte/store";
 import { sfts, sftMetadata } from "$lib/stores";
 import { decodeSftInformation } from "$lib/decodeMetadata/helpers";
-import {
-  generateAssetInstanceFromSftMeta,
-  generateTokenMetadataInstanceFromSft
-} from "$lib/decodeMetadata/addSchemaToReceipts";
+import { tokenMetadataTransformer, assetTransformer } from "$lib/data/transformers/sftTransformers";
+import { sftRepository } from "$lib/data/repositories/sftRepository";
 import authorizerAbi from "$lib/abi/authorizer.json";
 import type { Hex } from "viem";
-import type { Asset, Token } from "$lib/types/uiTypes";
+import type { Asset } from "$lib/types/uiTypes";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
+import type { OffchainAssetReceiptVault as GraphQLVault, MetaV1S } from "$lib/types/graphql";
 import { ENERGY_FIELDS } from "$lib/network";
 import { getMaxSharesSupplyMap } from "$lib/data/clients/onchain";
 
@@ -28,10 +27,13 @@ export class CatalogService {
       sftsCount: sftsData?.length || 0,
       metaCount: metaData?.length || 0,
       sftsIds: sftsData?.map(s => s.id).sort().join(',') || '',
-      metaIds: metaData?.map(m => m.contractAddress).sort().join(',') || ''
+      metaIds: metaData?.map(m => m.subject).sort().join(',') || ''
     });
   }
 
+  /**
+   * Build catalog from stores or fetch fresh data
+   */
   async build(): Promise<CatalogData> {
     // If a build is already in progress, return that promise
     if (this.buildPromise) {
@@ -39,11 +41,28 @@ export class CatalogService {
       return this.buildPromise;
     }
 
-    const $sfts = get(sfts);
-    const $sftMetadata = get(sftMetadata);
+    // Try to use store data first
+    let $sfts = get(sfts);
+    let $sftMetadata = get(sftMetadata);
+
+    // If stores are empty, fetch from repository
+    if (!$sfts || $sfts.length === 0) {
+      console.log('[CatalogService] Stores empty, fetching from repository');
+      const fetchedSfts = await sftRepository.getAllSfts();
+      // Convert GraphQL type to store type (they're compatible for our usage)
+      $sfts = fetchedSfts as any;
+      sfts.set($sfts);
+    }
+
+    if (!$sftMetadata || $sftMetadata.length === 0) {
+      console.log('[CatalogService] Metadata empty, fetching from repository');
+      const fetchedMetadata = await sftRepository.getSftMetadata();
+      $sftMetadata = fetchedMetadata as any;
+      sftMetadata.set($sftMetadata);
+    }
 
     // Check if data has changed
-    const currentHash = this.computeDataHash($sfts, $sftMetadata);
+    const currentHash = this.computeDataHash($sfts, $sftMetadata || []);
     if (this.catalog && this.lastBuildHash === currentHash) {
       console.log('[CatalogService] Data unchanged, returning cached catalog');
       return this.catalog;
@@ -52,7 +71,7 @@ export class CatalogService {
     console.log('[CatalogService] Starting new catalog build');
     
     // Start new build
-    this.buildPromise = this._buildInternal($sfts, $sftMetadata, currentHash);
+    this.buildPromise = this._buildInternal($sfts, $sftMetadata || [], currentHash);
     
     try {
       const result = await this.buildPromise;
@@ -63,8 +82,8 @@ export class CatalogService {
   }
 
   private async _buildInternal(
-    $sfts: any,
-    $sftMetadata: any,
+    $sfts: any[],
+    $sftMetadata: any[],
     currentHash: string
   ): Promise<CatalogData> {
     if (!$sfts || $sfts.length === 0 || !$sftMetadata) {
@@ -73,9 +92,10 @@ export class CatalogService {
       return this.catalog;
     }
 
+    // Decode metadata
     const decodedMeta = $sftMetadata.map((m) => decodeSftInformation(m));
 
-    // Collect authorizer addresses for a batched read
+    // Collect authorizer addresses for max supply lookup
     const authorizers: Hex[] = [];
     for (const sft of $sfts) {
       if (sft.activeAuthorizer?.address) {
@@ -85,51 +105,48 @@ export class CatalogService {
 
     console.log(`[CatalogService] Reading max supply from ${authorizers.length} authorizers`);
     
-    // Read max supply from authorizers using multicall (not vaults!)
+    // Read max supply from authorizers using multicall
     const maxSupplyByAuthorizer = await getMaxSharesSupplyMap(authorizers, authorizerAbi);
 
     const assets: Record<string, Asset> = {};
     const tokens: Record<string, TokenMetadata> = {};
 
     for (const sft of $sfts) {
-      const pinnedMetadata: any = decodedMeta.find(
+      const pinnedMetadata = decodedMeta.find(
         (meta: any) => meta?.contractAddress === `0x000000000000000000000000${sft.id.slice(2)}`
       );
       if (!pinnedMetadata) continue;
 
+      // Get max supply
       const authAddress = (sft.activeAuthorizer?.address || "").toLowerCase();
-      // Get max supply from authorizer contract
       let maxSupply = maxSupplyByAuthorizer[authAddress];
       
       if (!maxSupply || maxSupply === "0") {
-        // If we can't read from authorizer, use totalShares as fallback
-        // This is reasonable since totalShares represents what's been minted
+        // Fallback to totalShares if authorizer doesn't have max supply
         maxSupply = sft.totalShares;
         console.log(`[CatalogService] Using totalShares as max supply for ${sft.id}: ${maxSupply}`);
       }
 
-      let tokenInstance, assetInstance;
+      // Use transformers to create instances
       try {
-        tokenInstance = generateTokenMetadataInstanceFromSft(
-          sft,
-          pinnedMetadata,
-          maxSupply
+        const tokenInstance = tokenMetadataTransformer.transform(sft, pinnedMetadata, maxSupply);
+        const assetInstance = assetTransformer.transform(sft, pinnedMetadata);
+        
+        tokens[sft.id.toLowerCase()] = tokenInstance;
+        
+        // Asset ID canonicalization via ENERGY_FIELDS name → kebab-case
+        const field = ENERGY_FIELDS.find((f) =>
+          f.sftTokens.some((t) => t.address.toLowerCase() === sft.id.toLowerCase())
         );
-        assetInstance = generateAssetInstanceFromSftMeta(sft, pinnedMetadata);
+        const assetId = field
+          ? field.name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")
+          : sft.id.toLowerCase();
+        
+        assets[assetId] = assetInstance;
       } catch (error) {
         console.error(`[CatalogService] Failed to process SFT ${sft.id}:`, error);
-        continue; // Skip this SFT and continue with the next one
+        continue;
       }
-
-      tokens[sft.id.toLowerCase()] = tokenInstance;
-      // Asset ID canonicalization via ENERGY_FIELDS name → kebab-case (consistent with existing pages)
-      const field = ENERGY_FIELDS.find((f) =>
-        f.sftTokens.some((t) => t.address.toLowerCase() === sft.id.toLowerCase())
-      );
-      const assetId = field
-        ? field.name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")
-        : (assetInstance.id || sft.id.toLowerCase());
-      assets[assetId] = assetInstance as Asset;
     }
 
     this.catalog = { assets, tokens };

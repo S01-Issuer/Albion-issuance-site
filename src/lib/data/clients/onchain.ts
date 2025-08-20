@@ -27,7 +27,8 @@ export async function getMaxSharesSupplyMap(
 
   try {
     console.log('[onchain] Executing multicall RPC request...');
-    // Single RPC call for all authorizer contracts
+    
+    // Use wagmi's multicall - it has built-in fallback transport with retry
     const results = await multicall(cfg, {
       contracts,
       allowFailure: true // Allow individual calls to fail
