@@ -21,18 +21,28 @@ interface AssetDetailState {
  * Composable for managing asset detail data
  */
 export function useAssetDetailData(initialEnergyFieldId: string) {
-  // State management
+  // State management - start with loading true only if we have an ID
   const state: Writable<AssetDetailState> = writable({
     asset: null,
     tokens: [],
-    loading: true,
+    loading: !!initialEnergyFieldId, // Only show loading if we have an ID to load
     error: null,
   });
+
+  // Track what we've loaded to prevent duplicate loads
+  let currentlyLoadingId: string | null = null;
+  let loadedId: string | null = null;
 
   // Load asset and related data for an energy field
   async function loadAssetData(energyFieldId?: string) {
     const id = energyFieldId || initialEnergyFieldId;
 
+    // Prevent duplicate loads
+    if (currentlyLoadingId === id || loadedId === id) {
+      return;
+    }
+
+    currentlyLoadingId = id;
     state.update((s) => ({ ...s, loading: true, error: null }));
 
     try {
@@ -61,6 +71,8 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
         tokens: fieldTokens,
         loading: false,
       }));
+      loadedId = id;
+      currentlyLoadingId = null;
     } catch (err) {
       console.error(err);
       state.update((s) => ({
@@ -71,6 +83,7 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
             : "Failed to load energy field data",
         loading: false,
       }));
+      currentlyLoadingId = null;
     }
   }
 

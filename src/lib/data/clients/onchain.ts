@@ -8,7 +8,19 @@ export async function getMaxSharesSupplyMap(
   authorizerAddresses: Array<Hex>,
   authorizerAbi: any
 ): Promise<Record<string, string>> {
+  // Check if we're in a browser environment and wagmi is initialized
+  if (typeof window === 'undefined') {
+    console.log('[onchain] Skipping multicall - server-side rendering');
+    return {};
+  }
+
   const cfg = get(wagmiConfig);
+  
+  // Check if wagmi config is properly initialized
+  if (!cfg || !cfg.getClient) {
+    console.log('[onchain] Wagmi config not initialized yet');
+    return {};
+  }
   
   if (authorizerAddresses.length === 0) {
     console.log('[onchain] No authorizer addresses to query');

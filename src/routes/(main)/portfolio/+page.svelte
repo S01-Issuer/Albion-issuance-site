@@ -20,6 +20,9 @@
 	}
 
 	async function loadPortfolioData() {
+		// Only run in browser environment
+		if (typeof window === 'undefined') return;
+		
 		const claims = useClaimsService();
 		const catalog = useCatalogService();
 		await catalog.build();

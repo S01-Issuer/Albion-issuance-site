@@ -41,16 +41,25 @@
 	const assetDetailState = assetDetailComposable.state;
 	const loadAssetData = assetDetailComposable.loadAssetData;
 	
-	// Track if we've loaded data for the current asset
-	let loadedAssetId: string | null = null;
+	// Track if we've initiated loading for the current asset
+	let hasInitiatedLoad = false;
 	
 	// Load data when asset ID changes and SFT data is available
-	// Only load if we haven't already loaded for this asset
-	$: if (assetId && $sftMetadata && $sfts && loadedAssetId !== assetId) {
+	// The composable now handles duplicate load prevention internally
+	$: if (assetId && $sftMetadata && $sfts && !hasInitiatedLoad) {
 		console.log(`[AssetDetailPage] Loading data for asset: ${assetId}`);
-		loadedAssetId = assetId;
+		hasInitiatedLoad = true;
 		loadAssetData(assetId);
 	}
+	
+	// Reset when asset ID changes
+	$: if (assetId) {
+		const previousAssetId = loadedAssetId;
+		if (previousAssetId && previousAssetId !== assetId) {
+			hasInitiatedLoad = false;
+		}
+	}
+	let loadedAssetId = assetId;
 	const { exportProductionData: exportDataFunc, exportPaymentHistory } = useDataExport();
 	const { state: emailState, setEmail, submitEmail } = useEmailNotification();
 	

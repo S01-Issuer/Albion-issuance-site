@@ -10,6 +10,8 @@
 	import { useCatalogService } from '$lib/services';
 	import { ENERGY_FIELDS } from '$lib/network';
 
+	// Track if initial load is done to prevent double loading
+	let hasInitialized = false;
 	let loading = true;
 	let showSoldOutAssets = false;
 	let featuredTokensWithAssets: Array<{ token: TokenMetadata; asset: Asset }> = [];
@@ -22,7 +24,14 @@
 	
 	async function loadTokenAndAssets() {
 		try {
-			loading = true;
+			// Don't set loading = true if we're initializing for the first time
+			// This prevents the double loading state
+			if (!hasInitialized) {
+				// Keep the initial loading = true
+			} else {
+				loading = true;
+			}
+			
 			if($sftMetadata && $sfts) {
 				const catalog = useCatalogService();
 				await catalog.build();
@@ -40,15 +49,19 @@
 				}).filter(Boolean) as Array<{ token: TokenMetadata; asset: Asset }>;
 
 				groupedEnergyFields = groupSftsByEnergyField(featuredTokensWithAssets);
+				hasInitialized = true;
 			}
 			loading = false;
 
 		} catch(err) {
 			console.error('Featured tokens loading error:', err);
 			loading = false;
+			hasInitialized = true;
 		}
 	}
-	$: if($sfts && $sftMetadata){
+	
+	// Only load when data is available and we haven't loaded yet
+	$: if($sfts && $sftMetadata && !hasInitialized){
 		loadTokenAndAssets();
 	}
 
