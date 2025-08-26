@@ -227,9 +227,9 @@ describe('Home page E2E Tests', () => {
     };
     
     // Fetch empty data and update stores
-    const { getSfts } = await import('$lib/queries/getSfts');
+    const { sftRepository } = await import('$lib/data/repositories/sftRepository');
     const { sfts } = await import('$lib/stores');
-    const emptySftData = await getSfts();
+    const emptySftData = await sftRepository.getAllSfts();
     sfts.set(emptySftData);
     
     render(HomePage);
