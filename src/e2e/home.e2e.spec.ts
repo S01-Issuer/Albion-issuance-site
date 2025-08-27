@@ -13,13 +13,13 @@ vi.mock('$app/stores', async () => {
 });
 
 vi.mock('svelte-wagmi', async () => {
-  const { writable } = await import('svelte/store');
+  const { writable, readable } = await import('svelte/store');
   return {
     web3Modal: writable({ open: () => {} }),
     signerAddress: writable('0x1111111111111111111111111111111111111111'),
     connected: writable(true),
     loading: writable(false),
-    wagmiConfig: {},
+    wagmiConfig: readable({ chains: [], transports: {} }),
     chainId: writable(8453),
     disconnectWagmi: async () => {},
   } as any;

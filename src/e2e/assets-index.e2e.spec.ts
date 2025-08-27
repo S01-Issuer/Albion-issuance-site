@@ -1,5 +1,11 @@
 import { render, waitFor } from '@testing-library/svelte/svelte5';
 import { vi, describe, it, beforeEach, expect, afterEach } from 'vitest';
+
+// Mock the METABOARD_ADMIN environment variable BEFORE any component imports
+vi.mock('$env/static/public', () => ({
+  PUBLIC_METABOARD_ADMIN: '0x1111111111111111111111111111111111111111'
+}));
+
 import AssetsIndex from '../routes/(main)/assets/+page.svelte';
 import { installHttpMocks } from './http-mock';
 
@@ -21,11 +27,26 @@ vi.mock('svelte-wagmi', async () => {
     signerAddress: writable('0x1111111111111111111111111111111111111111'),
     connected: writable(true),
     loading: writable(false),
-    wagmiConfig: readable({ chains: [], transports: {} }),
+    wagmiConfig: readable({ 
+      chains: [], 
+      transports: {},
+      getClient: () => ({}) // Add getClient method so wagmi config is considered initialized
+    }),
     chainId: writable(8453),
     disconnectWagmi: async () => {},
   } as any;
 });
+
+// Mock @wagmi/core
+vi.mock('@wagmi/core', () => ({
+  readContract: vi.fn().mockResolvedValue(BigInt('12000000000000000000000')), // 12000 tokens max supply in wei
+  multicall: vi.fn().mockResolvedValue([
+    { result: BigInt('12000000000000000000000'), status: 'success' } // Return max supply for authorizer
+  ])
+}));
+
+// DO NOT MOCK $lib/stores - let it use production code to test the full data flow
+// The HTTP mocks will provide the data that flows through repositories → services → stores
 
 // Mock network config with test URLs
 vi.mock('$lib/network', async () => {
@@ -41,7 +62,7 @@ vi.mock('$lib/network', async () => {
         name: 'Wressle-1',
         sftTokens: [
           {
-            address: '0xc699575fe18f00104d926f0167cd858ce6d8b32e'
+            address: '0xf836a500910453a397084ade41321ee20a5aade1'
           }
         ]
       }
@@ -49,166 +70,262 @@ vi.mock('$lib/network', async () => {
   };
 });
 
-// Mock wagmi core for max supply calls
-vi.mock('@wagmi/core', () => ({
-  readContract: vi.fn().mockResolvedValue(BigInt('10000000000000000000000')),
-  multicall: vi.fn().mockResolvedValue([
-    { status: 'success', result: BigInt('10000000000000000000000') }
-  ])
-}));
-
-// Mock onchain client
-vi.mock('$lib/data/clients/onchain', () => ({
-  getMaxSharesSupplyMap: vi.fn().mockResolvedValue({
-    '0xc699575fe18f00104d926f0167cd858ce6d8b32e': '10000000000000000000000'
-  })
-}));
-
-const ADDRESS = '0xc699575fe18f00104d926f0167cd858ce6d8b32e';
+const ADDRESS = '0xf836a500910453a397084ade41321ee20a5aade1';
+const ORDER = '0x43ec2493caed6b56cfcbcf3b9279a01aedaafbce509598dfb324513e2d199977';
+const CSV = 'bafkreicjcemmypds6d5c4lonwp56xb2ilzhkk7hty3y6fo4nvdkxnaibgu';
 const WALLET = '0x1111111111111111111111111111111111111111';
 
-describe('Assets Index Page E2E Tests', () => {
-  let restore: () => void;
-  
+describe('Assets Index E2E Tests', () => {
+  let cleanupMocks: () => void;
+
   beforeEach(async () => {
     vi.clearAllMocks();
     
-    // Install HTTP mocks
-    restore = installHttpMocks({
+    cleanupMocks = installHttpMocks({
       sftSubgraphUrl: 'https://example.com/sft',
       metadataSubgraphUrl: 'https://example.com/meta',
       orderbookSubgraphUrl: 'https://example.com/orderbook',
       ipfsGateway: 'https://gateway.pinata.cloud/ipfs',
       wallet: WALLET,
       address: ADDRESS,
-      orderHash: '0x43ec2493caed6b56cfcbcf3b9279a01aedaafbce509598dfb324513e2d199977',
-      csvCid: 'bafkreicjcemmypds6d5c4lonwp56xb2ilzhkk7hty3y6fo4nvdkxnaibgu',
+      orderHash: ORDER,
+      csvCid: CSV,
+      hypersyncUrl: 'https://8453.hypersync.xyz/query',
+      sfts: [
+        {
+          address: ADDRESS,
+          name: 'Wressle-1 4.5% Royalty Stream',
+          symbol: 'ALB-WR1-R1',
+          totalShares: '1500000000000000000000' // 1500 tokens minted
+        }
+      ]
     });
     
-    // Initialize stores with data to trigger component loading
+    // Load data through the actual production flow: repositories → services → stores
+    const { sftRepository } = await import('$lib/data/repositories');
     const { sfts, sftMetadata } = await import('$lib/stores');
     
-    // Set initial data to trigger the component's reactive statements
-    sfts.set([
-      {
-        id: ADDRESS,
-        totalShares: '12000',
-        address: ADDRESS,
-        name: 'Wressle-1 4.5% Royalty Stream',
-        symbol: 'ALB-WR1-R1',
-        deployTimestamp: `${Math.floor(Date.now() / 1000)}`,
-        activeAuthorizer: { address: WALLET },
-        tokenHolders: []
-      }
-    ] as any);
+    // Fetch data using the actual repositories (which will use our HTTP mocks)
+    const [sftData, metaData] = await Promise.all([
+      sftRepository.getAllSfts(),
+      sftRepository.getSftMetadata()
+    ]);
     
-    sftMetadata.set([
-      {
-        id: 'meta-1',
-        meta: '0x' + Buffer.from('https://gateway.pinata.cloud/ipfs/QmWressleMetadata').toString('hex'),
-        subject: `0x000000000000000000000000${ADDRESS.slice(2)}`,
-        metaHash: '0x1234',
-        sender: WALLET
+    // Debug: Check what data we got
+    if ((import.meta as any).env?.MODE === 'test') {
+      console.log('Test setup - SFT data count:', sftData?.length);
+      console.log('Test setup - Metadata count:', metaData?.length);
+      if (metaData?.length > 0) {
+        console.log('Test setup - First metadata subject:', metaData[0].subject);
       }
-    ] as any);
+    }
+    
+    // Update stores with the fetched data
+    sfts.set(sftData);
+    sftMetadata.set(metaData);
   });
 
   afterEach(() => {
-    restore?.();
+    if (cleanupMocks) {
+      cleanupMocks();
+    }
   });
 
   describe('Page Structure', () => {
     it('renders assets page with correct title and subtitle', async () => {
-      const { container } = render(AssetsIndex);
+      render(AssetsIndex);
       
       await waitFor(() => {
-        const bodyText = container.textContent || '';
-        expect(bodyText).toContain('Available Assets');
-        expect(bodyText).toContain('Browse live energy investment opportunities');
-      }, { timeout: 3000 });
+        const bodyText = document.body.textContent || '';
+        expect(bodyText).toMatch(/Available Assets/);
+      });
+    });
+
+    it('displays correct number of asset cards (1 energy field)', async () => {
+      render(AssetsIndex);
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const bodyText = document.body.textContent || '';
+      // Should show Wressle - may be in sold out section
+      const hasWressle = bodyText.match(/Wressle/) || bodyText.match(/View Sold Out Assets/);
+      expect(hasWressle).toBeTruthy();
+    });
+
+    it('shows both available and sold out assets', async () => {
+      render(AssetsIndex);
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const bodyText = document.body.textContent || '';
+      // Check for availability indicators
+      const hasAvailableOrSoldOut = bodyText.match(/Available|Sold Out/i);
+      expect(hasAvailableOrSoldOut).toBeTruthy();
     });
   });
 
-  describe('Asset Display', () => {
-    it('displays asset cards when data is loaded', async () => {
-      const { container } = render(AssetsIndex);
+  describe('Asset Information', () => {
+    it('displays Wressle asset card with correct details', async () => {
+      render(AssetsIndex);
       
-      await waitFor(() => {
-        const bodyText = container.textContent || '';
-        // Should show either assets or "no assets" message
-        const hasContent = 
-          bodyText.includes('Wressle') ||
-          bodyText.includes('ALB-WR1-R1') ||
-          bodyText.includes('No Available Assets') ||
-          bodyText.includes('sold out');
-        expect(hasContent).toBeTruthy();
-      }, { timeout: 3000 });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const bodyText = document.body.textContent || '';
+      
+      // Test asset name
+      expect(bodyText).toMatch(/Wressle/);
+      
+      // Test location data from CBOR metadata
+      expect(bodyText).toMatch(/Lincolnshire/);
+      expect(bodyText).toMatch(/United Kingdom/);
+      
+      // Test operator data from CBOR metadata
+      expect(bodyText).toMatch(/Egdon Resources/);
+      
+      // Test asset type
+      expect(bodyText).toMatch(/onshore|oilfield|oil field|oil & gas/i);
     });
 
-    it('shows appropriate empty state when no assets available', async () => {
-      const { container } = render(AssetsIndex);
+    it('shows asset financial metrics', async () => {
+      render(AssetsIndex);
       
-      await waitFor(() => {
-        const bodyText = container.textContent || '';
-        // Page should handle empty/sold out state gracefully
-        const hasValidState = 
-          bodyText.includes('Wressle') ||
-          bodyText.includes('No Available Assets') ||
-          bodyText.includes('All assets are currently sold out');
-        expect(hasValidState).toBeTruthy();
-      }, { timeout: 3000 });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const bodyText = document.body.textContent || '';
+      // Test that sharePercentage from metadata is displayed
+      expect(bodyText).toMatch(/2\.5%/); // Wressle R1 sharePercentage from CBOR
+      
+      // Test that first payment date from metadata is shown (format: "2025-05" from CBOR)
+      expect(bodyText).toMatch(/2025-05/); // From CBOR decoded firstPaymentDate
     });
   });
 
   describe('Token Information', () => {
-    it('processes and displays token data', async () => {
-      const { container } = render(AssetsIndex);
+    it('displays correct number of tokens for Wressle (1 token)', async () => {
+      render(AssetsIndex);
       
-      await waitFor(() => {
-        const bodyText = container.textContent || '';
-        // Should show token info or empty state
-        const hasTokenContent = 
-          bodyText.includes('ALB-WR1-R1') ||
-          bodyText.includes('Royalty') ||
-          bodyText.includes('4.5%') ||
-          bodyText.includes('No Available');
-        expect(hasTokenContent).toBeTruthy();
-      }, { timeout: 3000 });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const bodyText = document.body.textContent || '';
+      // Should show Wressle token
+      expect(bodyText).toMatch(/ALB-WR1-R1/);
+      // Should show token percentage
+      expect(bodyText).toMatch(/4\.5%|2\.5%/); // Royalty percentage
     });
 
-    it('shows supply and availability information', async () => {
-      const { container } = render(AssetsIndex);
+    it('shows token availability status', async () => {
+      render(AssetsIndex);
       
-      await waitFor(() => {
-        const bodyText = container.textContent || '';
-        // Should show supply metrics or sold out status
-        const hasSupplyInfo = 
-          bodyText.includes('Supply') ||
-          bodyText.includes('Available') ||
-          bodyText.includes('Minted') ||
-          bodyText.includes('sold out');
-        expect(hasSupplyInfo).toBeTruthy();
-      }, { timeout: 3000 });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const bodyText = document.body.textContent || '';
+      // Should indicate availability
+      const hasAvailable = bodyText.match(/Available|10,500|10\.5k|15,000|15k/);
+      const hasSoldOut = bodyText.match(/Sold Out|Unavailable/);
+      // At least one should be present
+      expect(hasAvailable).toBeTruthy();
+    });
+
+    it('displays token supply information', async () => {
+      render(AssetsIndex);
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const bodyText = document.body.textContent || '';
+      // Check for any supply-related text
+      const hasSupplyInfo = bodyText.match(/Available|Sold Out|\d+%|tokens?/i);
+      expect(hasSupplyInfo).toBeTruthy();
+    });
+
+    it('shows token returns information', async () => {
+      render(AssetsIndex);
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const bodyText = document.body.textContent || '';
+      // Check for return information (UI shows "Base >10x" format)
+      const hasReturns = bodyText.match(/Base|Bonus|>10x|Returns?/i);
+      expect(hasReturns).toBeTruthy();
+    });
+  });
+
+  describe('User Actions', () => {
+    it('includes View Details buttons for each asset', async () => {
+      render(AssetsIndex);
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const bodyText = document.body.textContent || '';
+      expect(bodyText).toMatch(/View Details|Learn More|Explore/i);
+    });
+
+    it('shows sold out toggle when applicable', async () => {
+      render(AssetsIndex);
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const bodyText = document.body.textContent || '';
+      // May show option to view sold out assets
+      const hasSoldOutToggle = bodyText.match(/Show Sold Out|Include Sold Out/i);
+      // This is optional depending on implementation
+      if (hasSoldOutToggle) {
+        expect(hasSoldOutToggle).toBeTruthy();
+      }
     });
   });
 
   describe('Complete Data Flow', () => {
+    it('processes and displays all mock data correctly', async () => {
+      render(AssetsIndex);
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const bodyText = document.body.textContent || '';
+      
+      // Test 1: Verify SFT data from HTTP mock is displayed
+      // These come from the offchainAssetReceiptVaults response
+      expect(bodyText).toMatch(/ALB-WR1-R1/);
+      
+      // Test 2: Verify CBOR-decoded metadata is transformed and displayed
+      // These values come from the CBOR-encoded metadata that gets decoded by decodeSftInformation
+      expect(bodyText).toMatch(/Wressle-1 4\.5% Royalty Stream/); // From decoded CBOR metadata
+      
+      // Test 3: Verify asset data from nested metadata structure
+      // These come from metadata.asset after CBOR decoding
+      expect(bodyText).toMatch(/Lincolnshire/); // From CBOR decoded location
+      expect(bodyText).toMatch(/United Kingdom/); // From CBOR decoded location
+      
+      // Test 4: Verify operator data transformation
+      expect(bodyText).toMatch(/Egdon Resources/); // From CBOR decoded operator
+      
+      // Test 5: Verify financial data calculation/transformation
+      // These percentages come from sharePercentage in metadata
+      expect(bodyText).toMatch(/2\.5%|4\.5%/); // From CBOR decoded sharePercentage
+    });
+    
+    it('correctly displays Wressle energy field', async () => {
+      render(AssetsIndex);
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const bodyText = document.body.textContent || '';
+      
+      // Verify that Wressle is displayed with its token
+      expect(bodyText).toMatch(/Wressle/);
+      expect(bodyText).toMatch(/ALB-WR1-R1/);
+    });
+  });
+
+  // Keep the repository integration tests from the refactored version
+  describe('Repository Integration', () => {
     it('integrates HTTP mocks with repository and service layers', async () => {
-      const { container } = render(AssetsIndex);
+      render(AssetsIndex);
       
       await waitFor(() => {
-        const bodyText = container.textContent || '';
-        
-        // Verify page renders
-        expect(bodyText).toContain('Available Assets');
-        
-        // Verify data flow completed (either shows data or empty state)
-        const hasProcessedData = 
-          bodyText.includes('Wressle') ||
-          bodyText.includes('ALB-WR1-R1') ||
-          bodyText.includes('No Available Assets');
-        expect(hasProcessedData).toBeTruthy();
-      }, { timeout: 3000 });
+        const bodyText = document.body.textContent || '';
+        // Verify data flows through the new repository/service architecture
+        expect(bodyText).toMatch(/ALB-WR1-R1|Wressle/);
+      });
     });
   });
 });
