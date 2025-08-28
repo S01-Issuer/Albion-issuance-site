@@ -51,14 +51,20 @@ export class CatalogService {
       const fetchedSfts = await sftRepository.getAllSfts();
       // Convert GraphQL type to store type (they're compatible for our usage)
       $sfts = fetchedSfts as any;
+      console.log(`[CatalogService] Fetched ${$sfts.length} SFTs from repository`);
       sfts.set($sfts);
+    } else {
+      console.log(`[CatalogService] Using ${$sfts.length} SFTs from stores`);
     }
 
     if (!$sftMetadata || $sftMetadata.length === 0) {
       console.log('[CatalogService] Metadata empty, fetching from repository');
       const fetchedMetadata = await sftRepository.getSftMetadata();
       $sftMetadata = fetchedMetadata as any;
+      console.log(`[CatalogService] Fetched ${$sftMetadata.length} metadata entries from repository`);
       sftMetadata.set($sftMetadata);
+    } else {
+      console.log(`[CatalogService] Using ${$sftMetadata.length} metadata entries from stores`);
     }
 
     // Check if data has changed
@@ -93,7 +99,15 @@ export class CatalogService {
     }
 
     // Decode metadata
+    console.log(`[CatalogService] Raw metadata entries:`, $sftMetadata.length);
+    if ($sftMetadata.length > 0) {
+      console.log(`[CatalogService] First raw metadata entry:`, $sftMetadata[0]);
+    }
     const decodedMeta = $sftMetadata.map((m) => decodeSftInformation(m));
+    console.log(`[CatalogService] Decoded ${decodedMeta.length} metadata entries`);
+    if (decodedMeta.length > 0 && decodedMeta[0]) {
+      console.log(`[CatalogService] First decoded metadata contractAddress:`, decodedMeta[0].contractAddress);
+    }
 
     // Collect authorizer addresses for max supply lookup
     const authorizers: Hex[] = [];
@@ -112,14 +126,28 @@ export class CatalogService {
     const tokens: Record<string, TokenMetadata> = {};
 
     for (const sft of $sfts) {
+      const targetAddress = `0x000000000000000000000000${sft.id.slice(2)}`;
       const pinnedMetadata = decodedMeta.find(
-        (meta: any) => meta?.contractAddress === `0x000000000000000000000000${sft.id.slice(2)}`
+        (meta: any) => {
+          const matches = meta?.contractAddress === targetAddress;
+          if (!matches && sft.id === '0xf836a500910453a397084ade41321ee20a5aade1') {
+            console.log(`[CatalogService] Wressle matching debug:`);
+            console.log(`  Looking for: ${targetAddress}`);
+            console.log(`  Found: ${meta?.contractAddress}`);
+          }
+          return matches;
+        }
       );
-      if (!pinnedMetadata) continue;
+      if (!pinnedMetadata) {
+        console.log(`[CatalogService] No metadata found for SFT ${sft.id}`);
+        continue;
+      }
 
       // Get max supply
       const authAddress = (sft.activeAuthorizer?.address || "").toLowerCase();
       let maxSupply = maxSupplyByAuthorizer[authAddress];
+      
+      console.log(`[CatalogService] Token ${sft.symbol}: authorizer ${authAddress}, maxSupply from chain: ${maxSupply}, totalShares: ${sft.totalShares}`);
       
       if (!maxSupply || maxSupply === "0") {
         // Fallback to totalShares if authorizer doesn't have max supply
@@ -130,8 +158,6 @@ export class CatalogService {
       // Use transformers to create instances
       try {
         const tokenInstance = tokenMetadataTransformer.transform(sft, pinnedMetadata, maxSupply);
-        const assetInstance = assetTransformer.transform(sft, pinnedMetadata);
-        
         tokens[sft.id.toLowerCase()] = tokenInstance;
         
         // Asset ID canonicalization via ENERGY_FIELDS name → kebab-case
@@ -142,7 +168,17 @@ export class CatalogService {
           ? field.name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")
           : sft.id.toLowerCase();
         
-        assets[assetId] = assetInstance;
+        // Check if asset already exists (multiple tokens for same field)
+        if (assets[assetId]) {
+          // Add this token to the existing asset's tokenContracts
+          if (!assets[assetId].tokenContracts.includes(sft.id)) {
+            assets[assetId].tokenContracts.push(sft.id);
+          }
+        } else {
+          // Create new asset instance
+          const assetInstance = assetTransformer.transform(sft, pinnedMetadata);
+          assets[assetId] = assetInstance;
+        }
       } catch (error) {
         console.error(`[CatalogService] Failed to process SFT ${sft.id}:`, error);
         continue;

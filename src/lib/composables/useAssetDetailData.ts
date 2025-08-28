@@ -55,12 +55,15 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
       ));
       if (!field) throw new Error("Energy field not found");
 
-      const allTokens = Object.values(catalog.getCatalog()?.tokens || {});
+      const catalogData = catalog.getCatalog();
+      if (!catalogData) throw new Error("Failed to build catalog");
+      
+      const allTokens = Object.values(catalogData.tokens || {});
       const fieldTokens: TokenMetadata[] = allTokens.filter((t) =>
         field.sftTokens.some((s) => s.address.toLowerCase() === t.contractAddress.toLowerCase())
       );
       const assetId = field.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-      const asset = catalog.getCatalog()?.assets[assetId] || null;
+      const asset = catalogData.assets[assetId] || null;
 
       if (fieldTokens.length === 0) throw new Error("No tokens found for this energy field");
       if (!asset) throw new Error("Asset data not found");

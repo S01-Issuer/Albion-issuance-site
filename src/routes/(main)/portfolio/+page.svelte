@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { useClaimsService, useCatalogService } from '$lib/services';
 	import { web3Modal, signerAddress, connected } from 'svelte-wagmi';
-	import { Card, CardContent, PrimaryButton, SecondaryButton, StatsCard, SectionTitle, CollapsibleSection } from '$lib/components/components';
+	import { Card, CardContent, PrimaryButton, SecondaryButton, StatsCard, SectionTitle } from '$lib/components/components';
 	import { PageLayout, HeroSection, ContentSection } from '$lib/components/layout';
 	import { formatCurrency } from '$lib/utils/formatters';
 	import { sftRepository } from '$lib/data/repositories/sftRepository';
 	import { formatEther } from 'viem';
+	import { goto } from '$app/navigation';
 
 	let pageLoading = true;
 	let totalInvested = 0;
@@ -23,21 +24,57 @@
 		// Only run in browser environment
 		if (typeof window === 'undefined') return;
 		
-		const claims = useClaimsService();
-		const catalog = useCatalogService();
-		await catalog.build();
+		try {
+			const claims = useClaimsService();
+			const catalog = useCatalogService();
+			
+			// Try to build catalog, but don't fail if it can't fetch data
+			try {
+				await catalog.build();
+			} catch (catalogError) {
+				console.warn('[Portfolio] Catalog build failed, continuing with empty catalog:', catalogError);
+			}
 
-		const result = await claims.loadClaimsForWallet($signerAddress || '');
-		claimHistory = result.claimHistory as any;
-		holdings = result.holdings as any;
-		unclaimedPayout = result.totals.unclaimed;
-		totalPayoutsEarned = result.totals.earned;
-		activeAssetsCount = holdings.length;
+			// Try to load claims data
+			try {
+				const result = await claims.loadClaimsForWallet($signerAddress || '');
+				claimHistory = result.claimHistory as any;
+				holdings = result.holdings as any;
+				unclaimedPayout = result.totals.unclaimed;
+				totalPayoutsEarned = result.totals.earned;
+				activeAssetsCount = holdings.length;
+			} catch (claimsError) {
+				console.warn('[Portfolio] Claims loading failed:', claimsError);
+				// Set defaults
+				claimHistory = [];
+				holdings = [];
+				unclaimedPayout = 0;
+				totalPayoutsEarned = 0;
+				activeAssetsCount = 0;
+			}
 
-		const deposits = await sftRepository.getDepositsForOwner($signerAddress || '');
-		totalInvested = deposits ? deposits.reduce((sum: number, d: any) => sum + Number(formatEther(BigInt(d.amount))), 0) : 0;
-
-		pageLoading = false;
+			// Get deposits to calculate total invested
+			try {
+				const deposits = await sftRepository.getDepositsForOwner($signerAddress || '');
+				totalInvested = deposits ? deposits.reduce((sum: number, d: any) => 
+					sum + Number(formatEther(BigInt(d.amount))), 0
+				) : 0;
+			} catch (error) {
+				console.warn('[Portfolio] Error fetching deposits:', error);
+				totalInvested = 0;
+			}
+		} catch (error) {
+			console.error('[Portfolio] Unexpected error loading data:', error);
+			// Set all to defaults
+			claimHistory = [];
+			holdings = [];
+			unclaimedPayout = 0;
+			totalPayoutsEarned = 0;
+			activeAssetsCount = 0;
+			totalInvested = 0;
+		} finally {
+			pageLoading = false;
+		}
 	}
 
 	async function connectWallet() {
@@ -53,12 +90,16 @@
 <PageLayout variant="constrained">
 	<HeroSection title="My Portfolio" subtitle="Track your investments and performance" showBorder={true}>
 		{#if pageLoading}
-			<div class="text-center mt-8">Loading...</div>
+			<div class="text-center mt-8">
+				<div class="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent"></div>
+				<p class="mt-4 text-black opacity-70">Loading portfolio data...</p>
+			</div>
 		{:else}
-			<div class="grid grid-cols-3 gap-2 sm:gap-4 lg:gap-8 text-center max-w-6xl mx-auto mt-6">
-				<StatsCard title="Portfolio Value" value={formatCurrency(totalInvested, { compact: true })} subtitle="Total Value" size="small" />
+			<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4 lg:gap-8 text-center max-w-6xl mx-auto mt-6">
+				<StatsCard title="Portfolio Value" value={formatCurrency(totalInvested, { compact: true })} subtitle="Total Invested" size="small" />
 				<StatsCard title="Total Earned" value={formatCurrency(totalPayoutsEarned, { compact: true })} subtitle="All Payouts" size="small" />
-				<StatsCard title="Active Assets" value={activeAssetsCount.toString()} subtitle="Assets" size="small" />
+				<StatsCard title="Unclaimed" value={formatCurrency(unclaimedPayout, { compact: true })} subtitle="Ready to Claim" size="small" />
+				<StatsCard title="Active Assets" value={activeAssetsCount.toString()} subtitle="Assets Held" size="small" />
 			</div>
 		{/if}
 	</HeroSection>
@@ -67,53 +108,71 @@
 		<ContentSection background="white" padding="large" centered>
 			<div class="text-center">
 				<SectionTitle level="h1" size="page" center>Wallet Connection Required</SectionTitle>
-				<p class="text-lg text-black opacity-80 mb-8 max-w-md">Please connect your wallet to view your portfolio.</p>
+				<p class="text-lg text-black opacity-80 mb-8 max-w-md mx-auto">
+					Please connect your wallet to view your portfolio.
+				</p>
 				<PrimaryButton on:click={connectWallet}>Connect Wallet</PrimaryButton>
 			</div>
 		</ContentSection>
 	{:else if !pageLoading}
 		<ContentSection background="white" padding="standard">
-			<SectionTitle level="h2" size="section">My Holdings</SectionTitle>
-			<div class="grid grid-cols-1 gap-4 lg:gap-6 mt-4">
-				{#each holdings as group}
-					<Card>
-						<CardContent>
-							<div class="flex items-center justify-between">
-								<div>
-									<div class="font-extrabold text-black">{group.fieldName}</div>
-									<div class="text-xs text-black opacity-70">Royalty • Holdings</div>
-								</div>
-								<div class="text-right">
-									<div class="text-base text-black">Unclaimed</div>
-									<div class="text-lg font-extrabold text-primary">{formatCurrency(group.totalAmount)}</div>
-								</div>
-							</div>
-							<div class="mt-3 flex gap-2 justify-end">
-								<SecondaryButton>Claim</SecondaryButton>
-								<SecondaryButton>Export</SecondaryButton>
-							</div>
-						</CardContent>
-					</Card>
-				{/each}
+			<div class="flex justify-between items-center mb-6">
+				<SectionTitle level="h2" size="section">My Holdings</SectionTitle>
+				{#if unclaimedPayout > 0}
+					<PrimaryButton on:click={() => goto('/claims')}>
+						Claim Payouts ({formatCurrency(unclaimedPayout)})
+					</PrimaryButton>
+				{/if}
 			</div>
-		</ContentSection>
-
-		<ContentSection background="gray" padding="standard">
-			<CollapsibleSection title="Performance & Returns" isOpenByDefault={false} alwaysOpenOnDesktop={true}>
-				<div class="text-black">Performance metrics and Returns</div>
-			</CollapsibleSection>
-		</ContentSection>
-
-		<ContentSection background="white" padding="standard">
-			<CollapsibleSection title="Allocation Breakdown" isOpenByDefault={false} alwaysOpenOnDesktop={true}>
-				<div class="text-black">Distribution of investments</div>
-			</CollapsibleSection>
-		</ContentSection>
-
-		<ContentSection background="white" padding="standard">
-			<CollapsibleSection title="Monthly Payouts History" isOpenByDefault={false} alwaysOpenOnDesktop={true}>
-				<div class="text-black">Monthly payout data and history</div>
-			</CollapsibleSection>
+			
+			{#if holdings.length === 0}
+				<Card>
+					<CardContent>
+						<div class="text-center py-8">
+							<p class="text-lg text-black opacity-70 mb-4">No holdings yet</p>
+							<p class="text-sm text-black opacity-60 mb-6">
+								Start building your portfolio by investing in royalty tokens
+							</p>
+							<PrimaryButton on:click={() => goto('/assets')}>
+								Browse Assets
+							</PrimaryButton>
+						</div>
+					</CardContent>
+				</Card>
+			{:else}
+				<div class="grid grid-cols-1 gap-4 lg:gap-6">
+					{#each holdings as group}
+						<Card>
+							<CardContent>
+								<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+									<div>
+										<h3 class="font-extrabold text-lg text-black">{group.fieldName}</h3>
+										<div class="text-sm text-black opacity-70 mt-1">
+											{group.holdings.length} token{group.holdings.length !== 1 ? 's' : ''} held
+										</div>
+									</div>
+									<div class="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+										<div class="text-left sm:text-right">
+											<div class="text-xs text-black opacity-70">Unclaimed</div>
+											<div class="text-xl font-extrabold text-primary">
+												{formatCurrency(group.totalAmount)}
+											</div>
+										</div>
+										<div class="flex gap-2">
+											<SecondaryButton on:click={() => goto('/claims')}>
+												Claim
+											</SecondaryButton>
+											<SecondaryButton on:click={() => goto(`/assets/${group.fieldName.toLowerCase().replace(/\s+/g, '-')}`)}>
+												View Asset
+											</SecondaryButton>
+										</div>
+									</div>
+								</div>
+							</CardContent>
+						</Card>
+					{/each}
+				</div>
+			{/if}
 		</ContentSection>
 	{/if}
 </PageLayout>

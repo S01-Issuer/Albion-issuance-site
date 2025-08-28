@@ -4,6 +4,7 @@
 
 import { executeGraphQL } from "../clients/cachedGraphqlClient";
 import { BASE_SFT_SUBGRAPH_URL, BASE_METADATA_SUBGRAPH_URL, ENERGY_FIELDS } from "$lib/network";
+import { env as publicEnv } from '$env/dynamic/public';
 import type {
   GetSftsResponse,
   GetMetadataResponse,
@@ -13,10 +14,10 @@ import type {
   DepositWithReceipt
 } from "$lib/types/graphql";
 
-// Use environment variable if available, otherwise use default
-const METABOARD_ADMIN = (typeof process !== 'undefined' && process.env?.PUBLIC_METABOARD_ADMIN) || 
-                        (typeof import.meta !== 'undefined' && (import.meta as any).env?.PUBLIC_METABOARD_ADMIN) ||
-                        "0x0000000000000000000000000000000000000000";
+// Use environment variable from SvelteKit's env module
+const METABOARD_ADMIN = publicEnv.PUBLIC_METABOARD_ADMIN || "0x0000000000000000000000000000000000000000";
+
+console.log(`[SftRepository] METABOARD_ADMIN is set to: ${METABOARD_ADMIN}`);
 
 export class SftRepository {
   /**
@@ -38,12 +39,22 @@ export class SftRepository {
       }
     `;
 
-    const data = await executeGraphQL<GetSftsResponse>(
-      BASE_SFT_SUBGRAPH_URL,
-      query
-    );
+    try {
+      const data = await executeGraphQL<GetSftsResponse>(
+        BASE_SFT_SUBGRAPH_URL,
+        query
+      );
 
-    return data.offchainAssetReceiptVaults || [];
+      if (!data || !data.offchainAssetReceiptVaults) {
+        console.error('[SftRepository] No data returned from subgraph');
+        return [];
+      }
+
+      return data.offchainAssetReceiptVaults;
+    } catch (error) {
+      console.error('[SftRepository] Error fetching SFTs:', error);
+      return [];
+    }
   }
 
   /**
@@ -85,7 +96,13 @@ export class SftRepository {
         BASE_METADATA_SUBGRAPH_URL,
         query
       );
-      return data.metaV1S || [];
+      
+      if (!data || !data.metaV1S) {
+        console.error('[SftRepository] No metadata returned from subgraph');
+        return [];
+      }
+      
+      return data.metaV1S;
     } catch (error) {
       console.error("Error fetching SFT metadata:", error);
       return [];

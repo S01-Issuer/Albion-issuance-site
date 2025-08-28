@@ -47,6 +47,7 @@
 			
 			// Get all tokens and their corresponding assets
 			const allTokens = Object.values(catalog.tokens);
+			console.log(`[Carousel] Processing ${allTokens.length} tokens`);
 			
 			for (const token of allTokens) {
 				// Find corresponding asset
@@ -59,9 +60,12 @@
 					const asset = catalog.assets[assetKey];
 					// Only add tokens with available supply
 					const availableSupply = getAvailableSupplyBigInt(token);
+					console.log(`[Carousel] Token ${token.symbol}: has asset ${assetKey}, available supply = ${availableSupply}`);
 					if (availableSupply > 0n) {
 						featuredTokensWithAssets.push({ token, asset });
 					}
+				} else {
+					console.log(`[Carousel] Token ${token.symbol} (${token.contractAddress}): NO MATCHING ASSET FOUND`);
 				}
 			}
 			
@@ -72,8 +76,9 @@
 			loading = false;
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load featured tokens';
-			console.error('Featured tokens loading error:', err);
 			loading = false;
+			// Set empty array to show "no tokens" message instead of spinner
+			featuredTokensWithAssets = [];
 		}
 	}
 

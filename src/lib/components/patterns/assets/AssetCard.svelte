@@ -188,7 +188,7 @@
 					on:scroll={handleScroll}
 					class="{tokensArray.length > 2 ? tokensListScrollableClasses : tokensListClasses}">
 					{#each tokensArray as tokenItem}
-					{@const calculatedReturns = getTokenReturns(asset, tokenItem, tokenItem.supply.mintedSupply)}
+					{@const calculatedReturns = getTokenReturns(asset, tokenItem)}
 					{@const baseReturn = calculatedReturns?.baseReturn ? Math.round(calculatedReturns.baseReturn) : 0}
 					{@const bonusReturn = calculatedReturns?.bonusReturn ? Math.round(calculatedReturns.bonusReturn) : 0}
 					{@const firstPaymentMonth = tokenItem.firstPaymentDate || 'TBD'}

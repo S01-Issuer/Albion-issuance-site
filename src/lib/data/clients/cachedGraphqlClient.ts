@@ -84,10 +84,12 @@ class GraphQLCache {
     const json = await response.json();
     
     if (!response.ok) {
+      console.error(`[GraphQL] HTTP error! status: ${response.status}`, json);
       throw new Error(`GraphQL HTTP error! status: ${response.status}`);
     }
     
     if (json.errors) {
+      console.error(`[GraphQL] Query errors:`, json.errors);
       throw new Error(`GraphQL errors: ${JSON.stringify(json.errors)}`);
     }
     
