@@ -37,52 +37,14 @@ vi.mock('@wagmi/core', async () => {
     ...actual,
     writeContract: vi.fn(),
     simulateContract: vi.fn(),
-    multicall: vi.fn(),
+    multicall: vi.fn().mockResolvedValue([
+      { result: BigInt('12000000000000000000000'), status: 'success' } // Return max supply for authorizer
+    ]),
+    readContract: vi.fn().mockResolvedValue(BigInt('12000000000000000000000')) // 12000 tokens max supply in wei
   };
 });
 
-// Mock data stores with proper SFT data for claims
-vi.mock('$lib/stores', async () => {
-  const sftData = [
-    {
-      id: '0xf836a500910453a397084ade41321ee20a5aade1',
-      name: 'ALB-WR1-R1',
-      symbol: 'ALB-WR1-R1',
-      totalShares: '12000',
-      shareHolders: [
-        { address: '0x1111111111111111111111111111111111111111' }
-      ],
-      tokenHolders: [
-        { address: '0x1111111111111111111111111111111111111111', balance: '1500' }
-      ],
-      activeAuthorizer: {
-        address: '0x52503b55c3fa62610e7b04dcfa0b1c96d3ca0456'
-      },
-      deposits: [
-        { amount: '1500000000000000000000', caller: { address: '0x1111111111111111111111111111111111111111' } }
-      ],
-      withdraws: [],
-      receiptBalances: [],
-      certifications: []
-    }
-  ];
-  
-  const metadataData = [
-    {
-      id: '0x123',
-      subject: '0x000000000000000000000000f836a500910453a397084ade41321ee20a5aade1',
-      sender: '0xsender',
-      meta: 'encoded_meta_for_wressle'
-    }
-  ];
-  
-  const { writable } = await import('svelte/store');
-  
-  return {
-    sftMetadata: writable(metadataData),
-    sfts: writable(sftData)
-  };
-});
+// DO NOT MOCK $lib/stores - use actual production code with HTTP mocks
 
 vi.mock('$lib/network', async () => {
   const actual = await vi.importActual<any>('$lib/network');
@@ -123,7 +85,8 @@ vi.mock('$lib/network', async () => {
 // - $lib/data/repositories/*
 // - $lib/services/*
 // - $lib/utils/claims
-// - $lib/stores
+// Note: ClaimsService makes direct repository calls and doesn't use stores,
+// so we don't need to populate stores for claims tests
 
 const ADDRESS = '0xf836a500910453a397084ade41321ee20a5aade1';
 const ORDER = '0x43ec2493caed6b56cfcbcf3b9279a01aedaafbce509598dfb324513e2d199977';
@@ -133,7 +96,7 @@ const WALLET = '0x1111111111111111111111111111111111111111';
 describe('Claims Page E2E Tests', () => {
   let restore: () => void;
   
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     restore = installHttpMocks({
       sftSubgraphUrl: 'https://example.com/sft',
@@ -145,7 +108,19 @@ describe('Claims Page E2E Tests', () => {
       orderHash: ORDER,
       csvCid: CSV,
       hypersyncUrl: 'https://8453.hypersync.xyz/query',
+      sfts: [
+        {
+          address: ADDRESS,
+          name: 'ALB-WR1-R1',
+          symbol: 'ALB-WR1-R1',
+          totalShares: '1500000000000000000000' // 1500 tokens minted
+        }
+      ]
     });
+    
+    // Note: ClaimsService makes direct repository calls when loadClaimsForWallet() is invoked,
+    // so we don't need to populate stores. The HTTP mocks will intercept ClaimsService's
+    // repository calls directly, exactly as happens in production.
   });
 
   afterEach(() => {
@@ -160,11 +135,8 @@ describe('Claims Page E2E Tests', () => {
       
       const bodyText = document.body.textContent || '';
       
-      // Page should have claims-related content
-      const hasTitle = bodyText.match(/Claims/i);
-      const hasPayouts = bodyText.match(/Payouts/i);
-      
-      expect(hasTitle || hasPayouts).toBeTruthy();
+      // Page should have claims & payouts title
+      expect(bodyText).toMatch(/Claims.*Payouts|Payouts.*Claims/i);
     });
   });
 
@@ -179,13 +151,9 @@ describe('Claims Page E2E Tests', () => {
       // Should show Available to Claim
       expect(bodyText).toMatch(/Available to Claim/i);
       
-      // From HTTP mock: 347.76 + 330.885 = 678.645
-      const hasTotal = bodyText.match(/678\.6|678\.65|\$678/);
-      const hasMayAmount = bodyText.match(/347\.7|347\.76/);
-      const hasJuneAmount = bodyText.match(/330\.8|330\.88/);
-      
-      // Should have at least one of these amounts
-      expect(hasTotal || hasMayAmount || hasJuneAmount).toBeTruthy();
+      // From HTTP mock: 347.76 + 330.885 = 678.645  
+      // Should show total amount
+      expect(bodyText).toMatch(/678\.6|\$678/);
     });
 
     it('shows total earned amount including claimed payouts', async () => {
@@ -198,9 +166,8 @@ describe('Claims Page E2E Tests', () => {
       // Should show Total Earned
       expect(bodyText).toMatch(/Total Earned/i);
       
-      // Should show earnings amount
-      const hasAmounts = bodyText.match(/\d+\.\d+|\$\d+/);
-      expect(hasAmounts).toBeTruthy();
+      // Should show earnings amount (at least the unclaimed 678.645)
+      expect(bodyText).toMatch(/678\.6|\$678|\d+\.\d+/);
     });
 
     it('displays total claimed amount', async () => {
@@ -213,9 +180,8 @@ describe('Claims Page E2E Tests', () => {
       // Should show Total Claimed
       expect(bodyText).toMatch(/Total Claimed/i);
       
-      // Should show either claimed amount or zero
-      const hasAmount = bodyText.match(/\$\d+\.\d+|\$0/);
-      expect(hasAmount).toBeTruthy();
+      // Should show $0 since no payouts have been claimed yet (empty logs in mock)
+      expect(bodyText).toMatch(/\$0/);
     });
   });
 
@@ -241,10 +207,9 @@ describe('Claims Page E2E Tests', () => {
       
       const bodyText = document.body.textContent || '';
       
-      // The UI shows the total amount, and indicates there are 2 claims
-      const hasClaimCount = bodyText.match(/2 claims/);
-      const hasTotalAmount = bodyText.match(/678\.6|\$678/);
-      expect(hasClaimCount || hasTotalAmount).toBeTruthy();
+      // The UI shows there are 2 claims and the total amount
+      expect(bodyText).toMatch(/2 claims/);
+      expect(bodyText).toMatch(/678\.6|\$678/);
     });
 
     it('shows June 2025 payout of $330.885', async () => {
@@ -254,10 +219,9 @@ describe('Claims Page E2E Tests', () => {
       
       const bodyText = document.body.textContent || '';
       
-      // The UI shows combined amounts, verify the total includes both payouts
-      const hasTotalAmount = bodyText.match(/678\.6|\$678/);
-      const hasMultipleClaims = bodyText.match(/2 claims|claims.*2/);
-      expect(hasTotalAmount || hasMultipleClaims).toBeTruthy();
+      // The UI shows combined amounts for both May and June
+      expect(bodyText).toMatch(/678\.6|\$678/);
+      expect(bodyText).toMatch(/2 claims/);
     });
 
     it('groups payouts by energy field', async () => {
@@ -267,14 +231,11 @@ describe('Claims Page E2E Tests', () => {
       
       const bodyText = document.body.textContent || '';
       
-      // Should show field name with total
+      // Should show field name
       expect(bodyText).toMatch(/Wressle-1/);
       
       // Should show grouped total (347.76 + 330.885 = 678.645)
-      const hasGroupTotal = bodyText.match(/678\.6|678\.65/);
-      const hasIndividual = bodyText.match(/347|330/);
-      
-      expect(hasGroupTotal || hasIndividual).toBeTruthy();
+      expect(bodyText).toMatch(/678\.6|\$678/);
     });
   });
 
@@ -297,9 +258,8 @@ describe('Claims Page E2E Tests', () => {
       
       const bodyText = document.body.textContent || '';
       
-      // Should indicate claims are ready
-      const hasReady = bodyText.match(/Ready|Available/i);
-      expect(hasReady).toBeTruthy();
+      // Should indicate claims are ready or available
+      expect(bodyText).toMatch(/Ready|Available/i);
     });
 
     it('displays gas estimate for claims', async () => {
@@ -309,13 +269,9 @@ describe('Claims Page E2E Tests', () => {
       
       const bodyText = document.body.textContent || '';
       
-      // May show gas estimate
-      const hasGas = bodyText.match(/Gas|Fee|Cost/i);
-      
-      // This is optional depending on implementation
-      if (hasGas) {
-        expect(hasGas).toBeTruthy();
-      }
+      // Gas estimate is optional - no assertion needed if not present
+      const hasGas = bodyText.includes('Gas') || bodyText.includes('Fee');
+      // This test just documents the behavior
     });
   });
 
@@ -341,9 +297,8 @@ describe('Claims Page E2E Tests', () => {
       
       const bodyText = document.body.textContent || '';
       
-      // Should show payout count (2 claims)
-      const hasCount = bodyText.match(/2 claims/);
-      expect(hasCount).toBeTruthy();
+      // Should show payout count (2 claims from May and June)
+      expect(bodyText).toMatch(/2 claims/);
     });
 
     it('displays producing status badges', async () => {
@@ -369,9 +324,8 @@ describe('Claims Page E2E Tests', () => {
       // Should show claims by asset section
       expect(bodyText).toMatch(/Claims by Asset/i);
       
-      // Should show available amounts
-      const hasAvailable = bodyText.match(/Available|678\.6|\$678/i);
-      expect(hasAvailable).toBeTruthy();
+      // Should show available amount of $678.645
+      expect(bodyText).toMatch(/678\.6|\$678/);
     });
 
     it('displays claim buttons for each asset', async () => {
@@ -392,10 +346,8 @@ describe('Claims Page E2E Tests', () => {
       
       const bodyText = document.body.textContent || '';
       
-      // Should show count of claims
-      const hasClaimsText = bodyText.match(/claims/i);
-      
-      expect(hasClaimsText).toBeTruthy();
+      // Should show the word "claims" somewhere on the page
+      expect(bodyText).toMatch(/claims/i);
     });
   });
 
@@ -408,7 +360,7 @@ describe('Claims Page E2E Tests', () => {
       const bodyText = document.body.textContent || '';
       
       // Verify key sections
-      expect(bodyText).toMatch(/Claims & Payouts/i);
+      expect(bodyText).toMatch(/Claims.*Payouts|Payouts.*Claims/i);
       expect(bodyText).toMatch(/Available to Claim/i);
       expect(bodyText).toMatch(/Total Earned/i);
       expect(bodyText).toMatch(/Total Claimed/i);
@@ -417,21 +369,22 @@ describe('Claims Page E2E Tests', () => {
       expect(bodyText).toMatch(/Wressle-1/);
       
       // Verify total amount from mock data (347.76 + 330.885 = 678.645)
-      const hasAmounts = bodyText.match(/678\.6|\$678/);
-      expect(hasAmounts).toBeTruthy();
+      expect(bodyText).toMatch(/678\.6|\$678/);
       
       // Verify action elements
       expect(bodyText).toMatch(/Claim/i);
     });
   });
 
-  // Keep the service-level tests from the refactored version
   describe('Service Integration', () => {
-    it('integrates with ClaimsService correctly', async () => {
+    it('ClaimsService makes direct repository calls (not using stores)', async () => {
       const { useClaimsService } = await import('$lib/services');
       const claimsService = useClaimsService();
       expect(claimsService).toBeDefined();
       expect(claimsService.loadClaimsForWallet).toBeDefined();
+      
+      // This service will fetch data directly via repositories when called
+      // The HTTP mocks intercept these repository calls
     });
   });
 });

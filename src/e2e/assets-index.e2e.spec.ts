@@ -102,8 +102,8 @@ describe('Assets Index E2E Tests', () => {
     });
     
     // Load data through the actual production flow: repositories → services → stores
-    const { sftRepository } = await import('$lib/data/repositories');
-    const { sfts, sftMetadata } = await import('$lib/stores');
+    const { sftRepository } = await import('$lib/data/repositories/index');
+    const { sfts, sftMetadata } = await import('$lib/stores/index');
     
     // Fetch data using the actual repositories (which will use our HTTP mocks)
     const [sftData, metaData] = await Promise.all([
@@ -147,9 +147,8 @@ describe('Assets Index E2E Tests', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
-      // Should show Wressle - may be in sold out section
-      const hasWressle = bodyText.match(/Wressle/) || bodyText.match(/View Sold Out Assets/);
-      expect(hasWressle).toBeTruthy();
+      // Should show Wressle field
+      expect(bodyText).toMatch(/Wressle/);
     });
 
     it('shows both available and sold out assets', async () => {
@@ -158,9 +157,8 @@ describe('Assets Index E2E Tests', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
-      // Check for availability indicators
-      const hasAvailableOrSoldOut = bodyText.match(/Available|Sold Out/i);
-      expect(hasAvailableOrSoldOut).toBeTruthy();
+      // Check for availability indicators - at least one must be present
+      expect(bodyText).toMatch(/Available|Sold Out/i);
     });
   });
 
@@ -219,11 +217,8 @@ describe('Assets Index E2E Tests', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
-      // Should indicate availability
-      const hasAvailable = bodyText.match(/Available|10,500|10\.5k|15,000|15k/);
-      const hasSoldOut = bodyText.match(/Sold Out|Unavailable/);
-      // At least one should be present
-      expect(hasAvailable).toBeTruthy();
+      // Should show available tokens (10,500 available from 12,000 max - 1,500 minted)
+      expect(bodyText).toMatch(/10,500|10\.5k|Available/);
     });
 
     it('displays token supply information', async () => {
@@ -232,9 +227,8 @@ describe('Assets Index E2E Tests', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
-      // Check for any supply-related text
-      const hasSupplyInfo = bodyText.match(/Available|Sold Out|\d+%|tokens?/i);
-      expect(hasSupplyInfo).toBeTruthy();
+      // Check for supply information
+      expect(bodyText).toMatch(/tokens?|Available|\d+%/i);
     });
 
     it('shows token returns information', async () => {
@@ -243,9 +237,8 @@ describe('Assets Index E2E Tests', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
-      // Check for return information (UI shows "Base >10x" format)
-      const hasReturns = bodyText.match(/Base|Bonus|>10x|Returns?/i);
-      expect(hasReturns).toBeTruthy();
+      // Check for return information
+      expect(bodyText).toMatch(/Base|Bonus|Returns?|>\d+x/i);
     });
   });
 
@@ -265,12 +258,10 @@ describe('Assets Index E2E Tests', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
-      // May show option to view sold out assets
-      const hasSoldOutToggle = bodyText.match(/Show Sold Out|Include Sold Out/i);
-      // This is optional depending on implementation
-      if (hasSoldOutToggle) {
-        expect(hasSoldOutToggle).toBeTruthy();
-      }
+      // This test verifies the toggle appears if there are sold out assets
+      // Since we have available tokens, this is optional
+      const hasSoldOutToggle = bodyText.includes('Show Sold Out') || bodyText.includes('Include Sold Out');
+      // No assertion needed - this is an optional UI element
     });
   });
 
