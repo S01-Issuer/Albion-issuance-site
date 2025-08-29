@@ -37,7 +37,6 @@ export class CatalogService {
   async build(): Promise<CatalogData> {
     // If a build is already in progress, return that promise
     if (this.buildPromise) {
-      console.log('[CatalogService] Build already in progress, returning existing promise');
       return this.buildPromise;
     }
 
@@ -47,35 +46,26 @@ export class CatalogService {
 
     // If stores are empty, fetch from repository
     if (!$sfts || $sfts.length === 0) {
-      console.log('[CatalogService] Stores empty, fetching from repository');
       const fetchedSfts = await sftRepository.getAllSfts();
       // Convert GraphQL type to store type (they're compatible for our usage)
       $sfts = fetchedSfts as any;
-      console.log(`[CatalogService] Fetched ${$sfts.length} SFTs from repository`);
       sfts.set($sfts);
     } else {
-      console.log(`[CatalogService] Using ${$sfts.length} SFTs from stores`);
     }
 
     if (!$sftMetadata || $sftMetadata.length === 0) {
-      console.log('[CatalogService] Metadata empty, fetching from repository');
       const fetchedMetadata = await sftRepository.getSftMetadata();
       $sftMetadata = fetchedMetadata as any;
-      console.log(`[CatalogService] Fetched ${$sftMetadata.length} metadata entries from repository`);
       sftMetadata.set($sftMetadata);
     } else {
-      console.log(`[CatalogService] Using ${$sftMetadata.length} metadata entries from stores`);
     }
 
     // Check if data has changed
     const currentHash = this.computeDataHash($sfts, $sftMetadata || []);
     if (this.catalog && this.lastBuildHash === currentHash) {
-      console.log('[CatalogService] Data unchanged, returning cached catalog');
       return this.catalog;
     }
 
-    console.log('[CatalogService] Starting new catalog build');
-    
     // Start new build
     this.buildPromise = this._buildInternal($sfts, $sftMetadata || [], currentHash);
     
@@ -99,15 +89,7 @@ export class CatalogService {
     }
 
     // Decode metadata
-    console.log(`[CatalogService] Raw metadata entries:`, $sftMetadata.length);
-    if ($sftMetadata.length > 0) {
-      console.log(`[CatalogService] First raw metadata entry:`, $sftMetadata[0]);
-    }
     const decodedMeta = $sftMetadata.map((m) => decodeSftInformation(m));
-    console.log(`[CatalogService] Decoded ${decodedMeta.length} metadata entries`);
-    if (decodedMeta.length > 0 && decodedMeta[0]) {
-      console.log(`[CatalogService] First decoded metadata contractAddress:`, decodedMeta[0].contractAddress);
-    }
 
     // Collect authorizer addresses for max supply lookup
     const authorizers: Hex[] = [];
@@ -117,8 +99,6 @@ export class CatalogService {
       }
     }
 
-    console.log(`[CatalogService] Reading max supply from ${authorizers.length} authorizers`);
-    
     // Read max supply from authorizers using multicall
     const maxSupplyByAuthorizer = await getMaxSharesSupplyMap(authorizers, authorizerAbi);
 
@@ -130,16 +110,10 @@ export class CatalogService {
       const pinnedMetadata = decodedMeta.find(
         (meta: any) => {
           const matches = meta?.contractAddress === targetAddress;
-          if (!matches && sft.id === '0xf836a500910453a397084ade41321ee20a5aade1') {
-            console.log(`[CatalogService] Wressle matching debug:`);
-            console.log(`  Looking for: ${targetAddress}`);
-            console.log(`  Found: ${meta?.contractAddress}`);
-          }
           return matches;
         }
       );
       if (!pinnedMetadata) {
-        console.log(`[CatalogService] No metadata found for SFT ${sft.id}`);
         continue;
       }
 
@@ -147,12 +121,9 @@ export class CatalogService {
       const authAddress = (sft.activeAuthorizer?.address || "").toLowerCase();
       let maxSupply = maxSupplyByAuthorizer[authAddress];
       
-      console.log(`[CatalogService] Token ${sft.symbol}: authorizer ${authAddress}, maxSupply from chain: ${maxSupply}, totalShares: ${sft.totalShares}`);
-      
       if (!maxSupply || maxSupply === "0") {
         // Fallback to totalShares if authorizer doesn't have max supply
         maxSupply = sft.totalShares;
-        console.log(`[CatalogService] Using totalShares as max supply for ${sft.id}: ${maxSupply}`);
       }
 
       // Use transformers to create instances
@@ -187,7 +158,6 @@ export class CatalogService {
 
     this.catalog = { assets, tokens };
     this.lastBuildHash = currentHash;
-    console.log(`[CatalogService] Build complete: ${Object.keys(assets).length} assets, ${Object.keys(tokens).length} tokens`);
     return this.catalog;
   }
 

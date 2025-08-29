@@ -68,7 +68,18 @@ export class ClaimsRepository {
   /**
    * Get order details by hash
    */
-  async getOrderByHash(orderHash: string): Promise<Array<{ orderBytes: string; orderHash: string; orderbook: { id: string } }>> {
+  async getOrderByHash(orderHash: string): Promise<Array<{ 
+    orderBytes: string; 
+    orderHash: string; 
+    orderbook: { id: string };
+    addEvents?: Array<{
+      transaction: {
+        id: string;
+        timestamp: string;
+        blockNumber: string;
+      }
+    }> 
+  }>> {
     const cleanOrderHash = this.validateOrderHash(orderHash);
     if (!cleanOrderHash) return [];
 
@@ -78,6 +89,13 @@ export class ClaimsRepository {
           orderBytes
           orderHash
           orderbook { id }
+          addEvents {
+            transaction {
+              id
+              timestamp
+              blockNumber
+            }
+          }
         }
       }
     `;

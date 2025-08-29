@@ -269,6 +269,7 @@ export async function sortClaimsData(
   trades: any[],
   ownerAddress: string,
   feildName: string,
+  orderTimestamp?: string,
 ) {
   const blockRange = getBlockRangeFromTrades(trades);
 
@@ -289,6 +290,10 @@ export async function sortClaimsData(
   const decodedLogs = logs
     .map((log) => {
       const decodedData = decodeLogData(log.data);
+      if (decodedData && log.block) {
+        // Add timestamp from the block data
+        decodedData.timestamp = new Date(log.block.timestamp * 1000).toISOString();
+      }
       return decodedData;
     })
     .filter((log) => {
@@ -341,8 +346,22 @@ export async function sortClaimsData(
       );
     });
 
+    // Try to get timestamp from various sources
+    let claimDate = new Date().toISOString();
+    if (claim.decodedLog?.timestamp) {
+      claimDate = claim.decodedLog.timestamp;
+    } else if (originalLog?.block?.timestamp) {
+      claimDate = new Date(originalLog.block.timestamp * 1000).toISOString();
+    } else if (orderTimestamp) {
+      // Use the order timestamp (when the order was added to the orderbook)
+      claimDate = new Date(Number(orderTimestamp) * 1000).toISOString();
+    } else if (trades.length > 0 && trades[0].tradeEvent?.transaction?.timestamp) {
+      // Use the trade timestamp as fallback (all claims in a CSV are from the same payout period)
+      claimDate = new Date(trades[0].tradeEvent.transaction.timestamp * 1000).toISOString();
+    }
+
     return {
-      date: claim.decodedLog?.timestamp || new Date().toISOString(),
+      date: claimDate,
       amount: formatEther(claim.amount),
       asset: feildName || "Unknown Field",
       txHash: originalLog?.transaction_hash || "N/A",
