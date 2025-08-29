@@ -481,8 +481,8 @@
 		<HeroSection title="My Portfolio" subtitle="Track your investments and performance" showBorder={true}>
 			{#if pageLoading}
 				<div class="text-center mt-8">
-					<div class="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent"></div>
-					<p class="mt-4 text-black opacity-70">Loading portfolio data...</p>
+					<div class="w-8 h-8 border-4 border-light-gray border-t-primary animate-spin mx-auto mb-4"></div>
+					<p class="text-black opacity-70">Loading portfolio data...</p>
 				</div>
 			{:else}
 				<div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 lg:gap-8 text-center max-w-6xl mx-auto mt-6">
