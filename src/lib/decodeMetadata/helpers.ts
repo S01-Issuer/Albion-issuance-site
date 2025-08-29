@@ -1,7 +1,7 @@
 import pako from "pako";
 import { ethers } from "ethers";
 import { decodeAllSync, encodeCanonical } from "cbor-web";
-import type { MetaV1S } from "$lib/types/sftMetadataTypes";
+import type { MetaV1S } from "$lib/types/graphql";
 
 export const MAGIC_NUMBERS = {
   /**
@@ -78,7 +78,8 @@ export function encodeCBORStructure(structure: string, schemaHash: string) {
   if (typeof structure === "object") {
     structure = JSON.stringify(structure);
   }
-  const deflatedData = ethers.getBytes(deflateJson(structure)).buffer;
+  const deflatedBytes = ethers.getBytes(deflateJson(structure));
+  const deflatedData = deflatedBytes.buffer as ArrayBuffer;
   return cborEncode(
     deflatedData,
     MAGIC_NUMBERS.OA_STRUCTURE,
@@ -133,7 +134,9 @@ export function bytesToMeta(bytes: any, type: any) {
       res = _meta;
     }
     return res;
-  } else throw new Error("invalid meta");
+  } else {
+    throw new Error("Not a valid Bytes string");
+  }
 }
 
 export function cborDecode(dataEncoded_: any) {

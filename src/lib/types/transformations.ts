@@ -11,7 +11,7 @@ import type { Token as UIToken } from './uiTypes';
 export class TypeTransformations {
   /**
    * Transform TokenMetadata directly to UI Token
-   * Used by TokenService to convert token data for UI display
+   * Converts token data for UI display
    */
   static tokenToUI(tokenData: TokenMetadata): UIToken {
     return {

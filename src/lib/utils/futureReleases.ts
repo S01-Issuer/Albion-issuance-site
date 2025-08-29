@@ -1,5 +1,5 @@
 import { ENERGY_FIELDS } from "$lib/network";
-import tokenService from "$lib/services/TokenService";
+import { catalogService } from "$lib/services";
 
 /**
  * Check if an energy field has incomplete releases (< 100% shares allocated)
@@ -16,22 +16,13 @@ export async function hasIncompleteReleases(assetId: string): Promise<boolean> {
   if (!energyField) return false;
   
   try {
-    // Get all tokens for this energy field
-    const tokens = tokenService.getTokensByEnergyField(energyField.name);
-    if (!tokens || tokens.length === 0) return true; // If no tokens, assume future releases
-    
-    // Get metadata for each token to access share percentage
-    const tokenMetadataPromises = tokens.map(token => 
-      tokenService.getTokenMetadataByAddress(token.contractAddress)
+    await catalogService.build();
+    const allTokens = Object.values(catalogService.getCatalog()?.tokens || {});
+    const fieldTokens = allTokens.filter((t) =>
+      energyField.sftTokens.some(s => s.address.toLowerCase() === t.contractAddress.toLowerCase())
     );
-    
-    const tokenMetadata = await Promise.all(tokenMetadataPromises);
-    
-    // Calculate total share percentage
-    const totalSharePercentage = tokenMetadata.reduce((sum, metadata) => {
-      return sum + (metadata?.sharePercentage || 0);
-    }, 0);
-    
+    if (fieldTokens.length === 0) return true; // If no tokens, assume future releases
+    const totalSharePercentage = fieldTokens.reduce((sum, t) => sum + (t.sharePercentage || 0), 0);
     return totalSharePercentage < 100;
   } catch (error) {
     console.error(`Error checking incomplete releases for ${assetId}:`, error);
