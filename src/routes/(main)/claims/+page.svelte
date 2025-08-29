@@ -9,6 +9,7 @@
 	import { useClaimsService } from '$lib/services';
 	import orderbookAbi from '$lib/abi/orderbook.json';
 	import type { Hex } from 'viem';
+	import { claimsCache } from '$lib/stores/claimsCache';
 
 	let totalEarned = 0;
 	let totalClaimed = 0;
@@ -29,8 +30,26 @@
 
 	async function loadClaimsData(){
 		try {
+			// Check cache first
+			const cached = claimsCache.get($signerAddress || '');
+			if (cached) {
+				console.log('[Claims] Using cached data');
+				claimHistory = cached.claimHistory as any;
+				holdings = cached.holdings as any;
+				totalEarned = cached.totals.earned;
+				totalClaimed = cached.totals.claimed;
+				unclaimedPayout = cached.totals.unclaimed;
+				pageLoading = false;
+				return;
+			}
+
+			console.log('[Claims] Loading fresh data');
 			const claims = useClaimsService();
 			const result = await claims.loadClaimsForWallet($signerAddress || '');
+			
+			// Store in cache
+			claimsCache.set($signerAddress || '', result);
+			
 			claimHistory = result.claimHistory as any;
 			holdings = result.holdings as any;
 			totalEarned = result.totals.earned;
@@ -101,7 +120,8 @@
 			await writeContract($wagmiConfig, request);
 			claimSuccess = true;
 			
-			// Reload claims data after successful claim
+			// Clear cache and reload claims data after successful claim
+			claimsCache.clear();
 			setTimeout(() => {
 				pageLoading = true;
 				loadClaimsData();
@@ -153,7 +173,8 @@
 			await writeContract($wagmiConfig, request);
 			claimSuccess = true;
 			
-			// Reload claims data after successful claim
+			// Clear cache and reload claims data after successful claim
+			claimsCache.clear();
 			setTimeout(() => {
 				pageLoading = true;
 				loadClaimsData();

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { useClaimsService, useCatalogService } from '$lib/services';
+	import { claimsCache } from '$lib/stores/claimsCache';
 	import { web3Modal, signerAddress, connected } from 'svelte-wagmi';
 	import { 
 		Card, 
@@ -21,22 +22,11 @@
 	import { formatCurrency, formatPercentage, formatNumber, formatSmartNumber } from '$lib/utils/formatters';
 	import { sftRepository } from '$lib/data/repositories/sftRepository';
 	import { sfts, sftMetadata } from '$lib/stores';
-	import { formatEther, parseEther } from 'viem';
+	import { formatEther } from 'viem';
 	import { goto } from '$app/navigation';
 	import { useTooltip, useCardFlip } from '$lib/composables';
-	import { ENERGY_FIELDS, PINATA_GATEWAY } from '$lib/network';
+	import { PINATA_GATEWAY } from '$lib/network';
 	import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
-	import { 
-		decodeOrder, 
-		getLeaf, 
-		getMerkleTree, 
-		getProofForLeaf, 
-		signContext, 
-		sortClaimsData, 
-		fetchAndValidateCSV,
-		type ClaimHistory 
-	} from '$lib/utils/claims';
-	import { claimsRepository } from '$lib/data/repositories/claimsRepository';
 	
 	// Tab state
 	let activeTab: 'overview' | 'performance' | 'allocation' = 'overview';
@@ -46,14 +36,14 @@
 	let isLoadingData = false;
 	let totalInvested = 0;
 	let totalPayoutsEarned = 0;
+	let totalClaimed = 0;
 	let unclaimedPayout = 0;
 	let activeAssetsCount = 0;
 	let holdings: any[] = [];
-	let claimHistory: ClaimHistory[] = [];
+	let claimHistory: any[] = [];
 	let monthlyPayouts: any[] = [];
 	let tokenAllocations: any[] = [];
 	let allDepositsData: any[] = [];
-	let allTradesData: any[] = [];
 	let claimsHoldings: any[] = [];
 	
 	// Composables
@@ -108,95 +98,20 @@
 	}
 
 	async function loadAllClaimsData() {
-		// Process each individual SFT token instead of grouping by energy fields
-		for (const field of ENERGY_FIELDS) {
-			for (const token of field.sftTokens) {
-				if (token.claims && token.claims.length > 0) {
-					for (const claim of token.claims) {
-						if (claim.csvLink) {
-							
-							const csvData = await fetchAndValidateCSV(
-								claim.csvLink,
-								claim.expectedMerkleRoot,
-								claim.expectedContentHash
-							);
-							
-							if (csvData) {
-								const merkleTree = getMerkleTree(csvData);
-								
-								const trades = await claimsRepository.getTradesForClaims(claim.orderHash, $signerAddress || '');
-								
-								// Store trades data for monthly payouts
-								if (trades && trades.length > 0) {
-									allTradesData.push(...trades.map((trade: any) => ({
-										...trade,
-										fieldName: field.name,
-										sftAddress: token.address,
-										assetName: field.name
-									})));
-								}
-								
-								const orderDetails = await claimsRepository.getOrderByHash(claim.orderHash);
-								if(orderDetails && orderDetails.length > 0){
-									const orderBookAddress = orderDetails[0].orderbook.id;
-									const decodedOrder = decodeOrder(orderDetails[0].orderBytes);
-									// Get the timestamp from when the order was added
-									const orderTimestamp = orderDetails[0].addEvents?.[0]?.transaction?.timestamp;
-									const sortedClaimsData = await sortClaimsData(csvData, trades, $signerAddress || '', field.name, orderTimestamp);
-									const holdingsWithProofs = sortedClaimsData.holdings.map(holding => {
-										const leaf = getLeaf(holding.id, $signerAddress || '', holding.unclaimedAmount);
-										const proofForLeaf = getProofForLeaf(merkleTree, leaf);
-										const holdingSignedContext = signContext(
-											[holding.id, parseEther(holding.unclaimedAmount.toString()), ...proofForLeaf.proof].map(i => BigInt(i))
-										);
-										return {
-											...holding,
-											order: decodedOrder,
-											signedContext: holdingSignedContext,
-											orderBookAddress: orderBookAddress,
-											sftAddress: token.address,
-											fieldName: field.name
-										};
-									});
-									
-									// Add SFT address to each claim for precise matching later
-									const claimsWithSft = sortedClaimsData.claims.map((claim: any) => ({
-										...claim,
-										sftAddress: token.address,
-										fieldName: field.name
-									}));
-									claimHistory = [...claimHistory, ...claimsWithSft];
-									
-									// Store holdings grouped by SFT
-									let existingSftGroup = claimsHoldings.find(group => group.sftAddress === token.address);
-									
-									if (existingSftGroup) {
-										existingSftGroup.holdings = [...existingSftGroup.holdings, ...holdingsWithProofs];
-										// Store unclaimed amount separately from total earned
-										existingSftGroup.unclaimedAmount = (existingSftGroup.unclaimedAmount || 0) + 
-											(sortedClaimsData?.totalUnclaimedAmount ? Number(formatEther(BigInt(sortedClaimsData.totalUnclaimedAmount))) : 0);
-										existingSftGroup.claimedAmount = (existingSftGroup.claimedAmount || 0) + 
-											(sortedClaimsData?.totalClaimedAmount ? Number(formatEther(BigInt(sortedClaimsData.totalClaimedAmount))) : 0);
-										existingSftGroup.totalEarned = existingSftGroup.claimedAmount + existingSftGroup.unclaimedAmount;
-									} else {
-										const unclaimedAmount = sortedClaimsData?.totalUnclaimedAmount ? Number(formatEther(BigInt(sortedClaimsData.totalUnclaimedAmount))) : 0;
-										const claimedAmount = sortedClaimsData?.totalClaimedAmount ? Number(formatEther(BigInt(sortedClaimsData.totalClaimedAmount))) : 0;
-										claimsHoldings = [...claimsHoldings, { 
-											sftAddress: token.address,
-											fieldName: field.name,
-											unclaimedAmount: unclaimedAmount,
-											claimedAmount: claimedAmount,
-											totalEarned: claimedAmount + unclaimedAmount,
-											holdings: holdingsWithProofs
-										}];
-									}
-								}
-							}
-						}
-					}
-				}
-			}
+		// Use ClaimsService for efficient parallel loading with caching
+		const claims = useClaimsService();
+		
+		// Check cache first
+		let claimsResult = claimsCache.get($signerAddress || '');
+		if (claimsResult) {
+			console.log('[Portfolio] Using cached claims data');
+		} else {
+			console.log('[Portfolio] Loading fresh claims data');
+			claimsResult = await claims.loadClaimsForWallet($signerAddress || '');
+			claimsCache.set($signerAddress || '', claimsResult);
 		}
+		
+		return claimsResult;
 	}
 
 	async function loadSftData() {
@@ -214,15 +129,31 @@
 		holdings = [];
 		claimsHoldings = [];
 		claimHistory = [];
-		allTradesData = [];
 
 		try {
 			// Build catalog to populate stores
 			const catalog = useCatalogService();
 			await catalog.build();
 
-			// Load all claims data first
-			await loadAllClaimsData();
+			// Load all claims data using ClaimsService
+			const claimsResult = await loadAllClaimsData();
+			
+			// Use the claims result
+			if (claimsResult) {
+				claimHistory = claimsResult.claimHistory;
+				totalPayoutsEarned = claimsResult.totals.earned;
+				totalClaimed = claimsResult.totals.claimed;
+				unclaimedPayout = claimsResult.totals.unclaimed;
+				
+				// Map holdings to claimsHoldings format for compatibility
+				claimsHoldings = claimsResult.holdings.map((group: any) => ({
+					fieldName: group.fieldName,
+					unclaimedAmount: group.totalAmount,
+					claimedAmount: 0, // Will be calculated from claim history
+					totalEarned: group.totalAmount,
+					holdings: group.holdings
+				}));
+			}
 
 			// Get deposits data
 			allDepositsData = await sftRepository.getDepositsForOwner($signerAddress);
@@ -312,9 +243,9 @@
 					let unclaimedAmountForSft = 0;
 					let claimedAmountForSft = 0;
 					
-					// Find claims data for this specific SFT - use exact match
+					// Find claims data for this specific SFT by matching field name
 					const sftClaimsGroup = claimsHoldings.find(group => 
-						group.sftAddress.toLowerCase() === sft.id.toLowerCase()
+						group.fieldName === asset?.assetName
 					);
 					
 					// Use data from claimsGroup if available (this is the source of truth)
@@ -324,11 +255,10 @@
 						totalEarnedForSft = sftClaimsGroup.totalEarned || 0;
 					}
 					
-					// Get claim history for this SFT for display purposes only
-					// Use exact SFT address match to avoid incorrect attribution
+					// Get claim history for this asset
 					const sftClaims = claimHistory.filter((claim: any) => {
-						// Match by exact SFT address
-						return claim.sftAddress && claim.sftAddress.toLowerCase() === sft.id.toLowerCase();
+						// Match by asset name since that's what ClaimsService provides
+						return claim.asset === asset?.assetName || claim.fieldName === asset?.assetName;
 					});
 					
 					// Only add to holdings if user actually owns tokens
@@ -341,7 +271,7 @@
 						
 						// Get last payout info from claims
 						const lastClaim = sftClaims
-							.filter(claim => claim.status === 'completed')
+							.filter(claim => !claim.status || claim.status === 'completed')
 							.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
 						
 						holdings.push({
@@ -368,13 +298,13 @@
 				}
 			}
 
-			// Populate monthlyPayouts from claim history and trades
+					// Populate monthlyPayouts from claim history
 			monthlyPayouts = [];
 			const monthlyPayoutsMap = new Map();
 
 			// Process claim history to get monthly aggregations (only completed claims)
 			for(const claim of claimHistory) {
-				if(claim.date && claim.amount && claim.status === 'completed') {
+				if(claim.date && claim.amount && (!claim.status || claim.status === 'completed')) {
 					const date = new Date(claim.date);
 					const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 					

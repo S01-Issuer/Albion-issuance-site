@@ -73,33 +73,44 @@ export class ClaimsService {
     let totalEarned = 0;
     let totalUnclaimed = 0;
 
-    // Process claims for each field and token
+    // Collect all claim processing promises for parallel execution
+    const claimPromises: Promise<any>[] = [];
+    const claimMetadata: { fieldName: string; claim: Claim }[] = [];
+
+    // Build list of all claims to process
     for (const field of ENERGY_FIELDS) {
       for (const token of field.sftTokens) {
         if (!token.claims || token.claims.length === 0) continue;
 
         for (const claim of token.claims as Claim[]) {
-          const claimData = await this.processClaimForWallet(
-            claim,
-            ownerAddress,
-            field.name
+          claimMetadata.push({ fieldName: field.name, claim });
+          claimPromises.push(
+            this.processClaimForWallet(claim, ownerAddress, field.name)
           );
-          
-          if (!claimData) continue;
-
-          // Merge results
-          claimHistory = [...claimHistory, ...claimData.claims];
-          
-          // Group holdings by field name
-          this.mergeHoldingsGroup(holdings, field.name, claimData.holdings);
-
-          // Update totals
-          totalClaimed += claimData.totalClaimed;
-          totalEarned += claimData.totalEarned;
-          totalUnclaimed += claimData.totalUnclaimed;
         }
       }
     }
+
+    // Process all claims in parallel
+    const results = await Promise.all(claimPromises);
+
+    // Merge results
+    results.forEach((claimData, index) => {
+      if (!claimData) return;
+
+      const { fieldName } = claimMetadata[index];
+      
+      // Merge results
+      claimHistory = [...claimHistory, ...claimData.claims];
+      
+      // Group holdings by field name
+      this.mergeHoldingsGroup(holdings, fieldName, claimData.holdings);
+
+      // Update totals
+      totalClaimed += claimData.totalClaimed;
+      totalEarned += claimData.totalEarned;
+      totalUnclaimed += claimData.totalUnclaimed;
+    });
 
     return {
       holdings,
@@ -122,20 +133,18 @@ export class ClaimsService {
   ) {
     if (!claim.csvLink) return null;
 
-    // Fetch CSV data
-    const csvData = await this.fetchCsv(
-      claim.csvLink, 
-      claim.expectedMerkleRoot, 
-      claim.expectedContentHash
-    );
-    if (!csvData) return null;
-
-    // Fetch trades and order details
-    const [trades, orderDetails] = await Promise.all([
+    // Fetch CSV data, trades and order details in parallel
+    const [csvData, trades, orderDetails] = await Promise.all([
+      this.fetchCsv(
+        claim.csvLink, 
+        claim.expectedMerkleRoot, 
+        claim.expectedContentHash
+      ),
       this.repository.getTradesForClaims(claim.orderHash, ownerAddress),
       this.repository.getOrderByHash(claim.orderHash)
     ]);
-
+    
+    if (!csvData) return null;
     if (!orderDetails || orderDetails.length === 0) return null;
 
     const orderBookAddress = orderDetails[0].orderbook.id;
