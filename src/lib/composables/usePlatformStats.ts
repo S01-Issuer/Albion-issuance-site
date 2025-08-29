@@ -104,9 +104,9 @@ export function usePlatformStats() {
           const sft = $sfts.find(s => s.id.toLowerCase() === tokenAddress);
           if (sft) {
             const pinnedMetadata = decodedMeta.find(
-              (meta) => meta?.contractAddress?.toLowerCase() === `0x000000000000000000000000${sft.id.slice(2).toLowerCase()}`
+              (meta) => meta?.contractAddress === `0x000000000000000000000000${sft.id.slice(2)}`
             );
-            if (pinnedMetadata && 'asset' in pinnedMetadata && pinnedMetadata.asset) {
+            if (pinnedMetadata && pinnedMetadata.asset) {
               // Add country to set
               const country = pinnedMetadata.asset.location?.country;
               if (country && country.trim() !== '') {
@@ -130,7 +130,7 @@ export function usePlatformStats() {
           const sft = $sfts.find(s => s.id.toLowerCase() === tokenAddress);
           if (sft && sft.totalShares && sft.totalShares !== "0") {
             // totalShares is in wei format (18 decimals), convert to USD
-            const shares = Number(formatEther(BigInt(sft.totalShares)));
+            const shares = Number(formatEther(sft.totalShares));
             totalInvested += shares;
           }
         }

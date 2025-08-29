@@ -27,16 +27,6 @@ function calculateIRR(cashFlows: number[]): number {
   const tolerance = 1e-7;
   let rate = 0.1; // Initial guess of 10%
   
-  // Check if the investment can ever be recovered
-  const totalInflows = cashFlows.slice(1).reduce((sum, cf) => sum + cf, 0);
-  const initialOutflow = Math.abs(cashFlows[0]);
-  
-  if (totalInflows < initialOutflow * 0.01) {
-    // Total inflows are less than 1% of initial investment
-    // This is essentially a total loss
-    return -0.99; // -99% monthly return
-  }
-  
   for (let i = 0; i < maxIterations; i++) {
     let npv = 0;
     let dnpv = 0;
@@ -47,20 +37,7 @@ function calculateIRR(cashFlows: number[]): number {
       dnpv -= j * cashFlows[j] / Math.pow(1 + rate, j + 1);
     }
     
-    // Protect against division by zero or infinity
-    if (!isFinite(dnpv) || Math.abs(dnpv) < 1e-10) {
-      return -0.99; // Return maximum loss if derivative is invalid
-    }
-    
     const newRate = rate - npv / dnpv;
-    
-    // Bound the rate to prevent divergence
-    if (!isFinite(newRate) || newRate < -0.99) {
-      return -0.99; // Maximum loss
-    }
-    if (newRate > 100) {
-      return 100; // Cap at 10,000% monthly (unrealistic but prevents infinity)
-    }
     
     if (Math.abs(newRate - rate) < tolerance) {
       return newRate;
@@ -86,7 +63,6 @@ export function calculateTokenReturns(
   onChainMintedSupply?: string,
 ): TokenReturns {
   if (!asset.plannedProduction || !token.sharePercentage) {
-    console.log(`[Returns] Missing data for ${token.symbol}: plannedProduction=${!!asset.plannedProduction}, sharePercentage=${token.sharePercentage}`);
     return {
       baseReturn: 0,
       bonusReturn: 0,
@@ -98,17 +74,6 @@ export function calculateTokenReturns(
   const { plannedProduction } = asset;
   const { projections, oilPriceAssumption } = plannedProduction;
   const sharePercentage = token.sharePercentage / 100; // Convert to decimal
-  
-  console.log(`[Returns] Token ${token.symbol}: projections length = ${projections?.length}, oilPriceAssumption = ${oilPriceAssumption}`);
-  if (!projections || projections.length === 0) {
-    console.log(`[Returns] No projections for ${token.symbol}`);
-    return {
-      baseReturn: 0,
-      bonusReturn: 0,
-      impliedBarrelsPerToken: 0,
-      breakEvenOilPrice: 0,
-    };
-  }
 
   // Get pricing adjustments from asset technical data
   const benchmarkPremium = asset.technical?.pricing?.benchmarkPremium 
@@ -144,7 +109,6 @@ export function calculateTokenReturns(
     // This ensures we never use stale IPFS data
     mintedSupply = 0;
   }
-  
 
   // Build cash flows for IRR calculation
   // Start with initial investment of -$1 at month 0
@@ -177,18 +141,7 @@ export function calculateTokenReturns(
   
   // Calculate base return (using max supply)
   const monthlyIRRBase = calculateIRR(baseCashFlows);
-  
-  // Handle edge cases in IRR calculation
-  if (monthlyIRRBase <= -0.99) {
-    // IRR is -99% or worse monthly (total loss)
-    baseReturn = -100; // Total loss
-  } else if (monthlyIRRBase > 10) {
-    // IRR is unrealistically high (>1000% monthly), cap at very high value
-    baseReturn = 99999999999;
-  } else {
-    // Normal calculation
-    baseReturn = (Math.pow(1 + monthlyIRRBase, 12) - 1) * 100;
-  }
+  baseReturn = (Math.pow(1 + monthlyIRRBase, 12) - 1) * 100;
   
   // Calculate bonus return
   if (mintedSupply === 0) {
@@ -218,8 +171,8 @@ export function calculateTokenReturns(
     : 0;
 
   return {
-    baseReturn: baseReturn, // Keep negative values for proper display
-    bonusReturn: bonusReturn, // Keep negative values for proper display
+    baseReturn: Math.max(0, baseReturn),
+    bonusReturn: Math.max(0, bonusReturn),
     impliedBarrelsPerToken,
     breakEvenOilPrice,
   };

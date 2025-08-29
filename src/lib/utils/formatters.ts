@@ -378,11 +378,6 @@ export function formatSmartReturn(
 
   const { threshold = 1000, showPlus = false } = options;
 
-  // Handle negative returns
-  if (returnPercentage < 0) {
-    return "<0%"; // Display any negative return as <0%
-  }
-
   // For values below threshold, show as percentage
   if (returnPercentage < threshold) {
     const formatted = `${Math.round(returnPercentage)}%`;

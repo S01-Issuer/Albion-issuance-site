@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { sftRepository } from '$lib/data/repositories/sftRepository';
+	import { getSftMetadata } from '$lib/queries/getSftMetadata';
+	import { getSfts } from '$lib/queries/getSfts';
 	import { sftMetadata, sfts } from '$lib/stores';
 	import { onMount } from 'svelte';
 	import { web3Modal, signerAddress, connected, loading, disconnectWagmi } from 'svelte-wagmi';
@@ -55,7 +56,7 @@
 	$: query = createQuery({
 		queryKey: ['getSftMetadata'],
 		queryFn: () => {
-			return sftRepository.getSftMetadata();
+			return getSftMetadata();
 		}
 	});
 	$: if ($query && $query.data) {
@@ -65,7 +66,7 @@
 	$: vaultQuery = createQuery({
 		queryKey: ['getSfts'],
 		queryFn: () => {
-			return sftRepository.getAllSfts();
+			return getSfts();
 		}
 	});
 	$: if ($vaultQuery && $vaultQuery.data) {

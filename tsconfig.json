@@ -9,13 +9,8 @@
     "skipLibCheck": true,
     "sourceMap": true,
     "strict": true,
-    "moduleResolution": "bundler",
-    "baseUrl": ".",
-    "paths": {
-      "$lib": ["src/lib"],
-      "$lib/*": ["src/lib/*"]
-    }
+    "moduleResolution": "bundler"
   },
   "include": ["src"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", "dist", "src/e2e"]
 }

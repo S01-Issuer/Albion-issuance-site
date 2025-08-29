@@ -1,6 +1,6 @@
 import { MAGIC_NUMBERS } from "./helpers";
 import { cborDecode, bytesToMeta } from "./helpers";
-import type { OffchainAssetReceiptVault } from "$lib/types/graphql";
+import type { OffchainAssetReceiptVault } from "$lib/types/offchainAssetReceiptVaultTypes";
 import type { Asset, PlannedProduction, Token } from "$lib/types/uiTypes";
 import type { ISODateTimeString } from "$lib/types/sharedTypes";
 import { PINATA_GATEWAY } from "$lib/network";
@@ -9,7 +9,7 @@ import type { TokenMetadata } from "$lib/types/MetaboardTypes";
 export const addSchemaToReceipts = (vault: OffchainAssetReceiptVault) => {
   let tempSchema: { displayName: string; hash: string }[] = [];
 
-  const receiptVaultInformations = vault.receiptVaultInformations || [];
+  const receiptVaultInformations = vault.receiptVaultInformations;
 
   if (receiptVaultInformations.length) {
     receiptVaultInformations.map(async (data) => {
@@ -60,7 +60,7 @@ export function generateTokenInstanceFromSft(
     tokenType: "royalty", // SFTs are always royalty tokens, payment tokens are USDC, USDT or any other value token
     isActive: true, // SFTs are always active
     supply: {
-      maxSupply: sftMaxSharesSupply.toString(),
+      maxSupply: sftMaxSharesSupply.toString(), // Needs to be edited.
       mintedSupply: sft.totalShares.toString(),
     },
     holders: sft.tokenHolders.map((holder) => ({
@@ -71,20 +71,12 @@ export function generateTokenInstanceFromSft(
     sharePercentage: pinnedMetadata.sharePercentage, // Unclear what this is yet.
     firstPaymentDate: undefined, // Unclear what this is yet.
     metadata: {
-      createdAt: (() => {
-        const timestamp = Number(sft.deployTimestamp);
-        if (isNaN(timestamp) || timestamp <= 0) {
-          return new Date().toISOString() as ISODateTimeString;
-        }
-        return new Date(timestamp * 1000).toISOString() as ISODateTimeString;
-      })(),
-      updatedAt: (() => {
-        const timestamp = Number(sft.deployTimestamp);
-        if (isNaN(timestamp) || timestamp <= 0) {
-          return new Date().toISOString() as ISODateTimeString;
-        }
-        return new Date(timestamp * 1000).toISOString() as ISODateTimeString;
-      })(),
+      createdAt: new Date(
+        Number(sft.deployTimestamp) * 1000,
+      ).toISOString() as ISODateTimeString,
+      updatedAt: new Date(
+        Number(sft.deployTimestamp) * 1000,
+      ).toISOString() as ISODateTimeString,
     },
   };
 
@@ -142,20 +134,8 @@ export function generateTokenMetadataInstanceFromSft(
     payoutData: pinnedMetadata.payoutData || [],
     asset: pinnedMetadata.asset,
     metadata: pinnedMetadata.metadata || {
-      createdAt: (() => {
-        const timestamp = Number(sft.deployTimestamp);
-        if (isNaN(timestamp) || timestamp <= 0) {
-          return new Date().toISOString();
-        }
-        return new Date(timestamp * 1000).toISOString();
-      })(),
-      updatedAt: (() => {
-        const timestamp = Number(sft.deployTimestamp);
-        if (isNaN(timestamp) || timestamp <= 0) {
-          return new Date().toISOString();
-        }
-        return new Date(timestamp * 1000).toISOString();
-      })(),
+      createdAt: new Date(Number(sft.deployTimestamp) * 1000).toISOString(),
+      updatedAt: new Date(Number(sft.deployTimestamp) * 1000).toISOString(),
     },
   };
 
@@ -315,20 +295,12 @@ export function generateAssetInstanceFromSftMeta(
       hseMetrics: { incidentFreeDays: 0, lastIncidentDate: new Date().toISOString(), safetyRating: "Unknown" }
     },
     metadata: {
-      createdAt: (() => {
-        const timestamp = Number(sft.deployTimestamp);
-        if (isNaN(timestamp) || timestamp <= 0) {
-          return new Date().toISOString() as ISODateTimeString;
-        }
-        return new Date(timestamp * 1000).toISOString() as ISODateTimeString;
-      })(),
-      updatedAt: (() => {
-        const timestamp = Number(sft.deployTimestamp);
-        if (isNaN(timestamp) || timestamp <= 0) {
-          return new Date().toISOString() as ISODateTimeString;
-        }
-        return new Date(timestamp * 1000).toISOString() as ISODateTimeString;
-      })(),
+      createdAt: new Date(
+        Number(sft.deployTimestamp) * 1000,
+      ).toISOString() as ISODateTimeString,
+      updatedAt: new Date(
+        Number(sft.deployTimestamp) * 1000,
+      ).toISOString() as ISODateTimeString,
     },
   };
 

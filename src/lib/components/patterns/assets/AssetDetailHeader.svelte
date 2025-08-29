@@ -178,18 +178,15 @@
 			/>
 			<StatsCard
 				title="Last Revenue"
-				value={(() => {
-					const lastReport = asset?.monthlyReports?.[asset.monthlyReports.length - 1];
-					return lastReport?.netIncome !== undefined && lastReport.netIncome > 0
-						? formatCurrency(lastReport.netIncome)
-						: 'N/A';
-				})()}
-				subtitle={(() => {
-					const lastReport = asset?.monthlyReports?.[asset.monthlyReports.length - 1];
-					return lastReport?.netIncome !== undefined && lastReport.netIncome > 0 && lastReport.month
-						? new Date(lastReport.month + '-01').toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
-						: '';
-				})()}
+				value={asset?.monthlyReports?.[asset.monthlyReports.length - 1]?.netIncome && asset.monthlyReports[asset.monthlyReports.length - 1].netIncome > 0
+					? formatCurrency(asset.monthlyReports[asset.monthlyReports.length - 1].netIncome)
+					: 'N/A'}
+				subtitle={asset?.monthlyReports?.[asset.monthlyReports.length - 1]?.netIncome && asset.monthlyReports[asset.monthlyReports.length - 1].netIncome > 0
+					? (() => {
+						const date = new Date(asset.monthlyReports[asset.monthlyReports.length - 1].month + '-01');
+						return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+					})()
+					: ''}
 				size="small"
 			/>
 			<StatsCard
@@ -197,7 +194,8 @@
 				value={tokenCount.toString()}
 				subtitle="Token releases"
 				size="small"
-				on:click={onTokenSectionClick || (() => {})}
+				clickable={!!onTokenSectionClick}
+				on:click={onTokenSectionClick}
 			/>
 		</div>
 	</div>
