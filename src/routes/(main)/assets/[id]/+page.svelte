@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { useTokenService } from '$lib/services';
 	import { sftMetadata, sfts } from '$lib/stores';
 	import type { Asset, Token } from '$lib/types/uiTypes';
 	import { Card, CardContent, PrimaryButton, SecondaryButton, Chart, CollapsibleSection } from '$lib/components/components';
@@ -42,10 +41,25 @@
 	const assetDetailState = assetDetailComposable.state;
 	const loadAssetData = assetDetailComposable.loadAssetData;
 	
+	// Track if we've initiated loading for the current asset
+	let hasInitiatedLoad = false;
+	
 	// Load data when asset ID changes and SFT data is available
-	$: if (assetId && $sftMetadata && $sfts) {
+	// The composable now handles duplicate load prevention internally
+	$: if (assetId && $sftMetadata && $sfts && !hasInitiatedLoad) {
+		console.log(`[AssetDetailPage] Loading data for asset: ${assetId}`);
+		hasInitiatedLoad = true;
 		loadAssetData(assetId);
 	}
+	
+	// Reset when asset ID changes
+	$: if (assetId) {
+		const previousAssetId = loadedAssetId;
+		if (previousAssetId && previousAssetId !== assetId) {
+			hasInitiatedLoad = false;
+		}
+	}
+	let loadedAssetId = assetId;
 	const { exportProductionData: exportDataFunc, exportPaymentHistory } = useDataExport();
 	const { state: emailState, setEmail, submitEmail } = useEmailNotification();
 	

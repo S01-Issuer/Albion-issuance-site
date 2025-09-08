@@ -1,0 +1,167 @@
+/**
+ * SFT Repository - handles all SFT-related data fetching
+ */
+
+import { executeGraphQL } from "../clients/cachedGraphqlClient";
+import { 
+  BASE_SFT_SUBGRAPH_URL, 
+  BASE_METADATA_SUBGRAPH_URL, 
+  getEnergyFields,
+  PRODUCTION_METABOARD_ADMIN,
+  DEVELOPMENT_METABOARD_ADMIN 
+} from "$lib/network";
+import { env as publicEnv } from '$env/dynamic/public';
+import type {
+  GetSftsResponse,
+  GetMetadataResponse,
+  GetDepositsResponse,
+  OffchainAssetReceiptVault,
+  MetaV1S,
+  DepositWithReceipt
+} from "$lib/types/graphql";
+
+// Use environment variable to determine which metaboard admin to use
+const PUBLIC_METABOARD_ADMIN = publicEnv.PUBLIC_METABOARD_ADMIN || DEVELOPMENT_METABOARD_ADMIN;
+
+// Get the correct energy fields based on the metaboard admin
+const ENERGY_FIELDS = getEnergyFields(PUBLIC_METABOARD_ADMIN);
+
+console.log(`[SftRepository] METABOARD_ADMIN is set to: ${PUBLIC_METABOARD_ADMIN}`);
+
+export class SftRepository {
+  /**
+   * Fetch all SFTs from the subgraph
+   */
+  async getAllSfts(): Promise<OffchainAssetReceiptVault[]> {
+    const query = `
+      query GetAllSfts {
+        offchainAssetReceiptVaults {
+          id
+          totalShares
+          address
+          name
+          symbol
+          deployTimestamp
+          activeAuthorizer { address }
+          tokenHolders { address balance }
+        }
+      }
+    `;
+
+    try {
+      const data = await executeGraphQL<GetSftsResponse>(
+        BASE_SFT_SUBGRAPH_URL,
+        query
+      );
+
+      if (!data || !data.offchainAssetReceiptVaults) {
+        console.error('[SftRepository] No data returned from subgraph');
+        return [];
+      }
+
+      return data.offchainAssetReceiptVaults;
+    } catch (error) {
+      console.error('[SftRepository] Error fetching SFTs:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch SFT metadata from the metadata subgraph
+   */
+  async getSftMetadata(): Promise<MetaV1S[]> {
+    // Extract all SFT addresses from ENERGY_FIELDS
+    const sftAddresses = ENERGY_FIELDS.flatMap((field) =>
+      field.sftTokens.map((token) => token.address)
+    );
+
+    // Create the subjects array for the GraphQL query
+    const subjects = sftAddresses.map(
+      (address) => `"0x000000000000000000000000${address.slice(2)}"`
+    );
+
+    const query = `
+      query GetSftMetadata {
+        metaV1S(
+          where: {
+            subject_in: [${subjects.join(",")}],
+            sender: "${PUBLIC_METABOARD_ADMIN.toLowerCase()}"
+          },
+          orderBy: transaction__timestamp
+          orderDirection: desc
+          first: ${subjects.length}
+        ) {
+          id
+          meta
+          sender
+          subject
+          metaHash
+        }
+      }
+    `;
+
+    try {
+      const data = await executeGraphQL<GetMetadataResponse>(
+        BASE_METADATA_SUBGRAPH_URL,
+        query
+      );
+      
+      if (!data || !data.metaV1S) {
+        console.error('[SftRepository] No metadata returned from subgraph');
+        return [];
+      }
+      
+      return data.metaV1S;
+    } catch (error) {
+      console.error("Error fetching SFT metadata:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch deposits for a specific owner address
+   */
+  async getDepositsForOwner(ownerAddress: string): Promise<DepositWithReceipt[]> {
+    if (!ownerAddress) return [];
+
+    const sftAddresses = ENERGY_FIELDS.flatMap((field) =>
+      field.sftTokens.map((token) => token.address)
+    );
+
+    const query = `
+      query GetDepositsForOwner($owner: String!, $sftIds: [String!]!) {
+        depositWithReceipts(
+          where: {
+            and: [
+              { caller_: { address: $owner } }
+              { offchainAssetReceiptVault_: { id_in: $sftIds } }
+            ]
+          }
+        ) {
+          id
+          caller { address }
+          amount
+          offchainAssetReceiptVault { id }
+        }
+      }
+    `;
+
+    try {
+      const data = await executeGraphQL<GetDepositsResponse>(
+        BASE_SFT_SUBGRAPH_URL,
+        query,
+        {
+          owner: ownerAddress.toLowerCase(),
+          sftIds: sftAddresses.map(s => s.toLowerCase())
+        }
+      );
+      return data.depositWithReceipts || [];
+    } catch (error) {
+      console.error("Error fetching deposits:", error);
+      return [];
+    }
+  }
+}
+
+// Export singleton instance
+export const sftRepository = new SftRepository();

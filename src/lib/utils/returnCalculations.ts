@@ -86,6 +86,7 @@ export function calculateTokenReturns(
   onChainMintedSupply?: string,
 ): TokenReturns {
   if (!asset.plannedProduction || !token.sharePercentage) {
+    console.log(`[Returns] Missing data for ${token.symbol}: plannedProduction=${!!asset.plannedProduction}, sharePercentage=${token.sharePercentage}`);
     return {
       baseReturn: 0,
       bonusReturn: 0,
@@ -97,6 +98,17 @@ export function calculateTokenReturns(
   const { plannedProduction } = asset;
   const { projections, oilPriceAssumption } = plannedProduction;
   const sharePercentage = token.sharePercentage / 100; // Convert to decimal
+  
+  console.log(`[Returns] Token ${token.symbol}: projections length = ${projections?.length}, oilPriceAssumption = ${oilPriceAssumption}`);
+  if (!projections || projections.length === 0) {
+    console.log(`[Returns] No projections for ${token.symbol}`);
+    return {
+      baseReturn: 0,
+      bonusReturn: 0,
+      impliedBarrelsPerToken: 0,
+      breakEvenOilPrice: 0,
+    };
+  }
 
   // Get pricing adjustments from asset technical data
   const benchmarkPremium = asset.technical?.pricing?.benchmarkPremium 

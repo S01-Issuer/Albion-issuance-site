@@ -1,5 +1,9 @@
 // Minimal shim to satisfy SSR build; not used at runtime in prod
-export const AbiCoder = { defaultAbiCoder: { decode: () => [] } } as any;
+export const AbiCoder = { 
+  defaultAbiCoder: () => ({ 
+    decode: () => [] 
+  })
+} as any;
 export const ethers = {
   getBytes: (value: any) => {
     // Simple implementation for test purposes

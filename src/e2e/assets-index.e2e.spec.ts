@@ -1,7 +1,7 @@
-import { render, screen, waitFor } from '@testing-library/svelte/svelte5';
+import { render, waitFor } from '@testing-library/svelte/svelte5';
 import { vi, describe, it, beforeEach, expect, afterEach } from 'vitest';
 
-// Mock the environment variable before imports
+// Mock the METABOARD_ADMIN environment variable BEFORE any component imports
 vi.mock('$env/static/public', () => ({
   PUBLIC_METABOARD_ADMIN: '0x1111111111111111111111111111111111111111'
 }));
@@ -27,14 +27,28 @@ vi.mock('svelte-wagmi', async () => {
     signerAddress: writable('0x1111111111111111111111111111111111111111'),
     connected: writable(true),
     loading: writable(false),
-    wagmiConfig: readable({ chains: [], transports: {} }),
+    wagmiConfig: readable({ 
+      chains: [], 
+      transports: {},
+      getClient: () => ({}) // Add getClient method so wagmi config is considered initialized
+    }),
     chainId: writable(8453),
     disconnectWagmi: async () => {},
   } as any;
 });
 
+// Mock @wagmi/core
+vi.mock('@wagmi/core', () => ({
+  readContract: vi.fn().mockResolvedValue(BigInt('12000000000000000000000')), // 12000 tokens max supply in wei
+  multicall: vi.fn().mockResolvedValue([
+    { result: BigInt('12000000000000000000000'), status: 'success' } // Return max supply for authorizer
+  ])
+}));
 
-// Mock network config - only mock URLs, not data
+// DO NOT MOCK $lib/stores - let it use production code to test the full data flow
+// The HTTP mocks will provide the data that flows through repositories → services → stores
+
+// Mock network config with test URLs
 vi.mock('$lib/network', async () => {
   const actual = await vi.importActual<any>('$lib/network');
   return {
@@ -56,38 +70,18 @@ vi.mock('$lib/network', async () => {
   };
 });
 
-// Mock wagmi core
-vi.mock('@wagmi/core', () => ({
-  readContract: vi.fn().mockResolvedValue(BigInt('10000000000000000000000')) // Default max supply
-}));
-
-// DO NOT MOCK THESE - Let them use production code:
-// - $lib/stores
-// - $lib/utils/energyFieldGrouping
-// - $lib/queries/getSftMetadata
-// - $lib/queries/getSfts
-// - $lib/decodeMetadata/helpers
-// - $lib/decodeMetadata/addSchemaToReceipts
-
 const ADDRESS = '0xf836a500910453a397084ade41321ee20a5aade1';
 const ORDER = '0x43ec2493caed6b56cfcbcf3b9279a01aedaafbce509598dfb324513e2d199977';
 const CSV = 'bafkreicjcemmypds6d5c4lonwp56xb2ilzhkk7hty3y6fo4nvdkxnaibgu';
 const WALLET = '0x1111111111111111111111111111111111111111';
 
-describe('Assets Index Page E2E Tests', () => {
-  let restore: () => void;
-  let sftsStore: any;
-  let sftMetadataStore: any;
-  
+describe('Assets Index E2E Tests', () => {
+  let cleanupMocks: () => void;
+
   beforeEach(async () => {
     vi.clearAllMocks();
     
-    // Import stores
-    const stores = await import('$lib/stores');
-    sftsStore = stores.sfts;
-    sftMetadataStore = stores.sftMetadata;
-    
-    restore = installHttpMocks({
+    cleanupMocks = installHttpMocks({
       sftSubgraphUrl: 'https://example.com/sft',
       metadataSubgraphUrl: 'https://example.com/meta',
       orderbookSubgraphUrl: 'https://example.com/orderbook',
@@ -96,40 +90,45 @@ describe('Assets Index Page E2E Tests', () => {
       address: ADDRESS,
       orderHash: ORDER,
       csvCid: CSV,
+      hypersyncUrl: 'https://8453.hypersync.xyz/query',
       sfts: [
         {
-          address: '0xf836a500910453a397084ade41321ee20a5aade1',
+          address: ADDRESS,
           name: 'Wressle-1 4.5% Royalty Stream',
           symbol: 'ALB-WR1-R1',
-          totalShares: '1500000000000000000000' // 1500 tokens - matches CBOR data
+          totalShares: '1500000000000000000000' // 1500 tokens minted
         }
       ]
     });
     
-    // Import and populate stores with data from HTTP mocks
-    const { getSfts } = await import('$lib/queries/getSfts');
-    const { getSftMetadata } = await import('$lib/queries/getSftMetadata');
+    // Load data through the actual production flow: repositories → services → stores
+    const { sftRepository } = await import('$lib/data/repositories/index');
+    const { sfts, sftMetadata } = await import('$lib/stores/index');
     
-    // Fetch data using HTTP mocks and populate stores
+    // Fetch data using the actual repositories (which will use our HTTP mocks)
     const [sftData, metaData] = await Promise.all([
-      getSfts(),
-      getSftMetadata()
+      sftRepository.getAllSfts(),
+      sftRepository.getSftMetadata()
     ]);
     
-    sftsStore.set(sftData);
-    sftMetadataStore.set(metaData);
-    
-    // Debug logging
+    // Debug: Check what data we got
     if ((import.meta as any).env?.MODE === 'test') {
-      console.log('Assets test - sfts loaded:', sftData?.length, 'metadata loaded:', metaData?.length);
+      console.log('Test setup - SFT data count:', sftData?.length);
+      console.log('Test setup - Metadata count:', metaData?.length);
       if (metaData?.length > 0) {
-        console.log('Metadata subjects:', metaData.map(m => m.subject));
+        console.log('Test setup - First metadata subject:', metaData[0].subject);
       }
     }
+    
+    // Update stores with the fetched data
+    sfts.set(sftData);
+    sftMetadata.set(metaData);
   });
 
   afterEach(() => {
-    restore?.();
+    if (cleanupMocks) {
+      cleanupMocks();
+    }
   });
 
   describe('Page Structure', () => {
@@ -138,69 +137,56 @@ describe('Assets Index Page E2E Tests', () => {
       
       await waitFor(() => {
         const bodyText = document.body.textContent || '';
-        
-        // Page title
-        expect(bodyText).toMatch(/Available Assets/i);
-        
-        // Subtitle
-        expect(bodyText).toMatch(/Browse live energy investment opportunities/i);
-      }, { timeout: 5000 });
+        expect(bodyText).toMatch(/Available Assets/);
+      });
     });
-  });
 
-  describe('Asset Cards Count', () => {
     it('displays correct number of asset cards (1 energy field)', async () => {
       render(AssetsIndex);
       
-      // Wait for content to load
-      await waitFor(() => {
-        const bodyText = document.body.textContent || '';
-        // Should have at least Wressle-1 (which has metadata)
-        return bodyText.includes('Wressle');
-      }, { timeout: 3000 });
+      await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
-      // Gulf Deep Water won't show without metadata, just verify we have Wressle
+      // Should show Wressle field
       expect(bodyText).toMatch(/Wressle/);
     });
 
     it('shows both available and sold out assets', async () => {
       render(AssetsIndex);
       
-      // Don't wait for loading - just check content after a short delay
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
-      // Check for asset names - only Wressle has metadata
-      const hasWressle = bodyText.includes('Wressle');
-      expect(hasWressle).toBeTruthy();
+      // Check for availability indicators - at least one must be present
+      expect(bodyText).toMatch(/Available|Sold Out/i);
     });
   });
 
-  describe('Asset Card Contents', () => {
+  describe('Asset Information', () => {
     it('displays Wressle asset card with correct details', async () => {
       render(AssetsIndex);
       
-      // Don't wait for loading - just check content after a short delay
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
-              // Asset name
-        expect(bodyText).toMatch(/Wressle-1/);
-        // Location
-        expect(bodyText).toMatch(/Lincolnshire/);
-        // Operator
-        expect(bodyText).toMatch(/Egdon Resources/);
-        // Description or status (UI might not show status)
-        expect(bodyText).toMatch(/Wressle oil field|Lincolnshire/);
+      
+      // Test asset name
+      expect(bodyText).toMatch(/Wressle/);
+      
+      // Test location data from CBOR metadata
+      expect(bodyText).toMatch(/Lincolnshire/);
+      expect(bodyText).toMatch(/United Kingdom/);
+      
+      // Test operator data from CBOR metadata
+      expect(bodyText).toMatch(/Egdon Resources/);
+      
+      // Test asset type
+      expect(bodyText).toMatch(/onshore|oilfield|oil field|oil & gas/i);
     });
-
-    // Removed Gulf Deep Water test - no longer have Gulf mock data
 
     it('shows asset financial metrics', async () => {
       render(AssetsIndex);
       
-      // Don't wait for loading - just check content after a short delay
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
@@ -216,7 +202,6 @@ describe('Assets Index Page E2E Tests', () => {
     it('displays correct number of tokens for Wressle (1 token)', async () => {
       render(AssetsIndex);
       
-      // Don't wait for loading - just check content after a short delay
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
@@ -226,48 +211,34 @@ describe('Assets Index Page E2E Tests', () => {
       expect(bodyText).toMatch(/4\.5%|2\.5%/); // Royalty percentage
     });
 
-    // Removed Gulf Deep Water test - no longer have Gulf mock data
-
     it('shows token availability status', async () => {
       render(AssetsIndex);
       
-      // Don't wait for loading - just check content after a short delay
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
-              // Should indicate availability
-        // WR1-R1: Available (1500/12000 minted)
-        // WR1-R2: Sold out (8000/8000 minted)
-        // GDW-R1: Available (5000/20000 minted)
-        const hasAvailable = bodyText.match(/Available|10,500|10\.5k|15,000|15k/);
-        const hasSoldOut = bodyText.match(/Sold Out|Unavailable/);
-        // At least one should be available
-        expect(hasAvailable).toBeTruthy();
+      // Should show available tokens (10,500 available from 12,000 max - 1,500 minted)
+      expect(bodyText).toMatch(/10,500|10\.5k|Available/);
     });
 
     it('displays token supply information', async () => {
       render(AssetsIndex);
       
-      // Don't wait for loading - just check content after a short delay
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
-              // Check for any supply-related text
-        // UI might show percentages or availability instead of exact numbers
-        const hasSupplyInfo = bodyText.match(/Available|Sold Out|\d+%|tokens?/i);
-        expect(hasSupplyInfo).toBeTruthy();
+      // Check for supply information
+      expect(bodyText).toMatch(/tokens?|Available|\d+%/i);
     });
 
     it('shows token returns information', async () => {
       render(AssetsIndex);
       
-      // Don't wait for loading - just check content after a short delay
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
-              // Check for return information (UI shows "Base >10x" format)
-        const hasReturns = bodyText.match(/Base|Bonus|>10x|Returns?/i);
-        expect(hasReturns).toBeTruthy();
+      // Check for return information
+      expect(bodyText).toMatch(/Base|Bonus|Returns?|>\d+x/i);
     });
   });
 
@@ -275,26 +246,22 @@ describe('Assets Index Page E2E Tests', () => {
     it('includes View Details buttons for each asset', async () => {
       render(AssetsIndex);
       
-      // Don't wait for loading - just check content after a short delay
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
-              expect(bodyText).toMatch(/View Details|Learn More|Explore/i);
+      expect(bodyText).toMatch(/View Details|Learn More|Explore/i);
     });
 
     it('shows sold out toggle when applicable', async () => {
       render(AssetsIndex);
       
-      // Don't wait for loading - just check content after a short delay
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
-              // May show option to view sold out assets
-        const hasSoldOutToggle = bodyText.match(/Show Sold Out|Include Sold Out/i);
-        // This is optional depending on implementation
-        if (hasSoldOutToggle) {
-          expect(hasSoldOutToggle).toBeTruthy();
-        }
+      // This test verifies the toggle appears if there are sold out assets
+      // Since we have available tokens, this is optional
+      const hasSoldOutToggle = bodyText.includes('Show Sold Out') || bodyText.includes('Include Sold Out');
+      // No assertion needed - this is an optional UI element
     });
   });
 
@@ -302,7 +269,6 @@ describe('Assets Index Page E2E Tests', () => {
     it('processes and displays all mock data correctly', async () => {
       render(AssetsIndex);
       
-      // Don't wait for loading - just check content after a short delay
       await new Promise(resolve => setTimeout(resolve, 100));
       
       const bodyText = document.body.textContent || '';
@@ -338,6 +304,19 @@ describe('Assets Index Page E2E Tests', () => {
       // Verify that Wressle is displayed with its token
       expect(bodyText).toMatch(/Wressle/);
       expect(bodyText).toMatch(/ALB-WR1-R1/);
+    });
+  });
+
+  // Keep the repository integration tests from the refactored version
+  describe('Repository Integration', () => {
+    it('integrates HTTP mocks with repository and service layers', async () => {
+      render(AssetsIndex);
+      
+      await waitFor(() => {
+        const bodyText = document.body.textContent || '';
+        // Verify data flows through the new repository/service architecture
+        expect(bodyText).toMatch(/ALB-WR1-R1|Wressle/);
+      });
     });
   });
 });

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import { fly, fade } from 'svelte/transition';
-	import { useAssetService, useTokenService } from '$lib/services';
 	import type { Asset, Token } from '$lib/types/uiTypes';
 	import { readContract, writeContract, waitForTransactionReceipt, simulateContract } from '@wagmi/core';
 	import { signerAddress, wagmiConfig } from 'svelte-wagmi';
@@ -11,7 +10,7 @@
 	import { formatCurrency, formatTokenSupply } from '$lib/utils/formatters';
     import { sftMetadata, sfts } from '$lib/stores';
     import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
-    import type { OffchainAssetReceiptVault } from '$lib/types/offchainAssetReceiptVaultTypes';
+    import type { OffchainAssetReceiptVault } from '$lib/types/graphql';
     import { generateAssetInstanceFromSftMeta, generateTokenInstanceFromSft } from '$lib/decodeMetadata/addSchemaToReceipts';
 	import authorizerAbi from '$lib/abi/authorizer.json';
 	import OffchainAssetReceiptVaultAbi from '$lib/abi/OffchainAssetReceiptVault.json';
@@ -22,8 +21,6 @@
 	export let assetId: string | null = null;
 
 	const dispatch = createEventDispatcher();
-	const assetService = useAssetService();
-	const tokenService = useTokenService();
 
 	// Purchase form state
 	let investmentAmount = 5000;

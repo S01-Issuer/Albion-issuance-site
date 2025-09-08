@@ -1,18 +1,12 @@
 <script lang="ts">
-	import { createEventDispatcher, onMount, onDestroy } from 'svelte';
-	import { useAssetService, useTokenService } from '$lib/services';
-	import type { Token, Asset } from '$lib/types/uiTypes';
+	import { createEventDispatcher, onDestroy } from 'svelte';
+	import { useCatalogService } from '$lib/services';
+	import type { Asset } from '$lib/types/uiTypes';
 	import { PrimaryButton, SecondaryButton, FormattedNumber, FormattedReturn } from '$lib/components/components';
 	import { sftMetadata, sfts } from '$lib/stores';
 	import { formatCurrency, formatTokenSupply, formatSmartReturn, formatSmartNumber } from '$lib/utils/formatters';
-	import { meetsSupplyThreshold, formatSupplyAmount, getAvailableSupplyBigInt } from '$lib/utils/tokenSupplyUtils';
-    import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
-	import { readContract } from '@wagmi/core';
-	import { signerAddress, wagmiConfig, chainId } from 'svelte-wagmi';
-	import type { Hex } from 'viem';
-    import { generateAssetInstanceFromSftMeta, generateTokenInstanceFromSft, generateTokenMetadataInstanceFromSft } from '$lib/decodeMetadata/addSchemaToReceipts';
+	import { formatSupplyAmount, getAvailableSupplyBigInt } from '$lib/utils/tokenSupplyUtils';
     import { getTokenReturns } from '$lib/utils';
-	import authorizerAbi from '$lib/abi/authorizer.json';
     import type { TokenMetadata } from '$lib/types/MetaboardTypes';
     import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 
@@ -20,8 +14,7 @@
 	export let autoPlayInterval = 5000;
 	
 	const dispatch = createEventDispatcher();
-	const assetService = useAssetService();
-	const tokenService = useTokenService();
+	const catalogService = useCatalogService();
 
 	let currentIndex = 0;
 	let featuredTokensWithAssets: Array<{ token: TokenMetadata; asset: Asset }> = [];
@@ -35,45 +28,57 @@
 
 	// Reactive statement to trigger loading when data changes
 	$: if($sfts && $sftMetadata && $sfts.length > 0 && $sftMetadata.length > 0) {
-		loadFeaturedTokensFromSfts();
+		loadFeaturedTokensFromCatalog();
 	}
 
-	async function loadFeaturedTokensFromSfts() {
+	async function loadFeaturedTokensFromCatalog() {
 		try {
 			loading = true;
 			error = null;
-			if($sftMetadata && $sfts) {
-				const deocdedMeta = $sftMetadata.map((metaV1) => decodeSftInformation(metaV1));
-				for(const sft of $sfts) {
-					const pinnedMetadata: any = deocdedMeta.find(
-						(meta) => meta?.contractAddress?.toLowerCase() === `0x000000000000000000000000${sft.id.slice(2).toLowerCase()}`
-					);
-					if(pinnedMetadata) {
-						const sftMaxSharesSupply = await readContract($wagmiConfig, {
-							abi: authorizerAbi,
-							address: sft.activeAuthorizer?.address as Hex,
-							functionName: 'maxSharesSupply',
-							args: []
-						}) as bigint;
-						const tokenInstance = generateTokenMetadataInstanceFromSft(sft, pinnedMetadata, sftMaxSharesSupply.toString());
-						const assetInstance = generateAssetInstanceFromSftMeta(sft, pinnedMetadata);
-						
-						// Only add tokens with available supply
-						const availableSupply = getAvailableSupplyBigInt(tokenInstance);
-						if (availableSupply > 0n) {
-							featuredTokensWithAssets.push({ token: tokenInstance, asset: assetInstance });
-						}
+			featuredTokensWithAssets = []; // Reset the array
+			
+			// Build catalog with all tokens and assets
+			await catalogService.build();
+			const catalog = catalogService.getCatalog();
+			
+			if (!catalog) {
+				throw new Error('Failed to build catalog');
+			}
+			
+			// Get all tokens and their corresponding assets
+			const allTokens = Object.values(catalog.tokens);
+			console.log(`[Carousel] Processing ${allTokens.length} tokens`);
+			
+			for (const token of allTokens) {
+				// Find corresponding asset
+				const assetKey = Object.keys(catalog.assets).find(key => {
+					const asset = catalog.assets[key];
+					return asset.tokenContracts?.includes(token.contractAddress);
+				});
+				
+				if (assetKey) {
+					const asset = catalog.assets[assetKey];
+					// Only add tokens with available supply
+					const availableSupply = getAvailableSupplyBigInt(token);
+					console.log(`[Carousel] Token ${token.symbol}: has asset ${assetKey}, available supply = ${availableSupply}`);
+					if (availableSupply > 0n) {
+						featuredTokensWithAssets.push({ token, asset });
 					}
-				}
-								if (autoPlay && featuredTokensWithAssets.length > 1) {
-					startAutoPlay();
+				} else {
+					console.log(`[Carousel] Token ${token.symbol} (${token.contractAddress}): NO MATCHING ASSET FOUND`);
 				}
 			}
+			
+			if (autoPlay && featuredTokensWithAssets.length > 1) {
+				startAutoPlay();
+			}
+			
 			loading = false;
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load featured tokens';
-			console.error('Featured tokens loading error:', err);
 			loading = false;
+			// Set empty array to show "no tokens" message instead of spinner
+			featuredTokensWithAssets = [];
 		}
 	}
 
@@ -268,7 +273,7 @@
 	{:else if error}
 		<div class={errorStateClasses}>
 			<p>Error: {error}</p>
-			<button on:click={loadFeaturedTokensFromSfts} class={retryButtonClasses}>Retry</button>
+			<button on:click={loadFeaturedTokensFromCatalog} class={retryButtonClasses}>Retry</button>
 		</div>
 	{:else if featuredTokensWithAssets.length === 0}
 		<div class={emptyStateClasses}>
@@ -311,7 +316,7 @@
 				style="transform: translateX(-{currentIndex * 100}%)"
 			>
 				{#each featuredTokensWithAssets as item, index}
-					{@const calculatedReturns = getTokenReturns(item.asset, item.token, item.token.supply.mintedSupply)}
+					{@const calculatedReturns = getTokenReturns(item.asset, item.token)}
 					<div class="{carouselSlideClasses} {index === currentIndex ? activeSlideClasses : inactiveSlideClasses}">
 						<div class={bannerCardClasses}>
 							<!-- Token Section -->

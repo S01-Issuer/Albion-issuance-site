@@ -1,19 +1,17 @@
 <script lang="ts">
-	import { readContract } from '@wagmi/core';
-	import { wagmiConfig } from 'svelte-wagmi';
 	import { sfts, sftMetadata } from '$lib/stores';
 	import type { Asset } from '$lib/types/uiTypes';
 	import AssetCard from '$lib/components/patterns/assets/AssetCard.svelte';
 	import TokenPurchaseWidget from '$lib/components/patterns/TokenPurchaseWidget.svelte';
 	import { SecondaryButton, SectionTitle, Card, CardContent } from '$lib/components/components';
 	import { PageLayout, HeroSection } from '$lib/components/layout';
-    import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
-	import type { Hex } from 'viem';
-    import { generateAssetInstanceFromSftMeta, generateTokenMetadataInstanceFromSft } from '$lib/decodeMetadata/addSchemaToReceipts';
-	import authorizerAbi from '$lib/abi/authorizer.json';
-    import type { TokenMetadata } from '$lib/types/MetaboardTypes';
+	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import { groupSftsByEnergyField, type GroupedEnergyField } from '$lib/utils/energyFieldGrouping';
+	import { useCatalogService } from '$lib/services';
+	import { ENERGY_FIELDS } from '$lib/network';
 
+	// Track if initial load is done to prevent double loading
+	let hasInitialized = false;
 	let loading = true;
 	let showSoldOutAssets = false;
 	let featuredTokensWithAssets: Array<{ token: TokenMetadata; asset: Asset }> = [];
@@ -26,41 +24,44 @@
 	
 	async function loadTokenAndAssets() {
 		try {
-			loading = true;
+			// Don't set loading = true if we're initializing for the first time
+			// This prevents the double loading state
+			if (!hasInitialized) {
+				// Keep the initial loading = true
+			} else {
+				loading = true;
+			}
+			
 			if($sftMetadata && $sfts) {
-				const decodedMeta = $sftMetadata.map((metaV1) => decodeSftInformation(metaV1));
-				for(const sft of $sfts) {
-					const targetAddress = `0x000000000000000000000000${sft.id.slice(2).toLowerCase()}`;
-					const pinnedMetadata: any = decodedMeta.find(
-						(meta) => meta?.contractAddress?.toLowerCase() === targetAddress
-					);
-					if(pinnedMetadata) {
-	
-						const sftMaxSharesSupply = await readContract($wagmiConfig, {
-							abi: authorizerAbi,
-							address: sft.activeAuthorizer?.address as Hex,
-							functionName: 'maxSharesSupply',
-							args: []
-						}) as bigint;
-						
-						const tokenInstance = generateTokenMetadataInstanceFromSft(sft, pinnedMetadata, sftMaxSharesSupply.toString());
-						const assetInstance = generateAssetInstanceFromSftMeta(sft, pinnedMetadata);
-	
-						featuredTokensWithAssets.push({ token: tokenInstance, asset: assetInstance });
-					}
-				}
-				
-				// Group the tokens and assets by energy field
+				const catalog = useCatalogService();
+				await catalog.build();
+
+				const tokens = Object.values(catalog.getCatalog()?.tokens || {});
+				const assetsMap = catalog.getCatalog()?.assets || {};
+
+				featuredTokensWithAssets = tokens.map((t) => {
+					const field = ENERGY_FIELDS.find((f) => f.sftTokens.some(s => s.address.toLowerCase() === t.contractAddress.toLowerCase()));
+					const assetId = field
+						? field.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+						: '';
+					const asset = assetId ? assetsMap[assetId] : undefined;
+					return asset ? { token: t, asset } : null;
+				}).filter(Boolean) as Array<{ token: TokenMetadata; asset: Asset }>;
+
 				groupedEnergyFields = groupSftsByEnergyField(featuredTokensWithAssets);
+				hasInitialized = true;
 			}
 			loading = false;
 
 		} catch(err) {
 			console.error('Featured tokens loading error:', err);
 			loading = false;
+			hasInitialized = true;
 		}
 	}
-	$: if($sfts && $sftMetadata){
+	
+	// Only load when data is available and we haven't loaded yet
+	$: if($sfts && $sftMetadata && !hasInitialized){
 		loadTokenAndAssets();
 	}
 
@@ -185,4 +186,3 @@
 	on:purchaseSuccess={handlePurchaseSuccess}
 	on:close={handleWidgetClose}
 />
-
