@@ -47,15 +47,7 @@ export interface AssetTechnical {
   };
 }
 
-export interface AssetProduction {
-  current: string;
-  expectedRemainingProduction?: string; // Optional - calculated from planned production
-  status: "funding" | "producing" | "completed";
-  units?: {
-    production: string;
-    revenue: string;
-  };
-}
+// Removed AssetProduction: current production is derived from monthlyReports; status is top-level
 
 // AssetTerms moved to transformations.ts to avoid duplication
 // Use Display.AssetTerms from transformations for UI components
@@ -87,11 +79,6 @@ export interface PlannedProduction {
 }
 
 export interface OperationalMetrics {
-  dailyProduction: {
-    current: number;
-    target?: number;
-    unit: string;
-  };
   uptime: {
     percentage: number;
     period: string;
@@ -114,10 +101,10 @@ export interface Asset {
   coverImage: string;
   images: GalleryImage[];
   galleryImages?: GalleryImage[]; // Optional for compatibility
+  status: "funding" | "producing" | "completed";
   location: AssetLocation;
   operator: AssetOperator;
   technical: AssetTechnical;
-  production: AssetProduction;
   assetTerms?: AssetTerms;
   terms?: AssetTerms; // Alias for assetTerms
   pricing?: {
@@ -286,6 +273,7 @@ export interface AssetTemplate {
   id: string; // Unique identifier (kebab-case)
   name: string; // Display name
   description: string; // Detailed description
+  status: "funding" | "producing" | "completed";
   location: {
     state: string;
     county: string;
@@ -314,14 +302,6 @@ export interface AssetTemplate {
     };
   };
   assetTerms: AssetTerms;
-  production: {
-    current: string;
-    status: "funding" | "producing" | "completed";
-    units?: {
-      production: string;
-      revenue: string;
-    };
-  };
   tokenContracts: string[]; // Contract addresses of associated tokens
   monthlyReports: MonthlyReport[]; // Historical performance data
   plannedProduction?: PlannedProduction;

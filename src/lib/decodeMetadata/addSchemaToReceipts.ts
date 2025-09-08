@@ -2,6 +2,7 @@ import { MAGIC_NUMBERS } from "./helpers";
 import { cborDecode, bytesToMeta } from "./helpers";
 import type { OffchainAssetReceiptVault } from "$lib/types/graphql";
 import type { Asset, PlannedProduction, Token } from "$lib/types/uiTypes";
+import { mergeProductionHistory } from "$lib/utils/productionMerge";
 import type { ISODateTimeString } from "$lib/types/sharedTypes";
 import { PINATA_GATEWAY } from "$lib/network";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
@@ -140,7 +141,10 @@ export function generateTokenMetadataInstanceFromSft(
       mintedSupply: sft.totalShares.toString(),
     },
     payoutData: pinnedMetadata.payoutData || [],
-    asset: pinnedMetadata.asset,
+    asset: {
+      ...(pinnedMetadata.asset || {}),
+      status: pinnedMetadata.asset?.production?.status || 'producing',
+    },
     metadata: pinnedMetadata.metadata || {
       createdAt: (() => {
         const timestamp = Number(sft.deployTimestamp);
@@ -190,9 +194,7 @@ export function generateAssetInstanceFromSftMeta(
     throw new Error("Missing or invalid technical data");
   }
   
-  if (!asset.production || typeof asset.production !== 'object') {
-    throw new Error("Missing or invalid production data");
-  }
+  // production object is optional; we derive current production from merged history and carry status separately
   
   if (!asset.assetTerms || typeof asset.assetTerms !== 'object') {
     throw new Error("Missing or invalid assetTerms data");
@@ -204,6 +206,13 @@ export function generateAssetInstanceFromSftMeta(
     oilPriceAssumptionCurrency: asset.plannedProduction?.oilPriceAssumptionCurrency || "USD",
     projections: asset.plannedProduction?.projections || [],
   };
+  // Build merged monthly reports first (historical + later receipts)
+  const monthlyReports: Asset["monthlyReports"] = mergeProductionHistory(
+    asset.historicalProduction,
+    asset.receiptsData,
+    pinnedMetadata?.payoutData,
+  );
+
   const assetInstance: Asset = {
     id: sft.id, // Use contract address as ID since we're not using assetId
     name: asset.assetName,
@@ -249,25 +258,8 @@ export function generateAssetInstanceFromSftMeta(
         transportCosts: (asset.technical.pricing?.transportCosts || 0).toString(),
       },
     },
-    production: {
-      current: (() => {
-        // Calculate current production from most recent historical production
-        if (asset.historicalProduction && asset.historicalProduction.length > 0) {
-          const sortedProduction = [...asset.historicalProduction].sort((a: any, b: any) => 
-            b.month.localeCompare(a.month)
-          );
-          const mostRecentProduction = sortedProduction[0];
-          return `${mostRecentProduction.production.toFixed(0)} BOE/month`;
-        }
-        // Fallback to the original value
-        return asset.production.current;
-      })(),
-      status: asset.production.status,
-      units: {
-        production: asset.production.units?.production || 0,
-        revenue: asset.production.units?.revenue || 0,
-      },
-    },
+    // production removed from UI Asset; use top-level status
+    status: asset.production?.status || 'producing',
     terms: {
       interestType: asset.assetTerms.interestType,
       amount: asset.assetTerms.amount,
@@ -279,39 +271,11 @@ export function generateAssetInstanceFromSftMeta(
       paymentFrequency: asset.assetTerms.paymentFrequencyDays,
     },
     tokenContracts: [sft.id],
-    monthlyReports: (() => {
-      // Try historicalProduction first (primary source of production data)
-      if (Array.isArray(asset.historicalProduction) && asset.historicalProduction.length > 0) {
-        return asset.historicalProduction.map(
-          (record: any) => ({
-            month: record?.month || '',
-            production: record?.production || 0, // Already in BOE
-            revenue: 0, // No revenue data in historicalProduction
-            expenses: 0, // No expense data in historicalProduction
-            netIncome: 0, // No net income data in historicalProduction
-            payoutPerToken: 0, // No payout data in historicalProduction
-          }),
-        );
-      }
-      // Fall back to receiptsData (legacy format with financial data)
-      else if (Array.isArray(asset.receiptsData) && asset.receiptsData.length > 0) {
-        return asset.receiptsData.map(
-          (report: any, i: number) => ({
-            month: report?.month || `2024-${String(i + 1).padStart(2, '0')}`, // YYYY-MM format
-            production: report?.assetData?.production || 0, // barrels
-            revenue: report?.assetData?.revenue || 0, // USD
-            expenses: report?.assetData?.expenses || 0, // USD
-            netIncome: report?.assetData?.netIncome || 0, // USD
-            payoutPerToken: pinnedMetadata.payoutData?.[i]?.tokenPayout?.payoutPerToken || 0, // USD per token (optional for royalty assets)
-          }),
-        );
-      }
-      return [];
-    })(),
+    monthlyReports,
     plannedProduction: assetPlannedProduction,
     operationalMetrics: asset.operationalMetrics || {
+      // Keep UI defaults as before
       uptime: { percentage: 0, unit: "%", period: "unknown" },
-      dailyProduction: { current: 0, target: 0, unit: "BOE" },
       hseMetrics: { incidentFreeDays: 0, lastIncidentDate: new Date().toISOString(), safetyRating: "Unknown" }
     },
     metadata: {
