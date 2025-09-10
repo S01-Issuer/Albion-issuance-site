@@ -24,7 +24,7 @@ Albion royalty token platform frontend built with Svelte. This application enabl
 
 _Commands will be updated as the project structure is established. Typical Svelte patterns:_
 
-- `npm install` - Install dependencies
+- `npm ci` - Install dependencies
 - `npm run dev` - Start development server
 - `npm run build` - Build for production
 - `npm run preview` - Preview production build

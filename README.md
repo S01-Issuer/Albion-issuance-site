@@ -15,7 +15,7 @@ Frontend application for the Albion royalty token platform built with SvelteKit.
 1. **Install dependencies**
 
    ```bash
-   npm install
+   npm ci
    ```
 
 2. **Start development server**
