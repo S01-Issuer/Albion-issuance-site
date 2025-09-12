@@ -50,22 +50,32 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
       await catalog.build();
 
       // Find field by ID and collect tokens from catalog
-      const field = ENERGY_FIELDS.find((f) => (
-        f.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') === id
-      ));
+      const field = ENERGY_FIELDS.find(
+        (f) =>
+          f.name
+            .toLowerCase()
+            .replace(/\s+/g, "-")
+            .replace(/[^a-z0-9-]/g, "") === id,
+      );
       if (!field) throw new Error("Energy field not found");
 
       const catalogData = catalog.getCatalog();
       if (!catalogData) throw new Error("Failed to build catalog");
-      
+
       const allTokens = Object.values(catalogData.tokens || {});
       const fieldTokens: TokenMetadata[] = allTokens.filter((t) =>
-        field.sftTokens.some((s) => s.address.toLowerCase() === t.contractAddress.toLowerCase())
+        field.sftTokens.some(
+          (s) => s.address.toLowerCase() === t.contractAddress.toLowerCase(),
+        ),
       );
-      const assetId = field.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+      const assetId = field.name
+        .toLowerCase()
+        .replace(/\s+/g, "-")
+        .replace(/[^a-z0-9-]/g, "");
       const asset = catalogData.assets[assetId] || null;
 
-      if (fieldTokens.length === 0) throw new Error("No tokens found for this energy field");
+      if (fieldTokens.length === 0)
+        throw new Error("No tokens found for this energy field");
       if (!asset) throw new Error("Asset data not found");
 
       state.update((s) => ({

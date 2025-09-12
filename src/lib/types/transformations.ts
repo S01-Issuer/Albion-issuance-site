@@ -6,7 +6,7 @@
  */
 
 import type { TokenMetadata } from "./MetaboardTypes";
-import type { Token as UIToken } from './uiTypes';
+import type { Token as UIToken } from "./uiTypes";
 
 export class TypeTransformations {
   /**

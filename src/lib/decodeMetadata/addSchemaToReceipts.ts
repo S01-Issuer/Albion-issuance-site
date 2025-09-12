@@ -101,32 +101,48 @@ export function generateTokenMetadataInstanceFromSft(
   if (!pinnedMetadata) {
     throw new Error("Missing pinnedMetadata");
   }
-  
-  if (!pinnedMetadata.asset || typeof pinnedMetadata.asset !== 'object') {
+
+  if (!pinnedMetadata.asset || typeof pinnedMetadata.asset !== "object") {
     throw new Error("Missing or invalid asset data");
   }
-  
+
   // Validate critical required fields - throw if missing
-  if (!pinnedMetadata.releaseName || typeof pinnedMetadata.releaseName !== 'string') {
+  if (
+    !pinnedMetadata.releaseName ||
+    typeof pinnedMetadata.releaseName !== "string"
+  ) {
     throw new Error("Missing or invalid releaseName");
   }
-  
-  if (!pinnedMetadata.tokenType || typeof pinnedMetadata.tokenType !== 'string') {
+
+  if (
+    !pinnedMetadata.tokenType ||
+    typeof pinnedMetadata.tokenType !== "string"
+  ) {
     throw new Error("Missing or invalid tokenType");
   }
-  
-  if (typeof pinnedMetadata.sharePercentage !== 'number' || pinnedMetadata.sharePercentage < 0 || pinnedMetadata.sharePercentage > 100) {
+
+  if (
+    typeof pinnedMetadata.sharePercentage !== "number" ||
+    pinnedMetadata.sharePercentage < 0 ||
+    pinnedMetadata.sharePercentage > 100
+  ) {
     throw new Error("Missing or invalid sharePercentage");
   }
-  
-  if (!pinnedMetadata.firstPaymentDate || typeof pinnedMetadata.firstPaymentDate !== 'string') {
+
+  if (
+    !pinnedMetadata.firstPaymentDate ||
+    typeof pinnedMetadata.firstPaymentDate !== "string"
+  ) {
     throw new Error("Missing or invalid firstPaymentDate");
   }
-  
-  if (pinnedMetadata.payoutData !== undefined && !Array.isArray(pinnedMetadata.payoutData)) {
+
+  if (
+    pinnedMetadata.payoutData !== undefined &&
+    !Array.isArray(pinnedMetadata.payoutData)
+  ) {
     throw new Error("Invalid payoutData - must be an array");
   }
-  
+
   // Only create token instance if all validations pass
   const tokenInstance: TokenMetadata = {
     contractAddress: sft.id,
@@ -135,7 +151,10 @@ export function generateTokenMetadataInstanceFromSft(
     tokenType: pinnedMetadata.tokenType,
     firstPaymentDate: pinnedMetadata.firstPaymentDate,
     sharePercentage: pinnedMetadata.sharePercentage,
-    decimals: typeof pinnedMetadata.decimals === 'number' ? pinnedMetadata.decimals : 18,
+    decimals:
+      typeof pinnedMetadata.decimals === "number"
+        ? pinnedMetadata.decimals
+        : 18,
     supply: {
       maxSupply: sftMaxSharesSupply.toString(),
       mintedSupply: sft.totalShares.toString(),
@@ -143,7 +162,7 @@ export function generateTokenMetadataInstanceFromSft(
     payoutData: pinnedMetadata.payoutData || [],
     asset: {
       ...(pinnedMetadata.asset || {}),
-      status: pinnedMetadata.asset?.production?.status || 'producing',
+      status: pinnedMetadata.asset?.production?.status || "producing",
     },
     metadata: pinnedMetadata.metadata || {
       createdAt: (() => {
@@ -174,36 +193,37 @@ export function generateAssetInstanceFromSftMeta(
   if (!pinnedMetadata || !pinnedMetadata.asset) {
     throw new Error("Missing or invalid asset data in metadata");
   }
-  
+
   const asset = pinnedMetadata.asset;
-  
+
   // Validate critical asset fields
-  if (!asset.assetName || typeof asset.assetName !== 'string') {
+  if (!asset.assetName || typeof asset.assetName !== "string") {
     throw new Error("Missing or invalid assetName");
   }
-  
-  if (!asset.location || typeof asset.location !== 'object') {
+
+  if (!asset.location || typeof asset.location !== "object") {
     throw new Error("Missing or invalid location data");
   }
-  
-  if (!asset.operator || typeof asset.operator !== 'object') {
+
+  if (!asset.operator || typeof asset.operator !== "object") {
     throw new Error("Missing or invalid operator data");
   }
-  
-  if (!asset.technical || typeof asset.technical !== 'object') {
+
+  if (!asset.technical || typeof asset.technical !== "object") {
     throw new Error("Missing or invalid technical data");
   }
-  
+
   // production object is optional; we derive current production from merged history and carry status separately
-  
-  if (!asset.assetTerms || typeof asset.assetTerms !== 'object') {
+
+  if (!asset.assetTerms || typeof asset.assetTerms !== "object") {
     throw new Error("Missing or invalid assetTerms data");
   }
-  
+
   // Safely access nested properties with defaults
   const assetPlannedProduction: PlannedProduction = {
     oilPriceAssumption: asset.plannedProduction?.oilPriceAssumption || 0,
-    oilPriceAssumptionCurrency: asset.plannedProduction?.oilPriceAssumptionCurrency || "USD",
+    oilPriceAssumptionCurrency:
+      asset.plannedProduction?.oilPriceAssumptionCurrency || "USD",
     projections: asset.plannedProduction?.projections || [],
   };
   // Build merged monthly reports first (historical + later receipts)
@@ -218,16 +238,20 @@ export function generateAssetInstanceFromSftMeta(
     name: asset.assetName,
     description: asset.description || "",
     coverImage: asset.coverImage ? `${PINATA_GATEWAY}/${asset.coverImage}` : "",
-    images: Array.isArray(asset.galleryImages) ? asset.galleryImages.map((image: any) => ({
-      title: image?.title || "",
-      url: image?.url ? `${PINATA_GATEWAY}/${image.url}` : "",
-      caption: image?.caption || "",
-    })) : [],
-    galleryImages: Array.isArray(asset.galleryImages) ? asset.galleryImages.map((image: any) => ({
-      title: image?.title || "",
-      url: image?.url ? `${PINATA_GATEWAY}/${image.url}` : "",
-      caption: image?.caption || "",
-    })) : [],
+    images: Array.isArray(asset.galleryImages)
+      ? asset.galleryImages.map((image: any) => ({
+          title: image?.title || "",
+          url: image?.url ? `${PINATA_GATEWAY}/${image.url}` : "",
+          caption: image?.caption || "",
+        }))
+      : [],
+    galleryImages: Array.isArray(asset.galleryImages)
+      ? asset.galleryImages.map((image: any) => ({
+          title: image?.title || "",
+          url: image?.url ? `${PINATA_GATEWAY}/${image.url}` : "",
+          caption: image?.caption || "",
+        }))
+      : [],
     location: {
       state: asset.location.state,
       county: asset.location.county,
@@ -254,12 +278,16 @@ export function generateAssetInstanceFromSftMeta(
       expectedEndDate: asset.technical.expectedEndDate,
       crudeBenchmark: asset.technical.crudeBenchmark,
       pricing: {
-        benchmarkPremium: (asset.technical.pricing?.benchmarkPremium || 0).toString(),
-        transportCosts: (asset.technical.pricing?.transportCosts || 0).toString(),
+        benchmarkPremium: (
+          asset.technical.pricing?.benchmarkPremium || 0
+        ).toString(),
+        transportCosts: (
+          asset.technical.pricing?.transportCosts || 0
+        ).toString(),
       },
     },
     // production removed from UI Asset; use top-level status
-    status: asset.production?.status || 'producing',
+    status: asset.production?.status || "producing",
     terms: {
       interestType: asset.assetTerms.interestType,
       amount: asset.assetTerms.amount,
@@ -276,7 +304,11 @@ export function generateAssetInstanceFromSftMeta(
     operationalMetrics: asset.operationalMetrics || {
       // Keep UI defaults as before
       uptime: { percentage: 0, unit: "%", period: "unknown" },
-      hseMetrics: { incidentFreeDays: 0, lastIncidentDate: new Date().toISOString(), safetyRating: "Unknown" }
+      hseMetrics: {
+        incidentFreeDays: 0,
+        lastIncidentDate: new Date().toISOString(),
+        safetyRating: "Unknown",
+      },
     },
     metadata: {
       createdAt: (() => {

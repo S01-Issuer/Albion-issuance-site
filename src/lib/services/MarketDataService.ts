@@ -102,10 +102,10 @@ class MarketDataService {
     }
 
     // Debug logging
-    console.log(`Parsing ${data.name || 'commodity'} data:`, {
-      todayDate: new Date().toISOString().split('T')[0],
+    console.log(`Parsing ${data.name || "commodity"} data:`, {
+      todayDate: new Date().toISOString().split("T")[0],
       latestDataDate: data.data[0]?.date,
-      dataPoints: data.data.length
+      dataPoints: data.data.length,
     });
 
     const sortedData = data.data.sort(

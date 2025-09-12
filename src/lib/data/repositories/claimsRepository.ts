@@ -4,7 +4,11 @@
 
 import { executeGraphQL } from "../clients/cachedGraphqlClient";
 import { BASE_ORDERBOOK_SUBGRAPH_URL } from "$lib/network";
-import type { Trade, GetTradesResponse, GetOrdersResponse } from "$lib/types/graphql";
+import type {
+  Trade,
+  GetTradesResponse,
+  GetOrdersResponse,
+} from "$lib/types/graphql";
 
 export class ClaimsRepository {
   /**
@@ -24,7 +28,7 @@ export class ClaimsRepository {
    */
   async getTradesForClaims(
     orderHash: string,
-    ownerAddress: string
+    ownerAddress: string,
   ): Promise<Trade[]> {
     const cleanOrderHash = this.validateOrderHash(orderHash);
     if (!cleanOrderHash) return [];
@@ -55,8 +59,8 @@ export class ClaimsRepository {
         query,
         {
           orderHash: cleanOrderHash,
-          sender: ownerAddress.toLowerCase()
-        }
+          sender: ownerAddress.toLowerCase(),
+        },
       );
       return data?.trades || [];
     } catch (error) {
@@ -68,18 +72,20 @@ export class ClaimsRepository {
   /**
    * Get order details by hash
    */
-  async getOrderByHash(orderHash: string): Promise<Array<{ 
-    orderBytes: string; 
-    orderHash: string; 
-    orderbook: { id: string };
-    addEvents?: Array<{
-      transaction: {
-        id: string;
-        timestamp: string;
-        blockNumber: string;
-      }
-    }> 
-  }>> {
+  async getOrderByHash(orderHash: string): Promise<
+    Array<{
+      orderBytes: string;
+      orderHash: string;
+      orderbook: { id: string };
+      addEvents?: Array<{
+        transaction: {
+          id: string;
+          timestamp: string;
+          blockNumber: string;
+        };
+      }>;
+    }>
+  > {
     const cleanOrderHash = this.validateOrderHash(orderHash);
     if (!cleanOrderHash) return [];
 
@@ -104,7 +110,7 @@ export class ClaimsRepository {
       const data = await executeGraphQL<GetOrdersResponse>(
         BASE_ORDERBOOK_SUBGRAPH_URL,
         query,
-        { orderHash: cleanOrderHash }
+        { orderHash: cleanOrderHash },
       );
       return data?.orders || [];
     } catch (error) {
@@ -118,9 +124,8 @@ export class ClaimsRepository {
 export const claimsRepository = new ClaimsRepository();
 
 // Export convenience functions for backwards compatibility
-export const getTradesForClaims = (orderHash: string, ownerAddress: string) => 
+export const getTradesForClaims = (orderHash: string, ownerAddress: string) =>
   claimsRepository.getTradesForClaims(orderHash, ownerAddress);
 
-export const getOrderByHash = (orderHash: string) => 
+export const getOrderByHash = (orderHash: string) =>
   claimsRepository.getOrderByHash(orderHash);
-
