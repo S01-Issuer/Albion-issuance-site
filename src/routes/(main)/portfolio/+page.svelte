@@ -25,7 +25,7 @@
 	import { formatEther } from 'viem';
 	import { goto } from '$app/navigation';
 	import { useTooltip, useCardFlip } from '$lib/composables';
-	import { PINATA_GATEWAY } from '$lib/network';
+	import { getImageUrl } from '$lib/utils/imagePath';
 	import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
 	
 	// Tab state
@@ -481,7 +481,7 @@
 													<div class="flex items-start gap-3 lg:gap-4">
 														<div class="w-12 h-12 lg:w-14 lg:h-14 bg-light-gray rounded-lg overflow-hidden flex items-center justify-center flex-shrink-0">
 															{#if holding.asset?.coverImage}
-																<img src={`${PINATA_GATEWAY}/${holding.asset.coverImage}`} 
+																<img src={getImageUrl(holding.asset.coverImage)} 
 																	alt={holding.name} 
 																	class="w-full h-full object-cover" />
 															{:else}
