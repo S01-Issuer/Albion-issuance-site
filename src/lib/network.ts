@@ -148,5 +148,9 @@ export function getEnergyFields(metaboardAdmin: string): EnergyField[] {
     : DEV_ENERGY_FIELDS;
 }
 
-// For backward compatibility, export the dev fields as default
-export const ENERGY_FIELDS = DEV_ENERGY_FIELDS;
+// Export ENERGY_FIELDS based on the current PUBLIC_METABOARD_ADMIN env var
+// This keeps all consumers consistent (homepage stats, catalog, claims, etc.)
+import { env as publicEnv } from "$env/dynamic/public";
+export const ACTIVE_METABOARD_ADMIN =
+  publicEnv.PUBLIC_METABOARD_ADMIN || DEVELOPMENT_METABOARD_ADMIN;
+export const ENERGY_FIELDS = getEnergyFields(ACTIVE_METABOARD_ADMIN);

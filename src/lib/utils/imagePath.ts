@@ -1,20 +1,30 @@
+import { PINATA_GATEWAY } from "$lib/network";
+
+// Basic CID pattern: allow common prefixes (bafy..., Qm...)
+function looksLikeCid(input: string): boolean {
+  return /^bafy[\w]{20,}|^Qm[1-9A-HJ-NP-Za-km-z]{40,}/.test(input);
+}
+
 export function getImageUrl(path: string | undefined | null): string {
-  // Handle null/undefined paths
-  if (!path) {
-    return "";
+  if (!path) return "";
+
+  const trimmed = path.trim();
+
+  // Already absolute URL
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
   }
 
-  // If the path is already absolute (starts with http/https), return as is
-  if (path.startsWith("http://") || path.startsWith("https://")) {
-    return path;
+  // ipfs://CID[/subpath]
+  if (trimmed.startsWith("ipfs://")) {
+    return `${PINATA_GATEWAY}/${trimmed.replace("ipfs://", "")}`;
   }
 
-  // If path doesn't start with /, add it
-  if (!path.startsWith("/")) {
-    path = "/" + path;
+  // Bare CID
+  if (looksLikeCid(trimmed)) {
+    return `${PINATA_GATEWAY}/${trimmed}`;
   }
 
-  // In development, return the path as is (Vite will handle it)
-  // In production, this will work with the static files
-  return path;
+  // Treat as local/static path
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }

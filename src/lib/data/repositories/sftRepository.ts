@@ -6,11 +6,9 @@ import { executeGraphQL } from "../clients/cachedGraphqlClient";
 import {
   BASE_SFT_SUBGRAPH_URL,
   BASE_METADATA_SUBGRAPH_URL,
-  getEnergyFields,
-  PRODUCTION_METABOARD_ADMIN,
-  DEVELOPMENT_METABOARD_ADMIN,
+  ENERGY_FIELDS,
+  ACTIVE_METABOARD_ADMIN,
 } from "$lib/network";
-import { env as publicEnv } from "$env/dynamic/public";
 import type {
   GetSftsResponse,
   GetMetadataResponse,
@@ -20,15 +18,10 @@ import type {
   DepositWithReceipt,
 } from "$lib/types/graphql";
 
-// Use environment variable to determine which metaboard admin to use
-const PUBLIC_METABOARD_ADMIN =
-  publicEnv.PUBLIC_METABOARD_ADMIN || DEVELOPMENT_METABOARD_ADMIN;
-
-// Get the correct energy fields based on the metaboard admin
-const ENERGY_FIELDS = getEnergyFields(PUBLIC_METABOARD_ADMIN);
-
+// Log which token addresses we are operating on (derived from ENERGY_FIELDS)
 console.log(
-  `[SftRepository] METABOARD_ADMIN is set to: ${PUBLIC_METABOARD_ADMIN}`,
+  "[SftRepository] Active ENERGY_FIELDS tokens:",
+  ENERGY_FIELDS.flatMap((f) => f.sftTokens.map((t) => t.address)),
 );
 
 export class SftRepository {
@@ -88,7 +81,7 @@ export class SftRepository {
         metaV1S(
           where: {
             subject_in: [${subjects.join(",")}],
-            sender: "${PUBLIC_METABOARD_ADMIN.toLowerCase()}"
+            sender: "${ACTIVE_METABOARD_ADMIN.toLowerCase()}"
           },
           orderBy: transaction__timestamp
           orderDirection: desc
