@@ -17,7 +17,8 @@ function isAllowlisted(path: string) {
   if (
     path === "/interface-terms" ||
     path === "/privacy-policy" ||
-    path === "/token-terms"
+    path === "/token-terms" ||
+    path === "/legal"
   )
     return true;
   return ALLOWLIST.has(path);

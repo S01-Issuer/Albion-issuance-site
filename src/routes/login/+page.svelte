@@ -95,7 +95,7 @@
 							/>
 							<span class="text-sm text-black"
 								>I have read, understood and agree to the <a
-									href="/interface-terms"
+									href="/legal?tab=terms"
 									target="_blank"
 									rel="noopener"
 									class="font-bold text-[#283c84] underline hover:text-[#08bccc]">Interface Terms</a
@@ -110,7 +110,7 @@
 							/>
 							<span class="text-sm text-black"
 								>I have read, understood and agree to the <a
-									href="/privacy-policy"
+									href="/legal?tab=privacy"
 									target="_blank"
 									rel="noopener"
 									class="font-bold text-[#283c84] underline hover:text-[#08bccc]">Privacy Policy</a
