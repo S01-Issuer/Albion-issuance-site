@@ -89,8 +89,5 @@ export function getEnergyFieldId(contractAddress: string): string {
   }
 
   // Fallback: return a URL-friendly version of the contract address
-  return contractAddress
-    .toLowerCase()
-    .replace(/^0x/, "")
-    .substring(0, 8);
+  return contractAddress.toLowerCase().replace(/^0x/, "").substring(0, 8);
 }

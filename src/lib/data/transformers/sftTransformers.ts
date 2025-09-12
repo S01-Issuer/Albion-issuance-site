@@ -5,6 +5,7 @@
 
 import type { OffchainAssetReceiptVault } from "$lib/types/graphql";
 import type { Asset, Token, PlannedProduction } from "$lib/types/uiTypes";
+import { mergeProductionHistory } from "$lib/utils/productionMerge";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
 import type { ISODateTimeString } from "$lib/types/sharedTypes";
 import { PINATA_GATEWAY } from "$lib/network";
@@ -31,7 +32,7 @@ class BaseSftTransformer {
     const isoDate = this.timestampToISO(sft.deployTimestamp);
     return {
       createdAt: isoDate,
-      updatedAt: isoDate
+      updatedAt: isoDate,
     };
   }
 
@@ -55,7 +56,7 @@ class BaseSftTransformer {
    * Get nested object value using dot notation
    */
   private getNestedValue(obj: any, path: string): any {
-    return path.split('.').reduce((current, key) => current?.[key], obj);
+    return path.split(".").reduce((current, key) => current?.[key], obj);
   }
 }
 
@@ -66,7 +67,7 @@ export class TokenTransformer extends BaseSftTransformer {
   transform(
     sft: OffchainAssetReceiptVault,
     pinnedMetadata: any,
-    maxSupply: string
+    maxSupply: string,
   ): Token {
     const token: Token = {
       contractAddress: sft.id,
@@ -98,29 +99,34 @@ export class TokenTransformer extends BaseSftTransformer {
  */
 export class TokenMetadataTransformer extends BaseSftTransformer {
   private readonly REQUIRED_FIELDS = [
-    'releaseName',
-    'tokenType',
-    'sharePercentage',
-    'firstPaymentDate',
-    'asset'
+    "releaseName",
+    "tokenType",
+    "sharePercentage",
+    "firstPaymentDate",
+    "asset",
   ];
 
   transform(
     sft: OffchainAssetReceiptVault,
     pinnedMetadata: any,
-    maxSupply: string
+    maxSupply: string,
   ): TokenMetadata {
     // Validate required fields
     this.validateMetadata(pinnedMetadata, this.REQUIRED_FIELDS);
-    
+
     // Additional validation
-    if (typeof pinnedMetadata.sharePercentage !== 'number' || 
-        pinnedMetadata.sharePercentage < 0 || 
-        pinnedMetadata.sharePercentage > 100) {
+    if (
+      typeof pinnedMetadata.sharePercentage !== "number" ||
+      pinnedMetadata.sharePercentage < 0 ||
+      pinnedMetadata.sharePercentage > 100
+    ) {
       throw new Error("Invalid sharePercentage - must be between 0 and 100");
     }
 
-    if (pinnedMetadata.payoutData !== undefined && !Array.isArray(pinnedMetadata.payoutData)) {
+    if (
+      pinnedMetadata.payoutData !== undefined &&
+      !Array.isArray(pinnedMetadata.payoutData)
+    ) {
       throw new Error("Invalid payoutData - must be an array");
     }
 
@@ -131,13 +137,19 @@ export class TokenMetadataTransformer extends BaseSftTransformer {
       tokenType: pinnedMetadata.tokenType,
       firstPaymentDate: pinnedMetadata.firstPaymentDate,
       sharePercentage: pinnedMetadata.sharePercentage,
-      decimals: typeof pinnedMetadata.decimals === 'number' ? pinnedMetadata.decimals : 18,
+      decimals:
+        typeof pinnedMetadata.decimals === "number"
+          ? pinnedMetadata.decimals
+          : 18,
       supply: {
         maxSupply: maxSupply.toString(),
         mintedSupply: sft.totalShares.toString(),
       },
       payoutData: pinnedMetadata.payoutData || [],
-      asset: pinnedMetadata.asset,
+      asset: {
+        ...(pinnedMetadata.asset || {}),
+        status: pinnedMetadata.asset?.production?.status || "producing",
+      },
       metadata: pinnedMetadata.metadata || this.createMetadataTimestamps(sft),
     };
 
@@ -150,23 +162,24 @@ export class TokenMetadataTransformer extends BaseSftTransformer {
  */
 export class AssetTransformer extends BaseSftTransformer {
   private readonly REQUIRED_FIELDS = [
-    'asset.assetName',
-    'asset.location',
-    'asset.operator',
-    'asset.technical',
-    'asset.production',
-    'asset.assetTerms'
+    "asset.assetName",
+    "asset.location",
+    "asset.operator",
+    "asset.technical",
+    "asset.assetTerms",
   ];
 
-  transform(
-    sft: OffchainAssetReceiptVault,
-    pinnedMetadata: any
-  ): Asset {
+  transform(sft: OffchainAssetReceiptVault, pinnedMetadata: any): Asset {
     // Validate required fields
     this.validateMetadata(pinnedMetadata, this.REQUIRED_FIELDS);
 
     const assetData = pinnedMetadata.asset;
-    
+    // Build merged monthly reports first so we can derive current production
+    const monthlyReports = this.transformMonthlyReports(
+      assetData,
+      pinnedMetadata,
+    );
+
     const asset: Asset = {
       id: sft.id,
       name: assetData.assetName,
@@ -177,13 +190,17 @@ export class AssetTransformer extends BaseSftTransformer {
       location: this.transformLocation(assetData.location),
       operator: this.transformOperator(assetData.operator),
       technical: this.transformTechnical(assetData.technical),
-      production: this.transformProduction(assetData),
+      status: assetData.production?.status || "producing",
       terms: this.transformTerms(assetData.assetTerms),
       assetTerms: this.transformTerms(assetData.assetTerms),
       tokenContracts: [sft.id],
-      monthlyReports: this.transformMonthlyReports(assetData, pinnedMetadata),
-      plannedProduction: this.transformPlannedProduction(assetData.plannedProduction),
-      operationalMetrics: this.transformOperationalMetrics(assetData.operationalMetrics),
+      monthlyReports,
+      plannedProduction: this.transformPlannedProduction(
+        assetData.plannedProduction,
+      ),
+      operationalMetrics: this.transformOperationalMetrics(
+        assetData.operationalMetrics,
+      ),
       metadata: this.createMetadataTimestamps(sft),
     };
 
@@ -194,9 +211,11 @@ export class AssetTransformer extends BaseSftTransformer {
     return imageHash ? `${PINATA_GATEWAY}/${imageHash}` : "";
   }
 
-  private formatGalleryImages(images?: any[]): Array<{ title: string; url: string; caption: string }> {
+  private formatGalleryImages(
+    images?: any[],
+  ): Array<{ title: string; url: string; caption: string }> {
     if (!Array.isArray(images)) return [];
-    
+
     return images.map((image: any) => ({
       title: image?.title || "",
       url: image?.url ? `${PINATA_GATEWAY}/${image.url}` : "",
@@ -243,25 +262,20 @@ export class AssetTransformer extends BaseSftTransformer {
     };
   }
 
-  private transformProduction(assetData: any) {
-    // Calculate current production from most recent historical production
-    let currentProduction = assetData.production?.current;
-    
-    if (assetData.historicalProduction && assetData.historicalProduction.length > 0) {
-      const sortedProduction = [...assetData.historicalProduction].sort((a: any, b: any) => 
-        b.month.localeCompare(a.month)
-      );
-      const mostRecentProduction = sortedProduction[0];
-      currentProduction = `${mostRecentProduction.production.toFixed(0)} BOE/month`;
-    }
+  private transformProduction(assetData: any, mergedMonthlyReports: any[]) {
+    // Derive current production from latest merged monthly report when available
+    const latest = mergedMonthlyReports?.length
+      ? mergedMonthlyReports[mergedMonthlyReports.length - 1]
+      : undefined;
+    const latestProduction = latest?.production;
+    const currentProduction =
+      latestProduction !== undefined && latestProduction !== null
+        ? `${Number(latestProduction).toFixed(0)} BOE/month`
+        : assetData.production?.current;
 
     return {
       current: currentProduction,
       status: assetData.production?.status,
-      units: {
-        production: assetData.production?.units?.production || 0,
-        revenue: assetData.production?.units?.revenue || 0,
-      },
     };
   }
 
@@ -274,49 +288,35 @@ export class AssetTransformer extends BaseSftTransformer {
   }
 
   private transformMonthlyReports(assetData: any, pinnedMetadata: any) {
-    // Try historicalProduction first (primary source of production data)
-    if (Array.isArray(assetData.historicalProduction) && assetData.historicalProduction.length > 0) {
-      return assetData.historicalProduction.map((record: any) => ({
-        month: record?.month || '',
-        production: record?.production || 0,
-        revenue: 0,
-        expenses: 0,
-        netIncome: 0,
-        payoutPerToken: 0,
-      }));
-    }
-    // Fall back to receiptsData (legacy format with financial data)
-    else if (Array.isArray(assetData.receiptsData) && assetData.receiptsData.length > 0) {
-      return assetData.receiptsData.map((report: any, i: number) => ({
-        month: report?.month || `2024-${String(i + 1).padStart(2, '0')}`,
-        production: report?.assetData?.production || 0,
-        revenue: report?.assetData?.revenue || 0,
-        expenses: report?.assetData?.expenses || 0,
-        netIncome: report?.assetData?.netIncome || 0,
-        payoutPerToken: pinnedMetadata.payoutData?.[i]?.tokenPayout?.payoutPerToken || 0,
-      }));
-    }
-    return [];
+    return mergeProductionHistory(
+      assetData.historicalProduction,
+      assetData.receiptsData,
+      pinnedMetadata?.payoutData,
+    );
   }
 
-  private transformPlannedProduction(plannedProduction: any): PlannedProduction {
+  private transformPlannedProduction(
+    plannedProduction: any,
+  ): PlannedProduction {
     return {
       oilPriceAssumption: plannedProduction?.oilPriceAssumption || 0,
-      oilPriceAssumptionCurrency: plannedProduction?.oilPriceAssumptionCurrency || "USD",
+      oilPriceAssumptionCurrency:
+        plannedProduction?.oilPriceAssumptionCurrency || "USD",
       projections: plannedProduction?.projections || [],
     };
   }
 
   private transformOperationalMetrics(metrics: any) {
-    return metrics || {
-      uptime: { percentage: 0, unit: "%", period: "unknown" },
-      dailyProduction: { current: 0, target: 0, unit: "BOE" },
-      hseMetrics: { 
-        incidentFreeDays: 0, 
-        lastIncidentDate: new Date().toISOString(), 
-        safetyRating: "Unknown" 
+    return (
+      metrics || {
+        uptime: { percentage: 0, unit: "%", period: "unknown" },
+        hseMetrics: {
+          incidentFreeDays: 0,
+          lastIncidentDate: new Date().toISOString(),
+          safetyRating: "Unknown",
+        },
       }
-    };
+    );
   }
 }
 

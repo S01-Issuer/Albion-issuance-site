@@ -1,9 +1,17 @@
 <script lang="ts">
 	import SectionTitle from '$lib/components/components/SectionTitle.svelte';
 	import TabButton from '$lib/components/components/TabButton.svelte';
-	import { PageLayout, HeroSection, ContentSection } from '$lib/components/layout';
+	import { page } from '$app/stores';
+	import { onMount } from 'svelte';
 	
 	let activeSection = 'terms';
+
+	onMount(() => {
+		const tab = $page.url.searchParams.get('tab');
+		if (tab === 'privacy' || tab === 'terms' || tab === 'disclosures' || tab === 'compliance') {
+			activeSection = tab;
+		}
+	});
 </script>
 
 <svelte:head>
@@ -11,18 +19,27 @@
 	<meta name="description" content="Legal information, terms of service, and compliance details for Albion platform" />
 </svelte:head>
 
-<PageLayout>
-	<!-- Hero Section -->
-	<HeroSection 
-		title="Legal Information"
-		subtitle="Important legal documents and compliance information for the Albion platform."
-		showBorder={true}
-	/>
+<div class="min-h-screen bg-white">
+	<!-- Simple Header -->
+	<div class="border-b border-gray-200 bg-white">
+		<div class="max-w-6xl mx-auto px-4 py-6">
+			<div class="flex items-center justify-between">
+				<img src="/assets/logo.svg" alt="Albion Labs Logo" class="h-12 w-auto" />
+				<a href="/login" class="text-sm text-gray-600 hover:text-gray-900 underline">← Back</a>
+			</div>
+		</div>
+	</div>
 
-	<!-- Legal Tabs -->
-	<ContentSection background="white" padding="compact">
-		<div class="bg-white border border-light-gray mb-8">
-			<div class="flex flex-wrap border-b border-light-gray">
+	<!-- Hero Section -->
+	<div class="max-w-6xl mx-auto px-4 py-12">
+		<div class="text-center mb-12">
+			<h1 class="text-4xl font-extrabold text-black mb-4">Legal Information</h1>
+			<p class="text-lg text-gray-600">Important legal documents and compliance information for the Albion platform.</p>
+		</div>
+
+		<!-- Legal Tabs -->
+		<div class="bg-white border border-gray-300 mb-8">
+			<div class="flex flex-wrap border-b border-gray-300">
 				<TabButton 
 					active={activeSection === 'terms'}
 					on:click={() => activeSection = 'terms'}
@@ -179,12 +196,14 @@
 			{/if}
 			</div>
 		</div>
-	</ContentSection>
 
-	<!-- Contact Section -->
-	<ContentSection background="secondary" padding="standard" centered>
-			<h2 class="text-[1.75rem] font-extrabold mb-4 text-white">Legal Questions?</h2>
-			<p class="text-lg mb-6 opacity-90">If you have questions about our legal documents or compliance procedures, contact our legal team at <a href="mailto:legal@albion.org" class="text-white underline hover:no-underline">legal@albionlabs.org</a></p>
-	</ContentSection>
-</PageLayout>
+		<!-- Contact Section -->
+		<div class="bg-gray-900 text-white py-16 -mx-4">
+			<div class="max-w-4xl mx-auto px-4 text-center">
+				<h2 class="text-3xl font-extrabold mb-4">Legal Questions?</h2>
+				<p class="text-lg mb-6 opacity-90">If you have questions about our legal documents or compliance procedures, contact our legal team at <a href="mailto:legal@albionlabs.org" class="text-white underline hover:no-underline">legal@albionlabs.org</a></p>
+			</div>
+		</div>
+	</div>
+</div>
 

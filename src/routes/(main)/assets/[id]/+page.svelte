@@ -295,14 +295,14 @@
 									<!-- Current Daily Production -->
 									<div class="text-center p-3 bg-light-gray">
 										<div class="text-2xl font-extrabold text-black mb-1">
-											{#if assetData?.operationalMetrics?.dailyProduction?.current !== undefined}
-												{assetData.operationalMetrics.dailyProduction.current.toFixed(1)}
+											{#if (() => { const list = productionReports || []; return list.length > 0 && list[list.length-1]?.production !== undefined; })()}
+												{(() => { const list = productionReports || []; const last = list[list.length-1]; const val = (last.production || 0) * 12 / 365; return val.toFixed(1); })()}
 											{:else}
 												<span class="text-gray-400">N/A</span>
 											{/if}
 										</div>
 										<div class="text-sm font-medium text-black opacity-70">
-											Current Daily Production ({assetData?.operationalMetrics?.dailyProduction?.unit || 'units'})
+											Current Daily Production (BOE/day)
 										</div>
 									</div>
 									
@@ -512,14 +512,14 @@
 								<div class="grid grid-cols-1 gap-4 mb-6">
 									<div class="text-center p-3 bg-white">
 										<div class="text-3xl font-extrabold text-black mb-1">
-											{#if assetData?.operationalMetrics?.dailyProduction?.current !== undefined}
-												{assetData.operationalMetrics.dailyProduction.current.toFixed(1)}
+											{#if (() => { const list = productionReports || []; return list.length > 0 && list[list.length-1]?.production !== undefined; })()}
+												{(() => { const list = productionReports || []; const last = list[list.length-1]; const val = (last.production || 0) * 12 / 365; return val.toFixed(1); })()}
 											{:else}
 												<span class="text-gray-400">N/A</span>
 											{/if}
 										</div>
 										<div class="text-sm font-medium text-black opacity-70">
-											Current Daily Production ({assetData?.operationalMetrics?.dailyProduction?.unit || 'units'})
+											Current Daily Production (BOE/day)
 										</div>
 									</div>
 								</div>

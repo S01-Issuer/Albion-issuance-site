@@ -8,7 +8,7 @@ import {
   decodeOrder,
   signContext,
   sortClaimsData,
-  type ClaimHistory
+  type ClaimHistory,
 } from "$lib/utils/claims";
 import { formatEther, parseEther, type Hex } from "viem";
 import { wagmiConfig } from "svelte-wagmi";
@@ -40,15 +40,19 @@ export class ClaimsService {
    * Fetch and cache CSV data
    */
   private async fetchCsv(
-    csvLink: string, 
-    expectedMerkleRoot: string, 
-    expectedContentHash: string
+    csvLink: string,
+    expectedMerkleRoot: string,
+    expectedContentHash: string,
   ): Promise<any[] | null> {
     if (this.csvCache.has(csvLink)) {
       return this.csvCache.get(csvLink)!;
     }
-    
-    const data = await fetchAndValidateCSV(csvLink, expectedMerkleRoot, expectedContentHash);
+
+    const data = await fetchAndValidateCSV(
+      csvLink,
+      expectedMerkleRoot,
+      expectedContentHash,
+    );
     if (data) {
       this.csvCache.set(csvLink, data);
     }
@@ -63,7 +67,7 @@ export class ClaimsService {
       return {
         holdings: [],
         claimHistory: [],
-        totals: { earned: 0, claimed: 0, unclaimed: 0 }
+        totals: { earned: 0, claimed: 0, unclaimed: 0 },
       };
     }
 
@@ -85,7 +89,7 @@ export class ClaimsService {
         for (const claim of token.claims as Claim[]) {
           claimMetadata.push({ fieldName: field.name, claim });
           claimPromises.push(
-            this.processClaimForWallet(claim, ownerAddress, field.name)
+            this.processClaimForWallet(claim, ownerAddress, field.name),
           );
         }
       }
@@ -99,10 +103,10 @@ export class ClaimsService {
       if (!claimData) return;
 
       const { fieldName } = claimMetadata[index];
-      
+
       // Merge results
       claimHistory = [...claimHistory, ...claimData.claims];
-      
+
       // Group holdings by field name
       this.mergeHoldingsGroup(holdings, fieldName, claimData.holdings);
 
@@ -118,8 +122,8 @@ export class ClaimsService {
       totals: {
         earned: totalEarned,
         claimed: totalClaimed,
-        unclaimed: totalUnclaimed
-      }
+        unclaimed: totalUnclaimed,
+      },
     };
   }
 
@@ -129,21 +133,21 @@ export class ClaimsService {
   private async processClaimForWallet(
     claim: Claim,
     ownerAddress: string,
-    fieldName: string
+    fieldName: string,
   ) {
     if (!claim.csvLink) return null;
 
     // Fetch CSV data, trades and order details in parallel
     const [csvData, trades, orderDetails] = await Promise.all([
       this.fetchCsv(
-        claim.csvLink, 
-        claim.expectedMerkleRoot, 
-        claim.expectedContentHash
+        claim.csvLink,
+        claim.expectedMerkleRoot,
+        claim.expectedContentHash,
       ),
       this.repository.getTradesForClaims(claim.orderHash, ownerAddress),
-      this.repository.getOrderByHash(claim.orderHash)
+      this.repository.getOrderByHash(claim.orderHash),
     ]);
-    
+
     if (!csvData) return null;
     if (!orderDetails || orderDetails.length === 0) return null;
 
@@ -152,38 +156,45 @@ export class ClaimsService {
 
     // Build merkle tree and process claims
     const merkleTree = getMerkleTree(csvData);
-    const sortedClaimsData = await sortClaimsData(csvData, trades, ownerAddress, fieldName);
-    
+    const sortedClaimsData = await sortClaimsData(
+      csvData,
+      trades,
+      ownerAddress,
+      fieldName,
+    );
+
     // Generate proofs for holdings
     const holdingsWithProofs = sortedClaimsData.holdings.map((h: any) => {
       const leaf = getLeaf(h.id, ownerAddress, h.unclaimedAmount);
       const proofForLeaf = getProofForLeaf(merkleTree, leaf);
-      const holdingSignedContext = signContext([
-        h.id,
-        parseEther(h.unclaimedAmount.toString()),
-        ...proofForLeaf.proof
-      ].map((i) => BigInt(i)));
-      
+      const holdingSignedContext = signContext(
+        [
+          h.id,
+          parseEther(h.unclaimedAmount.toString()),
+          ...proofForLeaf.proof,
+        ].map((i) => BigInt(i)),
+      );
+
       return {
         ...h,
         order: decodedOrder,
         signedContext: holdingSignedContext,
-        orderBookAddress
+        orderBookAddress,
       };
     });
 
     return {
       holdings: holdingsWithProofs,
       claims: sortedClaimsData.claims,
-      totalClaimed: sortedClaimsData?.totalClaimedAmount 
-        ? Number(formatEther(BigInt(sortedClaimsData.totalClaimedAmount))) 
+      totalClaimed: sortedClaimsData?.totalClaimedAmount
+        ? Number(formatEther(BigInt(sortedClaimsData.totalClaimedAmount)))
         : 0,
-      totalEarned: sortedClaimsData?.totalEarned 
-        ? Number(formatEther(BigInt(sortedClaimsData.totalEarned))) 
+      totalEarned: sortedClaimsData?.totalEarned
+        ? Number(formatEther(BigInt(sortedClaimsData.totalEarned)))
         : 0,
-      totalUnclaimed: sortedClaimsData?.totalUnclaimedAmount 
-        ? Number(formatEther(BigInt(sortedClaimsData.totalUnclaimedAmount))) 
-        : 0
+      totalUnclaimed: sortedClaimsData?.totalUnclaimedAmount
+        ? Number(formatEther(BigInt(sortedClaimsData.totalUnclaimedAmount)))
+        : 0,
     };
   }
 
@@ -193,25 +204,25 @@ export class ClaimsService {
   private mergeHoldingsGroup(
     groups: ClaimsHoldingsGroup[],
     fieldName: string,
-    newHoldings: any[]
+    newHoldings: any[],
   ): void {
     const existing = groups.find((g) => g.fieldName === fieldName);
-    
+
     if (existing) {
       existing.holdings = [...existing.holdings, ...newHoldings];
       existing.totalAmount = existing.holdings.reduce(
-        (sum, h) => sum + Number(h.unclaimedAmount), 
-        0
+        (sum, h) => sum + Number(h.unclaimedAmount),
+        0,
       );
     } else {
       const totalAmount = newHoldings.reduce(
-        (sum: number, h: any) => sum + Number(h.unclaimedAmount), 
-        0
+        (sum: number, h: any) => sum + Number(h.unclaimedAmount),
+        0,
       );
-      groups.push({ 
-        fieldName, 
-        totalAmount, 
-        holdings: newHoldings 
+      groups.push({
+        fieldName,
+        totalAmount,
+        holdings: newHoldings,
       });
     }
   }
@@ -227,20 +238,20 @@ export class ClaimsService {
     const cfg = get(wagmiConfig);
     const allOrders = [] as any[];
     let orderBookAddress: Hex | undefined = undefined;
-    
+
     // Prepare all orders for claiming
     for (const group of holdings) {
       for (const h of group.holdings) {
         orderBookAddress = (h.orderBookAddress as Hex) || orderBookAddress;
-        allOrders.push({ 
-          order: h.order, 
-          inputIOIndex: 0, 
-          outputIOIndex: 0, 
-          signedContext: [h.signedContext] 
+        allOrders.push({
+          order: h.order,
+          inputIOIndex: 0,
+          outputIOIndex: 0,
+          signedContext: [h.signedContext],
         });
       }
     }
-    
+
     if (!orderBookAddress) {
       throw new Error("No orderbook address found");
     }
@@ -251,15 +262,15 @@ export class ClaimsService {
       maximumInput: 2n ** 256n - 1n,
       maximumIORatio: 2n ** 256n - 1n,
       orders: allOrders,
-      data: "0x"
+      data: "0x",
     } as const;
 
     // Simulate and execute transaction
     const { request } = await simulateContract(cfg, {
       abi: orderbookAbi,
       address: orderBookAddress,
-      functionName: 'takeOrders2',
-      args: [takeOrdersConfig]
+      functionName: "takeOrders2",
+      args: [takeOrdersConfig],
     });
 
     await writeContract(cfg, request);
@@ -274,4 +285,3 @@ export class ClaimsService {
 }
 
 export const claimsService = new ClaimsService();
-

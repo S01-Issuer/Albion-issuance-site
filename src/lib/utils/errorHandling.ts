@@ -76,7 +76,8 @@ export interface ErrorReporter {
 class ErrorReporterImpl implements ErrorReporter {
   report(error: AppError): void {
     // Log to console in development
-    const isDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+    const isDev =
+      typeof window !== "undefined" && window.location.hostname === "localhost";
     if (isDev) {
       console.error("AppError:", error.toJSON());
     }

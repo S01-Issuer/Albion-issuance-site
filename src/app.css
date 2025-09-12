@@ -1,5 +1,5 @@
 /* stylelint-disable at-rule-no-unknown */
-@import './lib/styles/typography.css';
+@import "./lib/styles/typography.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

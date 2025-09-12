@@ -9,25 +9,29 @@ export function getShareText(assetName: string): string {
 }
 
 // Helper function to add UTM parameters to URLs
-function addUTMParameters(url: string, medium: string, source: string = medium): string {
+function addUTMParameters(
+  url: string,
+  medium: string,
+  source: string = medium,
+): string {
   const urlObj = new URL(url);
-  urlObj.searchParams.set('utm_source', source);
-  urlObj.searchParams.set('utm_medium', medium);
-  urlObj.searchParams.set('utm_campaign', 'asset_sharing');
-  urlObj.searchParams.set('utm_content', 'social_share');
+  urlObj.searchParams.set("utm_source", source);
+  urlObj.searchParams.set("utm_medium", medium);
+  urlObj.searchParams.set("utm_campaign", "asset_sharing");
+  urlObj.searchParams.set("utm_content", "social_share");
   return urlObj.toString();
 }
 
 export function getShareUrls(shareData: ShareData) {
   const { title, text, url } = shareData;
-  
+
   // Add UTM parameters for each platform
-  const twitterUrl = addUTMParameters(url, 'twitter', 'twitter');
-  const linkedinUrl = addUTMParameters(url, 'linkedin', 'linkedin');
-  const telegramUrl = addUTMParameters(url, 'telegram', 'telegram');
-  const whatsappUrl = addUTMParameters(url, 'whatsapp', 'whatsapp');
-  const emailUrl = addUTMParameters(url, 'email', 'email');
-  
+  const twitterUrl = addUTMParameters(url, "twitter", "twitter");
+  const linkedinUrl = addUTMParameters(url, "linkedin", "linkedin");
+  const telegramUrl = addUTMParameters(url, "telegram", "telegram");
+  const whatsappUrl = addUTMParameters(url, "whatsapp", "whatsapp");
+  const emailUrl = addUTMParameters(url, "email", "email");
+
   const encodedTwitterUrl = encodeURIComponent(twitterUrl);
   const encodedLinkedinUrl = encodeURIComponent(linkedinUrl);
   const encodedTelegramUrl = encodeURIComponent(telegramUrl);

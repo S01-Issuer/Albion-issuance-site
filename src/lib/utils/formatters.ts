@@ -400,4 +400,3 @@ export function formatSmartReturn(
   // For multipliers below 10x, show with one decimal if needed
   return `${multiplier.toFixed(1)}x`;
 }
-

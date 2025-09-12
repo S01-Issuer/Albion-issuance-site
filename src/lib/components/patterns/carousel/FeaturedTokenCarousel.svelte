@@ -424,8 +424,8 @@
 				<div class="hidden sm:block">
 					<div class={assetHeaderClasses}>
 						<div class="flex items-center gap-2 mb-2">
-							<div class={getStatusIndicatorClasses(item.asset.production.status)}></div>
-							<span class={statusTextClasses}>{item.asset.production.status.toUpperCase()}</span>
+							<div class={getStatusIndicatorClasses(item.asset.status)}></div>
+							<span class={statusTextClasses}>{item.asset.status.toUpperCase()}</span>
 						</div>
 						<h3 class={assetNameClasses}>{item.asset.name}</h3>
 						<div class={assetLocationClasses}>
@@ -476,4 +476,3 @@
 		{/if}
 	{/if}
 </div>
-

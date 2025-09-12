@@ -8,9 +8,10 @@ import { formatEther, parseEther } from "viem";
 
 // Create a singleton AbiCoder instance for reuse
 // This works in both production and test environments
-const abiCoder = typeof AbiCoder.defaultAbiCoder === 'function'
-  ? AbiCoder.defaultAbiCoder()
-  : AbiCoder.defaultAbiCoder;
+const abiCoder =
+  typeof AbiCoder.defaultAbiCoder === "function"
+    ? AbiCoder.defaultAbiCoder()
+    : AbiCoder.defaultAbiCoder;
 
 const HYPERSYNC_URL = "https://8453.hypersync.xyz/query";
 const CONTEXT_EVENT_TOPIC =
@@ -79,14 +80,14 @@ export type IPFSValidationResult = {
  */
 export function validateCSVIntegrity(
   csvData: any[],
-  expectedMerkleRoot: string
+  expectedMerkleRoot: string,
 ): CSVValidationResult {
   try {
     // Validate CSV structure
     if (!Array.isArray(csvData) || csvData.length === 0) {
       return {
         isValid: false,
-        error: "Invalid CSV structure: data must be a non-empty array"
+        error: "Invalid CSV structure: data must be a non-empty array",
       };
     }
 
@@ -95,7 +96,7 @@ export function validateCSVIntegrity(
       if (!row.address || !row.amount || row.index === undefined) {
         return {
           isValid: false,
-          error: `Invalid CSV row ${index}: missing required fields (address, amount, index)`
+          error: `Invalid CSV row ${index}: missing required fields (address, amount, index)`,
         };
       }
 
@@ -103,7 +104,7 @@ export function validateCSVIntegrity(
       if (!/^0x[a-fA-F0-9]{40}$/.test(row.address)) {
         return {
           isValid: false,
-          error: `Invalid address format in row ${index}: ${row.address}`
+          error: `Invalid address format in row ${index}: ${row.address}`,
         };
       }
 
@@ -112,7 +113,7 @@ export function validateCSVIntegrity(
       if (isNaN(amount) || amount < 0) {
         return {
           isValid: false,
-          error: `Invalid amount in row ${index}: ${row.amount}`
+          error: `Invalid amount in row ${index}: ${row.amount}`,
         };
       }
     }
@@ -122,25 +123,26 @@ export function validateCSVIntegrity(
     const calculatedMerkleRoot = tree.root;
 
     // Compare with expected merkle root
-    if (calculatedMerkleRoot.toLowerCase() !== expectedMerkleRoot.toLowerCase()) {
+    if (
+      calculatedMerkleRoot.toLowerCase() !== expectedMerkleRoot.toLowerCase()
+    ) {
       return {
         isValid: false,
         error: "Merkle root mismatch",
         merkleRoot: calculatedMerkleRoot,
-        expectedMerkleRoot
+        expectedMerkleRoot,
       };
     }
 
     return {
       isValid: true,
       merkleRoot: calculatedMerkleRoot,
-      expectedMerkleRoot
+      expectedMerkleRoot,
     };
-
   } catch (error) {
     return {
       isValid: false,
-      error: `CSV validation error: ${error instanceof Error ? error.message : 'Unknown error'}`
+      error: `CSV validation error: ${error instanceof Error ? error.message : "Unknown error"}`,
     };
   }
 }
@@ -153,18 +155,18 @@ export function validateCSVIntegrity(
  */
 export async function validateIPFSContent(
   ipfsUrl: string,
-  expectedContentHash: string
+  expectedContentHash: string,
 ): Promise<IPFSValidationResult> {
   try {
     // Extract CID from IPFS URL
-    const urlParts = ipfsUrl.split('/');
+    const urlParts = ipfsUrl.split("/");
     const cidFromUrl = urlParts[urlParts.length - 1];
 
     // Validate CID format
     if (!cidFromUrl || cidFromUrl.length < 10) {
       return {
         isValid: false,
-        error: "Invalid IPFS URL format"
+        error: "Invalid IPFS URL format",
       };
     }
 
@@ -174,7 +176,7 @@ export async function validateIPFSContent(
         isValid: false,
         error: "IPFS content hash mismatch",
         contentHash: cidFromUrl,
-        expectedHash: expectedContentHash
+        expectedHash: expectedContentHash,
       };
     }
 
@@ -183,20 +185,19 @@ export async function validateIPFSContent(
     if (!response.ok) {
       return {
         isValid: false,
-        error: `Failed to fetch IPFS content: ${response.status}`
+        error: `Failed to fetch IPFS content: ${response.status}`,
       };
     }
 
     return {
       isValid: true,
       contentHash: cidFromUrl,
-      expectedHash: expectedContentHash
+      expectedHash: expectedContentHash,
     };
-
   } catch (error) {
     return {
       isValid: false,
-      error: `IPFS validation error: ${error instanceof Error ? error.message : 'Unknown error'}`
+      error: `IPFS validation error: ${error instanceof Error ? error.message : "Unknown error"}`,
     };
   }
 }
@@ -211,11 +212,14 @@ export async function validateIPFSContent(
 export async function fetchAndValidateCSV(
   csvLink: string,
   expectedMerkleRoot: string,
-  expectedContentHash: string
+  expectedContentHash: string,
 ): Promise<any[] | null> {
   try {
     // Step 1: Validate IPFS content integrity
-    const ipfsValidation = await validateIPFSContent(csvLink, expectedContentHash);
+    const ipfsValidation = await validateIPFSContent(
+      csvLink,
+      expectedContentHash,
+    );
     if (!ipfsValidation.isValid) {
       return null;
     }
@@ -232,14 +236,16 @@ export async function fetchAndValidateCSV(
     // Step 3: Validate CSV data integrity
     const csvValidation = validateCSVIntegrity(csvData, expectedMerkleRoot);
     if (!csvValidation.isValid) {
-      if (expectedMerkleRoot === "0x0000000000000000000000000000000000000000000000000000000000000000") {
+      if (
+        expectedMerkleRoot ===
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+      ) {
         return csvData;
       }
       return null;
     }
 
     return csvData;
-
   } catch {
     return null;
   }
@@ -251,16 +257,19 @@ export async function fetchAndValidateCSV(
  * @returns Parsed CSV data
  */
 function parseCSVData(csvText: string): any[] {
-  const lines = csvText.split('\n');
-  const headers = lines[0].split(',').map(h => h.trim());
-  const data = lines.slice(1).filter(line => line.trim()).map(line => {
-    const values = line.split(',').map(v => v.trim());
-    const row: any = {};
-    headers.forEach((header, index) => {
-      row[header] = values[index] || '';
+  const lines = csvText.split("\n");
+  const headers = lines[0].split(",").map((h) => h.trim());
+  const data = lines
+    .slice(1)
+    .filter((line) => line.trim())
+    .map((line) => {
+      const values = line.split(",").map((v) => v.trim());
+      const row: any = {};
+      headers.forEach((header, index) => {
+        row[header] = values[index] || "";
+      });
+      return row;
     });
-    return row;
-  });
   return data;
 }
 
@@ -292,15 +301,19 @@ export async function sortClaimsData(
       const decodedData = decodeLogData(log.data);
       if (decodedData && log.block) {
         // Add timestamp from the block data
-        decodedData.timestamp = new Date(log.block.timestamp * 1000).toISOString();
+        decodedData.timestamp = new Date(
+          log.block.timestamp * 1000,
+        ).toISOString();
       }
       return decodedData;
     })
     .filter((log) => {
       // Filter out null results and zero addresses
-      return log && 
-             log.address && 
-             log.address !== "0x0000000000000000000000000000000000000000";
+      return (
+        log &&
+        log.address &&
+        log.address !== "0x0000000000000000000000000000000000000000"
+      );
     });
 
   // Filter by owner address (required parameter)
@@ -313,7 +326,8 @@ export async function sortClaimsData(
 
   // Filter decoded logs by owner address
   const filteredDecodedLogs = decodedLogs.filter(
-    (log) => log?.address && log.address.toLowerCase() === normalizedOwnerAddress,
+    (log) =>
+      log?.address && log.address.toLowerCase() === normalizedOwnerAddress,
   );
 
   // Filter into claimed and unclaimed arrays
@@ -355,9 +369,14 @@ export async function sortClaimsData(
     } else if (orderTimestamp) {
       // Use the order timestamp (when the order was added to the orderbook)
       claimDate = new Date(Number(orderTimestamp) * 1000).toISOString();
-    } else if (trades.length > 0 && trades[0].tradeEvent?.transaction?.timestamp) {
+    } else if (
+      trades.length > 0 &&
+      trades[0].tradeEvent?.transaction?.timestamp
+    ) {
       // Use the trade timestamp as fallback (all claims in a CSV are from the same payout period)
-      claimDate = new Date(trades[0].tradeEvent.transaction.timestamp * 1000).toISOString();
+      claimDate = new Date(
+        trades[0].tradeEvent.transaction.timestamp * 1000,
+      ).toISOString();
     }
 
     return {
@@ -518,10 +537,7 @@ function decodeLogData(data: string): any {
   }
   try {
     const logBytes = ethers.getBytes(data);
-    const decodedData = abiCoder.decode(
-      ["address", "uint256[][]"],
-      logBytes,
-    );
+    const decodedData = abiCoder.decode(["address", "uint256[][]"], logBytes);
 
     return {
       index: decodedData[1][6][0].toString(),

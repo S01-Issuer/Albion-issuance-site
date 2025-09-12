@@ -44,4 +44,3 @@ export interface PricingInfo {
   benchmarkPremium: number | string;
   transportCosts: number | string;
 }
-

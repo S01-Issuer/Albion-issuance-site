@@ -40,7 +40,7 @@ export interface TokenMetadata {
   sharePercentage: number;
   decimals: number;
   supply: TokenSupply;
-  payoutData: PayoutData[];
+  payoutData: PayoutData[]; // Distributions to claims vaults
   asset: AssetData;
   metadata: Metadata;
 }
@@ -70,10 +70,11 @@ export interface AssetData {
   operator: Operator;
   technical: TechnicalDetails;
   assetTerms: AssetTerms;
-  production: Production;
-  plannedProduction: PlannedProduction;
-  historicalProduction: HistoricalProductionRecord[];
-  receiptsData: ReceiptsData[];
+  // Moved production status to top-level asset status
+  status: ProductionStatus;
+  plannedProduction: PlannedProduction; // Production forecast
+  historicalProduction: HistoricalProductionRecord[]; // Historical production pre-tokenisation
+  receiptsData: ReceiptsData[]; // Reported actuals since listing i.e. the monthly reports that get passed to the issuer
   operationalMetrics: OperationalMetrics;
   documents: Document[];
   coverImage: string;
@@ -102,9 +103,7 @@ export interface Operator {
 
 export interface TechnicalDetails {
   fieldType: string;
-  depth: number;
   license: string;
-  estimatedLifeMonths: number;
   firstOil: ISOYearMonthString;
   infrastructure: string;
   environmental: string;
@@ -119,22 +118,13 @@ export interface TechnicalDetails {
 export interface AssetTerms {
   interestType: string;
   amount: number;
-  amountTooltip: string;
   paymentFrequencyDays: number;
 }
 
-export interface Production {
-  current: string;
-  status: ProductionStatus;
-  units: {
-    production: number;
-    revenue: number;
-  };
-}
+// Production removed: current production is derived at runtime from merged production history
 
 export interface PlannedProduction {
   oilPriceAssumption: number;
-  oilPriceAssumptionCurrency: string;
   projections: PlannedProductionProjection[];
 }
 
@@ -151,29 +141,11 @@ export interface HistoricalProductionRecord {
 export interface OperationalMetrics {
   uptime: {
     percentage: number;
-    unit: string;
     period: string;
   };
-  dailyProduction: {
-    current: number;
-    target: number;
-    unit: string;
-  };
   hseMetrics: {
-    incidentFreeDays: number;
     lastIncidentDate: ISODateTimeString; // ISO datetime string
-    safetyRating: string;
   };
 }
 
-export interface FutureRelease {
-  whenRelease: string;
-  description: string;
-  emoji?: string;
-}
-
-export interface FutureReleaseData {
-  [assetId: string]: {
-    [tokenId: string]: FutureRelease[];
-  };
-}
+// Removed unused FutureRelease types

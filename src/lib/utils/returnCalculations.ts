@@ -26,34 +26,34 @@ function calculateIRR(cashFlows: number[]): number {
   const maxIterations = 100;
   const tolerance = 1e-7;
   let rate = 0.1; // Initial guess of 10%
-  
+
   // Check if the investment can ever be recovered
   const totalInflows = cashFlows.slice(1).reduce((sum, cf) => sum + cf, 0);
   const initialOutflow = Math.abs(cashFlows[0]);
-  
+
   if (totalInflows < initialOutflow * 0.01) {
     // Total inflows are less than 1% of initial investment
     // This is essentially a total loss
     return -0.99; // -99% monthly return
   }
-  
+
   for (let i = 0; i < maxIterations; i++) {
     let npv = 0;
     let dnpv = 0;
-    
+
     for (let j = 0; j < cashFlows.length; j++) {
       const factor = Math.pow(1 + rate, j);
       npv += cashFlows[j] / factor;
-      dnpv -= j * cashFlows[j] / Math.pow(1 + rate, j + 1);
+      dnpv -= (j * cashFlows[j]) / Math.pow(1 + rate, j + 1);
     }
-    
+
     // Protect against division by zero or infinity
     if (!isFinite(dnpv) || Math.abs(dnpv) < 1e-10) {
       return -0.99; // Return maximum loss if derivative is invalid
     }
-    
+
     const newRate = rate - npv / dnpv;
-    
+
     // Bound the rate to prevent divergence
     if (!isFinite(newRate) || newRate < -0.99) {
       return -0.99; // Maximum loss
@@ -61,14 +61,14 @@ function calculateIRR(cashFlows: number[]): number {
     if (newRate > 100) {
       return 100; // Cap at 10,000% monthly (unrealistic but prevents infinity)
     }
-    
+
     if (Math.abs(newRate - rate) < tolerance) {
       return newRate;
     }
-    
+
     rate = newRate;
   }
-  
+
   return rate;
 }
 
@@ -86,7 +86,9 @@ export function calculateTokenReturns(
   onChainMintedSupply?: string,
 ): TokenReturns {
   if (!asset.plannedProduction || !token.sharePercentage) {
-    console.log(`[Returns] Missing data for ${token.symbol}: plannedProduction=${!!asset.plannedProduction}, sharePercentage=${token.sharePercentage}`);
+    console.log(
+      `[Returns] Missing data for ${token.symbol}: plannedProduction=${!!asset.plannedProduction}, sharePercentage=${token.sharePercentage}`,
+    );
     return {
       baseReturn: 0,
       bonusReturn: 0,
@@ -98,8 +100,10 @@ export function calculateTokenReturns(
   const { plannedProduction } = asset;
   const { projections, oilPriceAssumption } = plannedProduction;
   const sharePercentage = token.sharePercentage / 100; // Convert to decimal
-  
-  console.log(`[Returns] Token ${token.symbol}: projections length = ${projections?.length}, oilPriceAssumption = ${oilPriceAssumption}`);
+
+  console.log(
+    `[Returns] Token ${token.symbol}: projections length = ${projections?.length}, oilPriceAssumption = ${oilPriceAssumption}`,
+  );
   if (!projections || projections.length === 0) {
     console.log(`[Returns] No projections for ${token.symbol}`);
     return {
@@ -111,22 +115,25 @@ export function calculateTokenReturns(
   }
 
   // Get pricing adjustments from asset technical data
-  const benchmarkPremium = asset.technical?.pricing?.benchmarkPremium 
-    ? parseFloat(asset.technical.pricing.benchmarkPremium.replace(/[^-\d.]/g, ''))
-    : (token.asset?.technical?.pricing?.benchmarkPremium || 0);
+  const benchmarkPremium = asset.technical?.pricing?.benchmarkPremium
+    ? parseFloat(
+        asset.technical.pricing.benchmarkPremium.replace(/[^-\d.]/g, ""),
+      )
+    : token.asset?.technical?.pricing?.benchmarkPremium || 0;
   const transportCosts = asset.technical?.pricing?.transportCosts
-    ? parseFloat(asset.technical.pricing.transportCosts.replace(/[^-\d.]/g, ''))
-    : (token.asset?.technical?.pricing?.transportCosts || 0);
+    ? parseFloat(asset.technical.pricing.transportCosts.replace(/[^-\d.]/g, ""))
+    : token.asset?.technical?.pricing?.transportCosts || 0;
 
   // Calculate adjusted oil price
-  const adjustedOilPrice = oilPriceAssumption + benchmarkPremium - transportCosts;
+  const adjustedOilPrice =
+    oilPriceAssumption + benchmarkPremium - transportCosts;
 
   // Convert supply to numbers
   const maxSupply =
     typeof token.supply?.maxSupply === "string"
       ? Number(BigInt(token.supply.maxSupply) / BigInt(10 ** token.decimals))
       : Number(token.supply?.maxSupply || 0);
-  
+
   // ALWAYS use on-chain minted supply for accurate bonus calculation
   // Never trust IPFS metadata for minted supply as it's not updated in real-time
   let mintedSupply: number;
@@ -134,7 +141,9 @@ export function calculateTokenReturns(
     // On-chain value is in wei, convert to token units
     // If it's "0" or any falsy value, this will correctly evaluate to 0
     try {
-      mintedSupply = Number(BigInt(onChainMintedSupply) / BigInt(10 ** token.decimals));
+      mintedSupply = Number(
+        BigInt(onChainMintedSupply) / BigInt(10 ** token.decimals),
+      );
     } catch {
       // If BigInt conversion fails, default to 0
       mintedSupply = 0;
@@ -144,13 +153,12 @@ export function calculateTokenReturns(
     // This ensures we never use stale IPFS data
     mintedSupply = 0;
   }
-  
 
   // Build cash flows for IRR calculation
   // Start with initial investment of -$1 at month 0
   const baseCashFlows = [-1]; // Month 0: pay $1 per token
   const mintedCashFlows = [-1]; // Month 0: pay $1 per token
-  
+
   let totalProduction = 0;
 
   for (const projection of projections) {
@@ -165,7 +173,8 @@ export function calculateTokenReturns(
     baseCashFlows.push(revenuePerTokenBase);
 
     // Step 4b: Revenue per token using minted supply (bonus case)
-    const revenuePerTokenMinted = mintedSupply > 0 ? tokenShareRevenue / mintedSupply : 0;
+    const revenuePerTokenMinted =
+      mintedSupply > 0 ? tokenShareRevenue / mintedSupply : 0;
     mintedCashFlows.push(revenuePerTokenMinted);
 
     totalProduction += projection.production;
@@ -174,10 +183,10 @@ export function calculateTokenReturns(
   // Calculate returns
   let baseReturn: number;
   let bonusReturn: number;
-  
+
   // Calculate base return (using max supply)
   const monthlyIRRBase = calculateIRR(baseCashFlows);
-  
+
   // Handle edge cases in IRR calculation
   if (monthlyIRRBase <= -0.99) {
     // IRR is -99% or worse monthly (total loss)
@@ -189,7 +198,7 @@ export function calculateTokenReturns(
     // Normal calculation
     baseReturn = (Math.pow(1 + monthlyIRRBase, 12) - 1) * 100;
   }
-  
+
   // Calculate bonus return
   if (mintedSupply === 0) {
     // When no tokens are minted, the return is effectively infinite
@@ -206,16 +215,18 @@ export function calculateTokenReturns(
   // This represents how many barrels of oil each $1 investment in the token represents
   // ONLY uses on-chain minted supply - no fallbacks
   // When no tokens are minted, the implied barrels is infinite
-  const impliedBarrelsPerToken = mintedSupply > 0
-    ? (totalProduction * sharePercentage) / mintedSupply
-    : Infinity;
+  const impliedBarrelsPerToken =
+    mintedSupply > 0
+      ? (totalProduction * sharePercentage) / mintedSupply
+      : Infinity;
 
   // Calculate breakeven oil price (price needed to recover $1 per token)
   // This is the oil price where total revenue equals total token investment
   // Formula: (minted supply * $1) / (total barrels * share percentage)
-  const breakEvenOilPrice = totalProduction * sharePercentage > 0
-    ? mintedSupply / (totalProduction * sharePercentage)
-    : 0;
+  const breakEvenOilPrice =
+    totalProduction * sharePercentage > 0
+      ? mintedSupply / (totalProduction * sharePercentage)
+      : 0;
 
   return {
     baseReturn: baseReturn, // Keep negative values for proper display
@@ -235,7 +246,7 @@ export function getTokenReturns(
   token: TokenMetadata,
   onChainMintedSupply?: string,
 ): TokenReturns {
-  const cacheKey = `${asset.id}-${token.contractAddress}-${onChainMintedSupply || 'ipfs'}`;
+  const cacheKey = `${asset.id}-${token.contractAddress}-${onChainMintedSupply || "ipfs"}`;
 
   if (returnCache.has(cacheKey)) {
     return returnCache.get(cacheKey)!;

@@ -120,7 +120,7 @@ export function useDataExport() {
       ["Asset ID", asset.id],
       ["Location", `${asset.location.state}, ${asset.location.country}`],
       ["Operator", asset.operator.name],
-      ["Status", asset.production.status],
+      ["Status", asset.status],
       ["Depth", asset.geology?.depth || "N/A"],
       ["Type", asset.geology?.type || "N/A"],
       ["Interest Type", asset.terms?.interestType || "N/A"],

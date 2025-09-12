@@ -3,30 +3,33 @@
  */
 
 import { executeGraphQL } from "../clients/cachedGraphqlClient";
-import { 
-  BASE_SFT_SUBGRAPH_URL, 
-  BASE_METADATA_SUBGRAPH_URL, 
+import {
+  BASE_SFT_SUBGRAPH_URL,
+  BASE_METADATA_SUBGRAPH_URL,
   getEnergyFields,
   PRODUCTION_METABOARD_ADMIN,
-  DEVELOPMENT_METABOARD_ADMIN 
+  DEVELOPMENT_METABOARD_ADMIN,
 } from "$lib/network";
-import { env as publicEnv } from '$env/dynamic/public';
+import { env as publicEnv } from "$env/dynamic/public";
 import type {
   GetSftsResponse,
   GetMetadataResponse,
   GetDepositsResponse,
   OffchainAssetReceiptVault,
   MetaV1S,
-  DepositWithReceipt
+  DepositWithReceipt,
 } from "$lib/types/graphql";
 
 // Use environment variable to determine which metaboard admin to use
-const PUBLIC_METABOARD_ADMIN = publicEnv.PUBLIC_METABOARD_ADMIN || DEVELOPMENT_METABOARD_ADMIN;
+const PUBLIC_METABOARD_ADMIN =
+  publicEnv.PUBLIC_METABOARD_ADMIN || DEVELOPMENT_METABOARD_ADMIN;
 
 // Get the correct energy fields based on the metaboard admin
 const ENERGY_FIELDS = getEnergyFields(PUBLIC_METABOARD_ADMIN);
 
-console.log(`[SftRepository] METABOARD_ADMIN is set to: ${PUBLIC_METABOARD_ADMIN}`);
+console.log(
+  `[SftRepository] METABOARD_ADMIN is set to: ${PUBLIC_METABOARD_ADMIN}`,
+);
 
 export class SftRepository {
   /**
@@ -51,17 +54,17 @@ export class SftRepository {
     try {
       const data = await executeGraphQL<GetSftsResponse>(
         BASE_SFT_SUBGRAPH_URL,
-        query
+        query,
       );
 
       if (!data || !data.offchainAssetReceiptVaults) {
-        console.error('[SftRepository] No data returned from subgraph');
+        console.error("[SftRepository] No data returned from subgraph");
         return [];
       }
 
       return data.offchainAssetReceiptVaults;
     } catch (error) {
-      console.error('[SftRepository] Error fetching SFTs:', error);
+      console.error("[SftRepository] Error fetching SFTs:", error);
       return [];
     }
   }
@@ -72,12 +75,12 @@ export class SftRepository {
   async getSftMetadata(): Promise<MetaV1S[]> {
     // Extract all SFT addresses from ENERGY_FIELDS
     const sftAddresses = ENERGY_FIELDS.flatMap((field) =>
-      field.sftTokens.map((token) => token.address)
+      field.sftTokens.map((token) => token.address),
     );
 
     // Create the subjects array for the GraphQL query
     const subjects = sftAddresses.map(
-      (address) => `"0x000000000000000000000000${address.slice(2)}"`
+      (address) => `"0x000000000000000000000000${address.slice(2)}"`,
     );
 
     const query = `
@@ -103,14 +106,14 @@ export class SftRepository {
     try {
       const data = await executeGraphQL<GetMetadataResponse>(
         BASE_METADATA_SUBGRAPH_URL,
-        query
+        query,
       );
-      
+
       if (!data || !data.metaV1S) {
-        console.error('[SftRepository] No metadata returned from subgraph');
+        console.error("[SftRepository] No metadata returned from subgraph");
         return [];
       }
-      
+
       return data.metaV1S;
     } catch (error) {
       console.error("Error fetching SFT metadata:", error);
@@ -121,11 +124,13 @@ export class SftRepository {
   /**
    * Fetch deposits for a specific owner address
    */
-  async getDepositsForOwner(ownerAddress: string): Promise<DepositWithReceipt[]> {
+  async getDepositsForOwner(
+    ownerAddress: string,
+  ): Promise<DepositWithReceipt[]> {
     if (!ownerAddress) return [];
 
     const sftAddresses = ENERGY_FIELDS.flatMap((field) =>
-      field.sftTokens.map((token) => token.address)
+      field.sftTokens.map((token) => token.address),
     );
 
     const query = `
@@ -152,8 +157,8 @@ export class SftRepository {
         query,
         {
           owner: ownerAddress.toLowerCase(),
-          sftIds: sftAddresses.map(s => s.toLowerCase())
-        }
+          sftIds: sftAddresses.map((s) => s.toLowerCase()),
+        },
       );
       return data.depositWithReceipts || [];
     } catch (error) {
