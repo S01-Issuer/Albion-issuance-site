@@ -25,7 +25,7 @@
 		<div class="max-w-6xl mx-auto px-4 py-6">
 			<div class="flex items-center justify-between">
 				<img src="/assets/logo.svg" alt="Albion Labs Logo" class="h-12 w-auto" />
-				<a href="/login" class="text-sm text-gray-600 hover:text-gray-900 underline">← Back to Login</a>
+				<a href="/login" class="text-sm text-gray-600 hover:text-gray-900 underline">← Back</a>
 			</div>
 		</div>
 	</div>
