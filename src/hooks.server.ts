@@ -1,6 +1,6 @@
 import type { Handle } from "@sveltejs/kit";
 import { verifySessionToken } from "$lib/server/auth";
-import { env } from "$env/dynamic/private";
+import { BASIC_AUTH_USER, BASIC_AUTH_PASS } from "$env/static/private";
 
 const ALLOWLIST = new Set<string>([
   "/login",
@@ -25,13 +25,13 @@ function isAllowlisted(path: string) {
 
 export const handle: Handle = async ({ event, resolve }) => {
   // Read credentials from env; still gate even if missing so misconfigurations are obvious.
-  const user = env.BASIC_AUTH_USER || "";
-  const pass = env.BASIC_AUTH_PASS || "";
+  const user = BASIC_AUTH_USER || "";
+  const pass = BASIC_AUTH_PASS || "";
 
   const { url, cookies } = event;
   const path = url.pathname;
 
-  const debug = env.DEBUG_LOGIN === "true";
+  const debug = false; // DEBUG_LOGIN not available in static env
   if (isAllowlisted(path)) {
     if (debug) console.log("[auth] allowlisted path", path);
     return resolve(event);
@@ -57,7 +57,17 @@ export const handle: Handle = async ({ event, resolve }) => {
     return resolve(event);
   }
 
-  const params = new URLSearchParams({ redirectTo: url.pathname + url.search });
+  let search = '';
+  try {
+    search = url.search || '';
+  } catch (e) {
+    // url.search not available during prerendering
+    search = '';
+  }
+  
+  const params = new URLSearchParams({ 
+    redirectTo: url.pathname + search
+  });
   return new Response(null, {
     status: 303,
     headers: { Location: `/login?${params.toString()}` },
