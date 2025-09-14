@@ -83,7 +83,7 @@ class GraphQLCache {
     variables?: Record<string, unknown>,
   ): Promise<T> {
     console.log(`[GraphQL] Fetching from: ${url}`);
-    console.log(`[GraphQL] Query:`, query.substring(0, 200) + '...');
+    console.log(`[GraphQL] Query:`, query.substring(0, 200) + "...");
     console.log(`[GraphQL] Variables:`, variables);
 
     const response = await fetch(url, {

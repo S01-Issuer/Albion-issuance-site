@@ -58,16 +58,16 @@ export const handle: Handle = async ({ event, resolve }) => {
     return resolve(event);
   }
 
-  let search = '';
+  let search = "";
   try {
-    search = url.search || '';
+    search = url.search || "";
   } catch (e) {
     // url.search not available during prerendering
-    search = '';
+    search = "";
   }
-  
-  const params = new URLSearchParams({ 
-    redirectTo: url.pathname + search
+
+  const params = new URLSearchParams({
+    redirectTo: url.pathname + search,
   });
   return new Response(null, {
     status: 303,

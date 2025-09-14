@@ -47,11 +47,17 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
 
     try {
       console.log("[useAssetDetailData] Loading data for ID:", id);
-      console.log("[useAssetDetailData] Available energy fields:", ENERGY_FIELDS.map(f => ({
-        name: f.name,
-        slug: f.name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, ""),
-        tokens: f.sftTokens.map(t => t.address)
-      })));
+      console.log(
+        "[useAssetDetailData] Available energy fields:",
+        ENERGY_FIELDS.map((f) => ({
+          name: f.name,
+          slug: f.name
+            .toLowerCase()
+            .replace(/\s+/g, "-")
+            .replace(/[^a-z0-9-]/g, ""),
+          tokens: f.sftTokens.map((t) => t.address),
+        })),
+      );
 
       const catalog = useCatalogService();
       await catalog.build();
@@ -68,12 +74,16 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
 
       // If not found, try to match by contract address prefix (fallback from getEnergyFieldId)
       if (!field && id.length === 8) {
-        console.log("[useAssetDetailData] Trying to match by contract address prefix:", id);
+        console.log(
+          "[useAssetDetailData] Trying to match by contract address prefix:",
+          id,
+        );
         field = ENERGY_FIELDS.find((f) =>
           f.sftTokens.some(
             (token) =>
-              token.address.toLowerCase().replace(/^0x/, "").substring(0, 8) === id
-          )
+              token.address.toLowerCase().replace(/^0x/, "").substring(0, 8) ===
+              id,
+          ),
         );
       }
 
@@ -86,7 +96,7 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
         hasAssets: !!catalogData?.assets,
         assetKeys: Object.keys(catalogData?.assets || {}),
         hasTokens: !!catalogData?.tokens,
-        tokenCount: Object.keys(catalogData?.tokens || {}).length
+        tokenCount: Object.keys(catalogData?.tokens || {}).length,
       });
 
       if (!catalogData) throw new Error("Failed to build catalog");
@@ -107,7 +117,7 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
         assetId,
         foundAsset: !!asset,
         fieldTokensCount: fieldTokens.length,
-        fieldTokenAddresses: fieldTokens.map(t => t.contractAddress)
+        fieldTokenAddresses: fieldTokens.map((t) => t.contractAddress),
       });
 
       if (fieldTokens.length === 0)

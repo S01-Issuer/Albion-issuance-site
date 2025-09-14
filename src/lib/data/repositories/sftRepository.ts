@@ -19,15 +19,21 @@ import type {
 } from "$lib/types/graphql";
 
 // Log which token addresses we are operating on (derived from ENERGY_FIELDS)
-console.log("[SftRepository] METABOARD_ADMIN is set to:", ACTIVE_METABOARD_ADMIN);
+console.log(
+  "[SftRepository] METABOARD_ADMIN is set to:",
+  ACTIVE_METABOARD_ADMIN,
+);
 console.log(
   "[SftRepository] Active ENERGY_FIELDS tokens:",
   ENERGY_FIELDS.flatMap((f) => f.sftTokens.map((t) => t.address)),
 );
-console.log("[SftRepository] Energy fields:", ENERGY_FIELDS.map(f => ({
-  name: f.name,
-  tokens: f.sftTokens.map(t => t.address)
-})));
+console.log(
+  "[SftRepository] Energy fields:",
+  ENERGY_FIELDS.map((f) => ({
+    name: f.name,
+    tokens: f.sftTokens.map((t) => t.address),
+  })),
+);
 
 export class SftRepository {
   /**
@@ -60,7 +66,8 @@ export class SftRepository {
         hasData: !!data,
         hasVaults: !!data?.offchainAssetReceiptVaults,
         vaultCount: data?.offchainAssetReceiptVaults?.length || 0,
-        vaultAddresses: data?.offchainAssetReceiptVaults?.map(v => v.address) || []
+        vaultAddresses:
+          data?.offchainAssetReceiptVaults?.map((v) => v.address) || [],
       });
 
       if (!data || !data.offchainAssetReceiptVaults) {

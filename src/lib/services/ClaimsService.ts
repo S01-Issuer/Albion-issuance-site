@@ -72,7 +72,7 @@ export class ClaimsService {
     }
 
     let claimHistory: ClaimHistory[] = [];
-    let holdings: ClaimsHoldingsGroup[] = [];
+    const holdings: ClaimsHoldingsGroup[] = [];
     let totalClaimed = 0;
     let totalEarned = 0;
     let totalUnclaimed = 0;

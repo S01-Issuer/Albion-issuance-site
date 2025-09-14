@@ -62,13 +62,15 @@ export class CatalogService {
       hasSfts: !!$sfts,
       sftCount: $sfts?.length || 0,
       hasMetadata: !!$sftMetadata,
-      metadataCount: $sftMetadata?.length || 0
+      metadataCount: $sftMetadata?.length || 0,
     });
 
     // If stores are null or empty, fetch from repository
     // Check for null explicitly to distinguish "not loaded" from "loaded but empty"
     if (!$sfts || !Array.isArray($sfts) || $sfts.length === 0) {
-      console.log("[CatalogService] SFTs not loaded or empty, fetching from repository...");
+      console.log(
+        "[CatalogService] SFTs not loaded or empty, fetching from repository...",
+      );
       const fetchedSfts = await sftRepository.getAllSfts();
       console.log("[CatalogService] Fetched SFTs:", fetchedSfts.length);
       // Convert GraphQL type to store type (they're compatible for our usage)
@@ -78,8 +80,14 @@ export class CatalogService {
       console.log("[CatalogService] Using existing SFTs from store");
     }
 
-    if (!$sftMetadata || !Array.isArray($sftMetadata) || $sftMetadata.length === 0) {
-      console.log("[CatalogService] Metadata not loaded or empty, fetching from repository...");
+    if (
+      !$sftMetadata ||
+      !Array.isArray($sftMetadata) ||
+      $sftMetadata.length === 0
+    ) {
+      console.log(
+        "[CatalogService] Metadata not loaded or empty, fetching from repository...",
+      );
       const fetchedMetadata = await sftRepository.getSftMetadata();
       console.log("[CatalogService] Fetched metadata:", fetchedMetadata.length);
       $sftMetadata = fetchedMetadata as any;

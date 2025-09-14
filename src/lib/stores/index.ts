@@ -20,7 +20,11 @@ export const dataLoaded = derived(
   [sfts, sftMetadata],
   ([$sfts, $sftMetadata]) => {
     // Both must be arrays with at least some data
-    return Array.isArray($sfts) && $sfts.length > 0 &&
-           Array.isArray($sftMetadata) && $sftMetadata.length > 0;
-  }
+    return (
+      Array.isArray($sfts) &&
+      $sfts.length > 0 &&
+      Array.isArray($sftMetadata) &&
+      $sftMetadata.length > 0
+    );
+  },
 );
