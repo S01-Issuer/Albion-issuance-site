@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { sftMetadata, sfts } from '$lib/stores';
+	import { sftMetadata, sfts, dataLoaded } from '$lib/stores';
 	import type { Asset, Token } from '$lib/types/uiTypes';
 	import { Card, CardContent, PrimaryButton, SecondaryButton, Chart, CollapsibleSection } from '$lib/components/components';
 	import SectionTitle from '$lib/components/components/SectionTitle.svelte';
@@ -16,12 +16,13 @@
 		useTooltip, 
 		useEmailNotification
 	} from '$lib/composables';
-	import { onMount } from 'svelte';
 	import AssetDetailHeader from '$lib/components/patterns/assets/AssetDetailHeader.svelte';
 	import AssetOverviewTab from '$lib/components/patterns/assets/AssetOverviewTab.svelte';
     import { calculateTokenReturns, getTokenPayoutHistory, getTokenSupply } from '$lib/utils/returnCalculations';
     import { formatEther } from 'viem';
-    import { PINATA_GATEWAY } from '$lib/network';
+import { PINATA_GATEWAY } from '$lib/network';
+import { onMount } from 'svelte';
+//
 
 	let activeTab = 'overview';
 	let unclaimedPayout = 0; // Will be calculated from actual token holdings
@@ -46,8 +47,10 @@
 	
 	// Load data when asset ID changes and SFT data is available
 	// The composable now handles duplicate load prevention internally
-	$: if (assetId && $sftMetadata && $sfts && !hasInitiatedLoad) {
+	// IMPORTANT: Wait for dataLoaded to ensure both stores have actual data
+	$: if (assetId && $dataLoaded && !hasInitiatedLoad) {
 		console.log(`[AssetDetailPage] Loading data for asset: ${assetId}`);
+		console.log(`[AssetDetailPage] Store state - SFTs: ${$sfts?.length}, Metadata: ${$sftMetadata?.length}`);
 		hasInitiatedLoad = true;
 		loadAssetData(assetId);
 	}
@@ -68,8 +71,13 @@
 	
 	// Check for future releases when asset data is available
 	$: if (assetId && assetData) {
+		console.log(`[AssetDetailPage] Checking for future releases for assetId: ${assetId}`);
 		hasIncompleteReleases(assetId).then(hasIncomplete => {
+			console.log(`[AssetDetailPage] hasFutureReleases result: ${hasIncomplete}`);
 			hasFutureReleases = hasIncomplete;
+		}).catch(error => {
+			console.error(`[AssetDetailPage] Error checking future releases:`, error);
+			hasFutureReleases = false;
 		});
 	}
 	
@@ -104,8 +112,23 @@
 		showTooltip = '';
 	}
 	
-	// Email popup state
-	let showEmailPopup = false;
+// Email popup state
+let showEmailPopup = false; // legacy modal (to be removed)
+// Future releases flip state
+let futureCardFlipped = false;
+
+onMount(() => {
+    // Redirect to local thank-you page on successful MailerLite submit for Future Releases form
+    (window as any).ml_webform_success_30848422 = function () {
+        try {
+            window.location.assign('/thank-you?source=releases');
+        } catch {
+            // no-op
+        }
+    };
+});
+
+	// No custom reCAPTCHA flow; use hosted MailerLite form
 	
 	// Track flipped state for each token card
 	let flippedCards = new Set();
@@ -173,35 +196,13 @@
 		selectedTokenAddress = null;
 	}
 	
-	function handleGetNotified() {
-		showEmailPopup = true;
-	}
+// Removed JS popup toggle; using HTML embed directly
 	
 	function handleCloseEmailPopup() {
 		showEmailPopup = false;
 	}
 	
-	function handleSubscribeFormSubmit() {
-		// Store the current page path before form submission
-		sessionStorage.setItem('lastPageBeforeSubscribe', $page.url.pathname + $page.url.search);
-		// The form will handle the actual submission
-	}
-	
-	onMount(() => {
-		// Add event listener to the form
-		const form = document.getElementById('mc-embedded-subscribe-form');
-		if (form) {
-			// Use capture phase to ensure our handler runs first
-			form.addEventListener('submit', handleSubscribeFormSubmit, true);
-		}
-		
-		// Cleanup
-		return () => {
-			if (form) {
-				form.removeEventListener('submit', handleSubscribeFormSubmit, true);
-			}
-		};
-	});
+
 
 </script>
 
@@ -316,11 +317,15 @@
 											{/if}
 										</div>
 										<div class="text-sm font-medium text-black opacity-70">Days Since Last HSE Incident</div>
-									</div>
-								</div>
-							</div>
-						</div>
-					</div>
+                        </div>
+                      </div>
+                    </div>
+                    <!-- MailerLite embed init (required for success handling) -->
+                    <script>
+                      try { fetch("https://assets.mailerlite.com/jsonp/1795576/forms/165461032541620178/takel"); } catch {}
+                    </script>
+                  </div>
+                </div>
         		</CollapsibleSection>
         		
         		<CollapsibleSection title="Revenue History" isOpenByDefault={false} alwaysOpenOnDesktop={false}>
@@ -909,21 +914,92 @@
 					{#if hasFutureReleases}
 					<Card hoverable>
 						<CardContent paddingClass="p-0">
-							<div class="flex flex-col justify-center text-center p-12" style="min-height: 650px;">
-								<div class="text-5xl mb-6">🚀</div>
-								<h4 class="text-xl font-extrabold mb-4 text-black uppercase tracking-wider">Future Releases</h4>
-								<p class="text-base mb-8 text-black opacity-70">Additional token releases planned</p>
-								<SecondaryButton on:click={handleGetNotified}>
-									Get Notified
-								</SecondaryButton>
-							</div>
-						</CardContent>
-					</Card>
+                        <!-- Flip container for Future Releases card -->
+                <div class="relative preserve-3d transform-gpu transition-transform duration-500 {futureCardFlipped ? 'rotate-y-180' : ''} min-h-[650px]">
+                  <!-- Front -->
+                  <div class="absolute inset-0 backface-hidden">
+                    <div class="flex flex-col justify-center text-center p-12 h-full">
+                      <div class="text-5xl mb-6">🚀</div>
+                      <h4 class="text-xl font-extrabold text-black uppercase tracking-wider mb-4">Future Releases</h4>
+                      <p class="text-base mb-8 text-black opacity-70">Additional token releases planned</p>
+                      <div class="max-w-xs mx-auto w-full">
+                        <SecondaryButton fullWidth on:click={() => { futureCardFlipped = true; }}>
+                          Get Notified
+                        </SecondaryButton>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Back -->
+                  <div class="absolute inset-0 backface-hidden rotate-y-180 bg-white">
+                    <div class="p-6 sm:p-8 h-full flex flex-col">
+                      <div class="flex items-center justify-between mb-4">
+                        <h4 class="text-lg font-extrabold text-black">Get Notified</h4>
+                        <div>
+                          <SecondaryButton on:click={() => { futureCardFlipped = false; }}>
+                            ← Back
+                          </SecondaryButton>
+                        </div>
+                      </div>
+                      <p class="text-base sm:text-lg text-black opacity-70 mb-6 leading-relaxed">Signup to be notified when the next token release becomes available.</p>
+
+                      <!-- MailerLite HTML embed form -->
+                      <div class="text-left max-w-md w-full mx-auto flex-1 future-notify">
+                        <div id="mlb2-30848422" class="ml-form-embedContainer ml-subscribe-form ml-subscribe-form-30848422">
+                          <div class="ml-form-align-center ">
+                            <div class="ml-form-embedWrapper embedForm">
+                              <div class="ml-form-embedBody ml-form-embedBodyDefault row-form">
+                                <form class="ml-block-form" action="https://assets.mailerlite.com/jsonp/1795576/forms/165461032541620178/subscribe" method="post" on:submit={() => { try { sessionStorage.setItem('lastPageBeforeSubscribe', window.location.pathname + window.location.search + window.location.hash); } catch {} }}>
+                                  <div class="ml-form-formContent">
+                                    <div class="ml-form-fieldRow ml-last-item">
+                                      <div class="ml-field-group ml-field-email ml-validate-email ml-validate-required">
+                                        <input aria-label="email" aria-required="true" type="email" name="fields[email]" placeholder="Enter your email address" autocomplete="email" class="form-control w-full px-4 py-3 border border-light-gray bg-white text-black placeholder-black placeholder-opacity-50 focus:outline-none focus:border-primary" required>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div class="ml-form-embedPermissions" style="">
+                                    <div class="ml-form-embedPermissionsContent default privacy-policy">
+                                      <p class="text-base sm:text-lg text-black opacity-70 mb-6 leading-relaxed">You can unsubscribe anytime. For more details, review our Privacy Policy.</p>
+                                      </div>
+                                  </div>
+                                  <div class="ml-form-recaptcha ml-validate-required mb-3">
+                                    <script src="https://www.google.com/recaptcha/api.js"></script>
+                                    <div class="g-recaptcha" data-sitekey="6Lf1KHQUAAAAAFNKEX1hdSWCS3mRMv4FlFaNslaD"></div>
+                                  </div>
+                                  <input type="hidden" name="fields[interest]" value={assetId}>
+                                  <input type="hidden" name="ml-submit" value="1">
+                                  <div class="ml-form-embedSubmit">
+                                    <button type="submit" class="w-full px-6 py-3 bg-black text-white font-extrabold text-sm uppercase tracking-wider cursor-pointer transition-colors duration-200 hover:bg-secondary border-0">Subscribe</button>
+                                    <button disabled="disabled" style="display: none;" type="button" class="loading">
+                                      <div class="ml-form-embedSubmitLoad"></div>
+                                      <span class="sr-only">Loading...</span>
+                                    </button>
+                                  </div>
+                                  <input type="hidden" name="anticsrf" value="true">
+                                </form>
+                              </div>
+                              <div class="ml-form-successBody row-success" style="display: none">
+                                <div class="ml-form-successContent">
+                                  <h4>Thank you!</h4>
+                                  <p>You have successfully joined our subscriber list.</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  </div>
+                </CardContent>
+                </Card>
 					{/if}
 				</div>
 				</div>
 			</div>
 		</ContentSection>
+
+        
 
 		<!-- Token Purchase Widget -->
 		{#if showPurchaseWidget}
@@ -938,72 +1014,7 @@
 		{/if}
 
 		<!-- Email Notification Popup -->
-		{#if showEmailPopup}
-			<!-- svelte-ignore a11y-click-events-have-key-events -->
-			<!-- svelte-ignore a11y-no-static-element-interactions -->
-			<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[200] p-4" on:click={handleCloseEmailPopup}>
-				<!-- svelte-ignore a11y-click-events-have-key-events -->
-				<!-- svelte-ignore a11y-no-static-element-interactions -->
-				<div class="bg-white border border-light-gray max-w-md w-full flex flex-col" style="max-height: 95vh; min-height: 500px;" on:click|stopPropagation role="dialog" aria-modal="true" tabindex="0">
-					<div class="flex justify-between items-center p-6 border-b border-light-gray flex-shrink-0">
-						<h3 class="text-xl font-extrabold text-black">Get Notified</h3>
-						<button class="text-2xl font-bold text-black bg-transparent border-none cursor-pointer p-0 leading-none hover:opacity-70" on:click={handleCloseEmailPopup}>×</button>
-					</div>
-					<div class="p-6 overflow-y-auto">
-						<p class="mb-4">Enter your email address to be notified when the next token release becomes available.</p>
-						
-						<!-- MailChimp Token Notification Form -->
-						<div id="mc_embed_shell">
-							<div id="mc_embed_signup">
-								<form action="https://exchange.us7.list-manage.com/subscribe/post?u=f3b19322aa5fe51455b292838&amp;id=6eaaa49162&amp;f_id=00fc53e0f0" 
-									  method="post" id="mc-embedded-subscribe-form" name="mc-embedded-subscribe-form" class="validate" target="_self" novalidate>
-									<div id="mc_embed_signup_scroll">
-										<h2 class="text-lg font-extrabold text-black mb-4">Subscribe for Token Updates</h2>
-										<div class="text-sm text-black opacity-70 mb-4">Get notified when this token becomes available</div>
-										
-										<div class="mc-field-group mb-6">
-											<label for="mce-EMAIL" class="block text-sm font-medium text-black mb-2">
-												Email Address <span class="asterisk text-red-500">*</span>
-											</label>
-											<input type="email" name="EMAIL" 
-												   class="required email w-full px-4 py-3 border border-light-gray bg-white text-black placeholder-black placeholder-opacity-50 focus:outline-none focus:border-primary" 
-												   id="mce-EMAIL" required value=""
-												   placeholder="Enter your email address"
-											/>
-										</div>
-										
-										<div hidden><input type="hidden" name="tags" value="3587473"></div>
-										
-										<div id="mce-responses" class="clear mt-4">
-											<div class="response" id="mce-error-response" style="display: none;"></div>
-											<div class="response" id="mce-success-response" style="display: none;"></div>
-										</div>
-										
-										<div aria-hidden="true" style="position: absolute; left: -5000px;">
-											<input type="text" name="b_f3b19322aa5fe51455b292838_6eaaa49162" tabindex="-1" value="">
-										</div>
-										
-										<!-- Spacer -->
-										<div style="height: 2rem;"></div>
-										
-										<div class="mt-8 mb-4">
-											<button 
-												type="submit" 
-												class="w-full px-8 py-4 bg-black text-white font-extrabold text-sm uppercase tracking-wider cursor-pointer transition-colors duration-200 hover:bg-secondary border-0"
-												style="display: block; visibility: visible;"
-												on:click={() => sessionStorage.setItem('lastPageBeforeSubscribe', $page.url.pathname + $page.url.search)}
-											>
-												Subscribe
-											</button>
-										</div>
-									</div>
-								</form>
-							</div>
-						</div>
-					</div>
-				</div>
-			</div>
-		{/if}
+        {#if showEmailPopup}{/if}
 	{/if}
 </PageLayout>
 
@@ -1016,7 +1027,26 @@
 		backface-visibility: hidden;
 	}
 	
-	.rotate-y-180 {
-		transform: rotateY(180deg);
-	}
+.rotate-y-180 {
+    transform: rotateY(180deg);
+}
+
+/* No captcha hiding here */
+
+/* Future Releases form styling overrides to match site */
+.future-notify .ml-form-embedContainer,
+.future-notify .ml-form-embedWrapper,
+.future-notify .ml-form-embedBody,
+.future-notify .row-form {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}
+.future-notify .ml-form-embedPermissionsContent p {
+    margin: 0.25rem 0 0.75rem 0;
+}
+.future-notify .ml-form-recaptcha {
+    margin: 0.5rem 0 1rem 0;
+}
 </style>

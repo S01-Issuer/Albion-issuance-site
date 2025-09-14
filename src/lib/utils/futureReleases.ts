@@ -7,6 +7,9 @@ import { catalogService } from "$lib/services";
  * @returns Promise<boolean> - True if there are future releases available
  */
 export async function hasIncompleteReleases(assetId: string): Promise<boolean> {
+  console.log(`[hasIncompleteReleases] Checking assetId: ${assetId}`);
+  console.log(`[hasIncompleteReleases] Available energy fields:`, ENERGY_FIELDS.map(f => f.name));
+
   // Find the matching energy field
   const energyField = ENERGY_FIELDS.find(
     (field) =>
@@ -17,7 +20,12 @@ export async function hasIncompleteReleases(assetId: string): Promise<boolean> {
         .replace(/[^a-z0-9-]/g, "") === assetId,
   );
 
-  if (!energyField) return false;
+  console.log(`[hasIncompleteReleases] Found energy field:`, energyField?.name);
+
+  if (!energyField) {
+    console.log(`[hasIncompleteReleases] No energy field found for ${assetId}`);
+    return false;
+  }
 
   try {
     await catalogService.build();
@@ -27,14 +35,30 @@ export async function hasIncompleteReleases(assetId: string): Promise<boolean> {
         (s) => s.address.toLowerCase() === t.contractAddress.toLowerCase(),
       ),
     );
-    if (fieldTokens.length === 0) return true; // If no tokens, assume future releases
+
+    console.log(`[hasIncompleteReleases] Found ${fieldTokens.length} tokens for field`);
+    console.log(`[hasIncompleteReleases] Token share percentages:`, fieldTokens.map(t => ({
+      address: t.contractAddress,
+      sharePercentage: t.sharePercentage
+    })));
+
+    if (fieldTokens.length === 0) {
+      console.log(`[hasIncompleteReleases] No tokens found, assuming future releases`);
+      return true; // If no tokens, assume future releases
+    }
+
     const totalSharePercentage = fieldTokens.reduce(
       (sum, t) => sum + (t.sharePercentage || 0),
       0,
     );
-    return totalSharePercentage < 100;
+
+    console.log(`[hasIncompleteReleases] Total share percentage: ${totalSharePercentage}%`);
+    const hasIncomplete = totalSharePercentage < 100;
+    console.log(`[hasIncompleteReleases] Has incomplete releases: ${hasIncomplete}`);
+
+    return hasIncomplete;
   } catch (error) {
-    console.error(`Error checking incomplete releases for ${assetId}:`, error);
+    console.error(`[hasIncompleteReleases] Error checking incomplete releases for ${assetId}:`, error);
     return false;
   }
 }

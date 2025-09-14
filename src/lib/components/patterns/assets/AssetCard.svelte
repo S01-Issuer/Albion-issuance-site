@@ -1,17 +1,22 @@
 <script lang="ts">
 	import { createEventDispatcher, onMount, onDestroy } from 'svelte';
+	import { goto } from '$app/navigation';
 	import type { Asset, Token } from '$lib/types/uiTypes';
 	import { Card, CardImage, CardContent, CardActions, PrimaryButton, SecondaryButton } from '$lib/components/components';
 	import { formatCurrency, formatEndDate, formatSmartNumber } from '$lib/utils/formatters';
     import { getTokenReturns } from '$lib/utils';
     import type { TokenMetadata } from '$lib/types/MetaboardTypes';
     import FormattedReturn from '$lib/components/components/FormattedReturn.svelte';
+    import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 
 	export let asset: Asset;
 	export let token: TokenMetadata[];
 	export let energyFieldId: string | undefined = undefined; // Add energy field ID for navigation
-	
+
 	const dispatch = createEventDispatcher();
+
+	// Generate consistent asset URL from token contract address
+	$: consistentAssetId = token.length > 0 ? getEnergyFieldId(token[0].contractAddress) : (energyFieldId || asset.id);
 	
 	// Scroll state management for token list
 	let scrollContainer: HTMLDivElement;
@@ -106,7 +111,7 @@
 
 </script>
 
-<Card hoverable clickable heightClass="h-full flex flex-col" on:click={() => window.location.href = `/assets/${energyFieldId || asset.id}`}>
+<Card hoverable clickable heightClass="h-full flex flex-col" on:click={() => goto(`/assets/${consistentAssetId}`)}>
 	<!-- Universal: Image with overlay for all viewports -->
 	<div class="relative">
 		<div class="relative overflow-hidden">
@@ -160,7 +165,7 @@
 		
 		<!-- View Details Button -->
 		<div class={viewDetailsSectionClasses}>
-			<PrimaryButton href="/assets/{asset.id}" fullWidth on:click={(e) => e.stopPropagation()}>
+			<PrimaryButton href="/assets/{consistentAssetId}" fullWidth on:click={(e) => e.stopPropagation()}>
 				{hasAvailableTokens ? 'View Details' : 'View Details'}
 			</PrimaryButton>
 		</div>

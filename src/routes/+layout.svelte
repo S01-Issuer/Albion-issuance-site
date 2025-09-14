@@ -105,11 +105,19 @@
 		initWallet();
 		injectAnalytics();
 		injectSpeedInsights();
+
+		// MailerLite forms should now work with direct form submission
+
 		return () => {
 			document.body.style.overflow = '';
 		};
 	});
 </script>
+
+<svelte:head>
+    <!-- MailerLite Form Scripts -->
+    <script src="https://groot.mailerlite.com/js/w/webforms.min.js?v176e10baa5e7ed80d35ae235be3d5024"></script>
+</svelte:head>
 
 <QueryClientProvider client={queryClient}>
 	<slot />
