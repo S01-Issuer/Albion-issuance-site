@@ -20,7 +20,7 @@
 				if (url.origin === window.location.origin) {
 					redirectUrl = url.pathname + url.search + url.hash;
 				}
-			} catch (e) {
+			} catch {
 				// If URL parsing fails, use the returnUrl as a pathname
 				if (returnUrl.startsWith('/')) {
 					redirectUrl = returnUrl;
@@ -40,7 +40,7 @@
 						if (referrerUrl.origin === window.location.origin) {
 							redirectUrl = referrerUrl.pathname + referrerUrl.search + referrerUrl.hash;
 						}
-					} catch (e) {
+					} catch {
 						// Keep default redirect
 					}
 				}

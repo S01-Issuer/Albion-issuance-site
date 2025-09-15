@@ -1,3 +1,7 @@
+import forms from "@tailwindcss/forms";
+import typography from "@tailwindcss/typography";
+import scrollbar from "tailwind-scrollbar";
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./src/**/*.{html,js,svelte,ts}"],
@@ -42,9 +46,5 @@ export default {
       },
     },
   },
-  plugins: [
-    require("@tailwindcss/forms"),
-    require("@tailwindcss/typography"),
-    require("tailwind-scrollbar")({ nocompatible: true }),
-  ],
+  plugins: [forms, typography, scrollbar({ nocompatible: true })],
 };

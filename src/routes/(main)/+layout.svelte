@@ -3,13 +3,14 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { sftRepository } from '$lib/data/repositories/sftRepository';
 	import { sftMetadata, sfts } from '$lib/stores';
-	import { onMount } from 'svelte';
 	import { web3Modal, signerAddress, connected, loading, disconnectWagmi } from 'svelte-wagmi';
-	import { formatAddress } from '$lib/utils/formatters';
-	import { slide } from 'svelte/transition';
+    import { formatAddress } from '$lib/utils/formatters';
+    import { slide } from 'svelte/transition';
+    import { onMount } from 'svelte';
 	
 	$: currentPath = $page.url.pathname;
 	let mobileMenuOpen = false;
+    // Newsletter form uses hosted MailerLite + built-in reCAPTCHA
 	
 	// Real wallet connection
 	async function connectWallet() {
@@ -30,27 +31,13 @@
 	function closeMobileMenu() {
 		mobileMenuOpen = false;
 	}
-	
-	function handleSubscribeFormSubmit() {
-		// Store the current page path before form submission
-		sessionStorage.setItem('lastPageBeforeSubscribe', $page.url.pathname + $page.url.search);
-		// The form will handle the actual submission
-	}
-	
-	onMount(() => {
-		// Add event listener to the form
-		const form = document.getElementById('mc-embedded-subscribe-form');
-		if (form) {
-			form.addEventListener('submit', handleSubscribeFormSubmit);
-		}
-		
-		// Cleanup
-		return () => {
-			if (form) {
-				form.removeEventListener('submit', handleSubscribeFormSubmit);
-			}
-		};
-	});
+
+    // MailerLite success redirect overrides (fallback if ML redirect not set)
+    onMount(() => {
+        (window as any).ml_webform_success_30848031 = function () {
+            try { window.location.assign('/thank-you?source=newsletter'); } catch {}
+        };
+    });
 
 	$: query = createQuery({
 		queryKey: ['getSftMetadata'],
@@ -70,6 +57,9 @@
 	});
 	$: if ($vaultQuery && $vaultQuery.data) {
 		sfts.set($vaultQuery.data);
+	} else if ($vaultQuery && $vaultQuery.isError) {
+		// Set to empty array on error to indicate "loaded but failed"
+		sfts.set([]);
 	}
 	
 
@@ -195,33 +185,66 @@
 
 				<!-- Middle Column: Newsletter & Social -->
 				<div class="flex flex-col lg:order-2">
-					<h4 class={footerSectionH4Classes}>Sign up updates</h4>
-					
-					<!-- MailChimp Newsletter Signup Form -->
-					<div id="mc_embed_signup" class="mt-4">
-						<form action="https://exchange.us7.list-manage.com/subscribe/post?u=f3b19322aa5fe51455b292838&amp;id=6eaaa49162&amp;f_id=00fd53e0f0" 
-							  method="post" id="mc-embedded-subscribe-form" name="mc-embedded-subscribe-form" target="_self" novalidate>
-							<div id="mc_embed_signup_scroll" class="flex gap-2">
-								<input type="email" value="" name="EMAIL" 
-									   placeholder="Enter email address"
-									   id="mce-EMAIL" required
-									   class="flex-1 px-3 py-3 border border-light-gray font-figtree text-sm bg-white text-black transition-colors duration-200 focus:outline-none focus:border-black"
-								/>
-								<!-- Hidden field for notification type -->
-								<input type="hidden" name="MMERGE9" value="newsletter" />
-								<!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
-								<div style="position: absolute; left: -5000px;" aria-hidden="true">
-									<input type="text" name="b_f3b19322aa5fe51455b292838_6eaaa49162" tabindex="-1" value="">
-								</div>
-								<input type="submit" value="Sign up" name="subscribe" id="mc-embedded-subscribe"
-									   class="px-4 py-3 bg-black text-white border-none font-figtree font-extrabold text-sm uppercase tracking-wider cursor-pointer transition-colors duration-200 hover:bg-secondary whitespace-nowrap"
-								/>
-							</div>
-							<div id="mce-responses" class="clear">
-								<div class="response" id="mce-error-response" style="display: none;"></div>
-								<div class="response" id="mce-success-response" style="display: none;"></div>
-							</div>
-						</form>
+					<h4 class={footerSectionH4Classes}>Get the latest updates</h4>
+
+					<!-- MailerLite Newsletter Signup Form -->
+					<div class="mt-4">
+                    <div class="footer-newsletter">
+                        <div id="mlb2-30848031" class="ml-form-embedContainer ml-subscribe-form ml-subscribe-form-30848031">
+                          <div class="ml-form-align-center">
+                            <div class="ml-form-embedWrapper embedForm">
+                              <div class="ml-form-embedBody ml-form-embedBodyHorizontal row-form">
+                                <div class="ml-form-embedContent" style="margin: 0 0 0 0;">
+                                  <!-- optional heading left empty to keep compact footer -->
+                                </div>
+                                <form class="ml-block-form"
+                                    action="https://assets.mailerlite.com/jsonp/1795576/forms/165459421552445204/subscribe"
+                                    method="post"
+                                    on:submit={() => { try { sessionStorage.setItem('lastPageBeforeSubscribe', window.location.pathname + window.location.search + window.location.hash); } catch {} }}
+                                >
+                                  <div class="ml-form-formContent horozintalForm">
+                                    <div class="ml-form-horizontalRow">
+                                      <div class="ml-input-horizontal">
+                                        <div class="horizontal-fields" style="width: 100%;">
+                                          <div class="ml-field-group ml-field-email ml-validate-email ml-validate-required">
+                                            <input type="email" name="fields[email]" placeholder="Enter email address" autocomplete="email" required class="form-control w-full px-3 py-3 border border-light-gray font-figtree text-sm bg-white text-black transition-colors duration-200 focus:outline-none focus:border-black">
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <div class="ml-button-horizontal primary" style="display:flex; align-items:stretch; min-width: 120px;">
+                                        <button type="submit" class="px-4 py-3 bg-black text-white border-none font-figtree font-extrabold text-sm uppercase tracking-wider cursor-pointer transition-colors duration-200 hover:bg-secondary whitespace-nowrap w-full">Sign up</button>
+                                        <button disabled="disabled" style="display:none;" type="button" class="loading">
+                                          <div class="ml-form-embedSubmitLoad"></div>
+                                          <span class="sr-only">Loading...</span>
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <!-- Captcha (hidden until email valid via CSS) -->
+                                  <div class="ml-form-recaptcha ml-validate-required" style="float: left; margin-top: 8px;">
+                                    <script src="https://www.google.com/recaptcha/api.js"></script>
+                                    <div class="g-recaptcha" data-sitekey="6Lf1KHQUAAAAAFNKEX1hdSWCS3mRMv4FlFaNslaD"></div>
+                                  </div>
+
+                                  <input type="hidden" name="ml-submit" value="1">
+                                  <input type="hidden" name="anticsrf" value="true">
+                                </form>
+                              </div>
+                              <div class="ml-form-successBody row-success" style="display:none;">
+                                <div class="ml-form-successContent">
+                                  <h4>Thank you!</h4>
+                                  <p>You have successfully joined our subscriber list.</p>
+                        </div>
+                      </div>
+                    </div>
+                    <!-- MailerLite embed init (required for success handling) -->
+                    <script>
+                      try { fetch("https://assets.mailerlite.com/jsonp/1795576/forms/165459421552445204/takel"); } catch {}
+                    </script>
+                  </div>
+                </div>
+                    </div>
 					</div>
 
 					<div class="mt-6">
@@ -264,8 +287,32 @@
 				</div>
 			</div>
 		</div>
-	</footer>
+    </footer>
 </div>
 
+<style>
+/* Option A: CSS-only hide/show of visible reCAPTCHA until email is valid */
+@supports selector(:has(*)) {
+  /* Hide reCAPTCHA for footer embed until email valid */
+  .footer-newsletter:has(input[name="fields[email]"]) :is(.g-recaptcha, .ml-form-recaptcha, .ml-form-embedReCaptcha, iframe[src*="google.com/recaptcha"]) {
+    visibility: hidden;
+    opacity: 0;
+    max-height: 0;
+    pointer-events: none;
+    transition: opacity 150ms ease;
+  }
+  .footer-newsletter:has(input[name="fields[email]"]:valid) :is(.g-recaptcha, .ml-form-recaptcha, .ml-form-embedReCaptcha, iframe[src*="google.com/recaptcha"]) {
+    visibility: visible;
+    opacity: 1;
+    max-height: 120px;
+    pointer-events: auto;
+  }
+}
 
+/* Remove default ML embed background/borders in footer */
+.footer-newsletter .ml-form-embedContainer,
+.footer-newsletter .ml-form-embedWrapper,
+.footer-newsletter .ml-form-embedBody,
+.footer-newsletter .row-form { background: transparent; border: 0; box-shadow: none; padding: 0; }
 
+</style>

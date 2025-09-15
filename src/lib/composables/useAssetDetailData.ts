@@ -46,20 +46,59 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
     state.update((s) => ({ ...s, loading: true, error: null }));
 
     try {
+      console.log("[useAssetDetailData] Loading data for ID:", id);
+      console.log(
+        "[useAssetDetailData] Available energy fields:",
+        ENERGY_FIELDS.map((f) => ({
+          name: f.name,
+          slug: f.name
+            .toLowerCase()
+            .replace(/\s+/g, "-")
+            .replace(/[^a-z0-9-]/g, ""),
+          tokens: f.sftTokens.map((t) => t.address),
+        })),
+      );
+
       const catalog = useCatalogService();
       await catalog.build();
 
       // Find field by ID and collect tokens from catalog
-      const field = ENERGY_FIELDS.find(
+      // Try to match by slugified field name first
+      let field = ENERGY_FIELDS.find(
         (f) =>
           f.name
             .toLowerCase()
             .replace(/\s+/g, "-")
             .replace(/[^a-z0-9-]/g, "") === id,
       );
+
+      // If not found, try to match by contract address prefix (fallback from getEnergyFieldId)
+      if (!field && id.length === 8) {
+        console.log(
+          "[useAssetDetailData] Trying to match by contract address prefix:",
+          id,
+        );
+        field = ENERGY_FIELDS.find((f) =>
+          f.sftTokens.some(
+            (token) =>
+              token.address.toLowerCase().replace(/^0x/, "").substring(0, 8) ===
+              id,
+          ),
+        );
+      }
+
+      console.log("[useAssetDetailData] Found field:", field);
+
       if (!field) throw new Error("Energy field not found");
 
       const catalogData = catalog.getCatalog();
+      console.log("[useAssetDetailData] Catalog data:", {
+        hasAssets: !!catalogData?.assets,
+        assetKeys: Object.keys(catalogData?.assets || {}),
+        hasTokens: !!catalogData?.tokens,
+        tokenCount: Object.keys(catalogData?.tokens || {}).length,
+      });
+
       if (!catalogData) throw new Error("Failed to build catalog");
 
       const allTokens = Object.values(catalogData.tokens || {});
@@ -74,6 +113,13 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
         .replace(/[^a-z0-9-]/g, "");
       const asset = catalogData.assets[assetId] || null;
 
+      console.log("[useAssetDetailData] Result:", {
+        assetId,
+        foundAsset: !!asset,
+        fieldTokensCount: fieldTokens.length,
+        fieldTokenAddresses: fieldTokens.map((t) => t.contractAddress),
+      });
+
       if (fieldTokens.length === 0)
         throw new Error("No tokens found for this energy field");
       if (!asset) throw new Error("Asset data not found");
@@ -87,7 +133,7 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
       loadedId = id;
       currentlyLoadingId = null;
     } catch (err) {
-      console.error(err);
+      console.error("[useAssetDetailData] Error:", err);
       state.update((s) => ({
         ...s,
         error:

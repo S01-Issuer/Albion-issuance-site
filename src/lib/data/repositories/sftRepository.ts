@@ -20,8 +20,19 @@ import type {
 
 // Log which token addresses we are operating on (derived from ENERGY_FIELDS)
 console.log(
+  "[SftRepository] METABOARD_ADMIN is set to:",
+  ACTIVE_METABOARD_ADMIN,
+);
+console.log(
   "[SftRepository] Active ENERGY_FIELDS tokens:",
   ENERGY_FIELDS.flatMap((f) => f.sftTokens.map((t) => t.address)),
+);
+console.log(
+  "[SftRepository] Energy fields:",
+  ENERGY_FIELDS.map((f) => ({
+    name: f.name,
+    tokens: f.sftTokens.map((t) => t.address),
+  })),
 );
 
 export class SftRepository {
@@ -45,10 +56,19 @@ export class SftRepository {
     `;
 
     try {
+      console.log("[SftRepository] Fetching SFTs from:", BASE_SFT_SUBGRAPH_URL);
       const data = await executeGraphQL<GetSftsResponse>(
         BASE_SFT_SUBGRAPH_URL,
         query,
       );
+
+      console.log("[SftRepository] Raw SFT data received:", {
+        hasData: !!data,
+        hasVaults: !!data?.offchainAssetReceiptVaults,
+        vaultCount: data?.offchainAssetReceiptVaults?.length || 0,
+        vaultAddresses:
+          data?.offchainAssetReceiptVaults?.map((v) => v.address) || [],
+      });
 
       if (!data || !data.offchainAssetReceiptVaults) {
         console.error("[SftRepository] No data returned from subgraph");

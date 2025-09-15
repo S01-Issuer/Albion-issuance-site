@@ -82,6 +82,10 @@ class GraphQLCache {
     query: string,
     variables?: Record<string, unknown>,
   ): Promise<T> {
+    console.log(`[GraphQL] Fetching from: ${url}`);
+    console.log(`[GraphQL] Query:`, query.substring(0, 200) + "...");
+    console.log(`[GraphQL] Variables:`, variables);
+
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -99,6 +103,9 @@ class GraphQLCache {
       console.error(`[GraphQL] Query errors:`, json.errors);
       throw new Error(`GraphQL errors: ${JSON.stringify(json.errors)}`);
     }
+
+    console.log(`[GraphQL] Response data keys:`, Object.keys(json.data || {}));
+    console.log(`[GraphQL] Response data:`, json.data);
 
     return json.data as T;
   }
