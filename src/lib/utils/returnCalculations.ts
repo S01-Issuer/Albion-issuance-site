@@ -84,6 +84,7 @@ export function calculateTokenReturns(
   asset: Asset,
   token: TokenMetadata,
   onChainMintedSupply?: string,
+  maxSupply?: string,
 ): TokenReturns {
   if (!asset.plannedProduction || !token.sharePercentage) {
     console.log(
@@ -128,11 +129,10 @@ export function calculateTokenReturns(
   const adjustedOilPrice =
     oilPriceAssumption + benchmarkPremium - transportCosts;
 
-  // Convert supply to numbers
-  const maxSupply =
-    typeof token.supply?.maxSupply === "string"
-      ? Number(BigInt(token.supply.maxSupply) / BigInt(10 ** token.decimals))
-      : Number(token.supply?.maxSupply || 0);
+  // Convert supply to numbers using provided maxSupply parameter
+  const maxSupplyNum = maxSupply ?
+    Number(BigInt(maxSupply) / BigInt(10 ** 18)) :
+    0;
 
   // ALWAYS use on-chain minted supply for accurate bonus calculation
   // Never trust IPFS metadata for minted supply as it's not updated in real-time
@@ -141,8 +141,9 @@ export function calculateTokenReturns(
     // On-chain value is in wei, convert to token units
     // If it's "0" or any falsy value, this will correctly evaluate to 0
     try {
+      // TokenMetadata no longer has decimals field - using default of 18
       mintedSupply = Number(
-        BigInt(onChainMintedSupply) / BigInt(10 ** token.decimals),
+        BigInt(onChainMintedSupply) / BigInt(10 ** 18),
       );
     } catch {
       // If BigInt conversion fails, default to 0
@@ -169,7 +170,7 @@ export function calculateTokenReturns(
     const tokenShareRevenue = monthlyRevenue * sharePercentage;
 
     // Step 4a: Revenue per token using max supply (base case)
-    const revenuePerTokenBase = tokenShareRevenue / maxSupply;
+    const revenuePerTokenBase = tokenShareRevenue / maxSupplyNum;
     baseCashFlows.push(revenuePerTokenBase);
 
     // Step 4b: Revenue per token using minted supply (bonus case)
@@ -190,13 +191,13 @@ export function calculateTokenReturns(
   // Handle edge cases in IRR calculation
   if (monthlyIRRBase <= -0.99) {
     // IRR is -99% or worse monthly (total loss)
-    baseReturn = -100; // Total loss
+    baseReturn = 0; // Base return should never be negative - represents minimum return
   } else if (monthlyIRRBase > 10) {
     // IRR is unrealistically high (>1000% monthly), cap at very high value
     baseReturn = 99999999999;
   } else {
     // Normal calculation
-    baseReturn = (Math.pow(1 + monthlyIRRBase, 12) - 1) * 100;
+    baseReturn = Math.max(0, (Math.pow(1 + monthlyIRRBase, 12) - 1) * 100);
   }
 
   // Calculate bonus return
@@ -229,8 +230,8 @@ export function calculateTokenReturns(
       : 0;
 
   return {
-    baseReturn: baseReturn, // Keep negative values for proper display
-    bonusReturn: bonusReturn, // Keep negative values for proper display
+    baseReturn: baseReturn, // Always >= 0, represents minimum guaranteed return
+    bonusReturn: bonusReturn, // Can be negative if bonus is less than base
     impliedBarrelsPerToken,
     breakEvenOilPrice,
   };
@@ -245,14 +246,15 @@ export function getTokenReturns(
   asset: Asset,
   token: TokenMetadata,
   onChainMintedSupply?: string,
+  maxSupply?: string,
 ): TokenReturns {
-  const cacheKey = `${asset.id}-${token.contractAddress}-${onChainMintedSupply || "ipfs"}`;
+  const cacheKey = `${asset.id}-${token.contractAddress}-${onChainMintedSupply || "ipfs"}-${maxSupply || "unknown"}`;
 
   if (returnCache.has(cacheKey)) {
     return returnCache.get(cacheKey)!;
   }
 
-  const returns = calculateTokenReturns(asset, token, onChainMintedSupply);
+  const returns = calculateTokenReturns(asset, token, onChainMintedSupply, maxSupply);
   returnCache.set(cacheKey, returns);
 
   return returns;
@@ -265,20 +267,34 @@ export function clearReturnsCache(): void {
   returnCache.clear();
 }
 
-export function getTokenSupply(token: TokenMetadata) {
+export function getTokenSupply(
+  token: TokenMetadata,
+  sft?: any,
+  maxSupplyString?: string
+) {
   if (!token) return null;
 
-  const maxSupply =
-    parseFloat(token.supply.maxSupply) / Math.pow(10, token.decimals);
-  const mintedSupply =
-    parseFloat(token.supply.mintedSupply) / Math.pow(10, token.decimals);
-  const supplyUtilization = (mintedSupply / maxSupply) * 100;
+  // If SFT and maxSupply data provided, use them
+  if (sft && maxSupplyString) {
+    const decimals = 18; // Standard decimals
+    const maxSupply = parseFloat(maxSupplyString) / Math.pow(10, decimals);
+    const mintedSupply = parseFloat(sft.totalShares) / Math.pow(10, decimals);
+    const supplyUtilization = maxSupply > 0 ? (mintedSupply / maxSupply) * 100 : 0;
 
+    return {
+      maxSupply,
+      mintedSupply,
+      supplyUtilization,
+      availableSupply: maxSupply - mintedSupply,
+    };
+  }
+
+  // Fallback to defaults if no SFT data
   return {
-    maxSupply,
-    mintedSupply,
-    supplyUtilization,
-    availableSupply: maxSupply - mintedSupply,
+    maxSupply: 0,
+    mintedSupply: 0,
+    supplyUtilization: 0,
+    availableSupply: 0,
   };
 }
 

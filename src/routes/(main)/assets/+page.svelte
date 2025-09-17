@@ -8,6 +8,7 @@
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import { groupSftsByEnergyField, type GroupedEnergyField } from '$lib/utils/energyFieldGrouping';
 	import { useCatalogService } from '$lib/services';
+	import { hasAvailableSupplySync } from '$lib/utils/supplyHelpers';
 	import { ENERGY_FIELDS } from '$lib/network';
 
 	// Track if initial load is done to prevent double loading
@@ -68,7 +69,7 @@
 	// Check if an energy field group has available tokens
 	function hasAvailableTokens(group: GroupedEnergyField): boolean {
 		return group.tokens.some(token => {
-			const hasAvailable = BigInt(token.supply.maxSupply) > BigInt(token.supply.mintedSupply);
+			const hasAvailable = hasAvailableSupplySync(token);
 			return hasAvailable;
 		});
 	}
@@ -79,7 +80,7 @@
 			const filteredTokensWithAssets = showSoldOutAssets 
 				? featuredTokensWithAssets 
 				: featuredTokensWithAssets.filter(item => {
-					const hasAvailable = BigInt(item.token.supply.maxSupply) > BigInt(item.token.supply.mintedSupply);
+					const hasAvailable = hasAvailableSupplySync(item.token);
 					return hasAvailable;
 				});
 			
@@ -89,7 +90,7 @@
 	
 	// Count sold out assets
 	$: soldOutCount = featuredTokensWithAssets.filter(item => {
-		const hasAvailable = BigInt(item.token.supply.maxSupply) > BigInt(item.token.supply.mintedSupply);
+		const hasAvailable = hasAvailableSupplySync(item.token);
 		return !hasAvailable;
 	}).length;
 	

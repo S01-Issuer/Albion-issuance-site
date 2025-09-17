@@ -20,6 +20,7 @@ import { getMaxSharesSupplyMap } from "$lib/data/clients/onchain";
 export interface CatalogData {
   assets: Record<string, Asset>;
   tokens: Record<string, TokenMetadata>;
+  maxSupplyByToken: Record<string, string>; // token address -> max supply
 }
 
 export class CatalogService {
@@ -123,7 +124,7 @@ export class CatalogService {
     currentHash: string,
   ): Promise<CatalogData> {
     if (!$sfts || $sfts.length === 0 || !$sftMetadata) {
-      this.catalog = { assets: {}, tokens: {} };
+      this.catalog = { assets: {}, tokens: {}, maxSupplyByToken: {} };
       this.lastBuildHash = currentHash;
       return this.catalog;
     }
@@ -147,6 +148,7 @@ export class CatalogService {
 
     const assets: Record<string, Asset> = {};
     const tokens: Record<string, TokenMetadata> = {};
+    const maxSupplyByToken: Record<string, string> = {};
 
     for (const sft of $sfts) {
       const targetAddress = `0x000000000000000000000000${sft.id.slice(2)}`;
@@ -175,6 +177,7 @@ export class CatalogService {
           maxSupply,
         );
         tokens[sft.id.toLowerCase()] = tokenInstance;
+        maxSupplyByToken[sft.id.toLowerCase()] = maxSupply;
 
         // Asset ID canonicalization via ENERGY_FIELDS name → kebab-case
         const field = ENERGY_FIELDS.find((f) =>
@@ -209,7 +212,7 @@ export class CatalogService {
       }
     }
 
-    this.catalog = { assets, tokens };
+    this.catalog = { assets, tokens, maxSupplyByToken };
     this.lastBuildHash = currentHash;
     return this.catalog;
   }
@@ -242,6 +245,14 @@ export class CatalogService {
         (s) => s.address.toLowerCase() === t.contractAddress.toLowerCase(),
       ),
     );
+  }
+
+  /**
+   * Get max supply for a token from authorizer data
+   */
+  getTokenMaxSupply(tokenAddress: string): string | null {
+    if (!this.catalog) return null;
+    return this.catalog.maxSupplyByToken[tokenAddress.toLowerCase()] || null;
   }
 }
 

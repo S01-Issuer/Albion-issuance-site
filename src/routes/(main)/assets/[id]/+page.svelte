@@ -19,8 +19,10 @@
 	import AssetDetailHeader from '$lib/components/patterns/assets/AssetDetailHeader.svelte';
 	import AssetOverviewTab from '$lib/components/patterns/assets/AssetOverviewTab.svelte';
     import { calculateTokenReturns, getTokenPayoutHistory, getTokenSupply } from '$lib/utils/returnCalculations';
+    import { formatSupplyDisplay } from '$lib/utils/supplyHelpers';
     import { formatEther } from 'viem';
 import { PINATA_GATEWAY } from '$lib/network';
+import { catalogService } from '$lib/services';
 import { onMount } from 'svelte';
 //
 
@@ -545,10 +547,10 @@ onMount(() => {
 					{@const monthlyReports = assetData?.monthlyReports || []}
 					{@const maxRevenue = monthlyReports.length > 0 ? Math.max(...monthlyReports.map(r => r.netIncome ?? 0)) : 1500}
 					{@const latestReport = monthlyReports[monthlyReports.length - 1]}
+					{@const primaryToken = assetTokens && assetTokens.length > 0 ? assetTokens[0] : null}
 					{@const nextMonth = (() => {
 						// Use first payment date from primary token if no revenue yet
 						if (!latestReport || !latestReport.netIncome || latestReport.netIncome === 0) {
-							const primaryToken = assetTokens && assetTokens.length > 0 ? assetTokens[0] : null;
 							if (primaryToken?.firstPaymentDate) {
 								// Parse YYYY-MM format and set to end of month
 								const [year, month] = primaryToken.firstPaymentDate.split('-').map(Number);
@@ -567,6 +569,57 @@ onMount(() => {
 					})()}
 					{@const avgRevenue = monthlyReports.length > 0 ? monthlyReports.reduce((sum, r) => sum + (r.netIncome ?? 0), 0) / monthlyReports.length : 0}
 					{@const hasRevenue = monthlyReports.some(r => r.netIncome && r.netIncome > 0)}
+					{@const chartData = (() => {
+						// Generate chart data starting from firstPaymentDate
+						const data = [];
+
+						if (primaryToken?.firstPaymentDate) {
+							// Parse the first payment date
+							const [startYear, startMonth] = primaryToken.firstPaymentDate.split('-').map(Number);
+							const startDate = new Date(startYear, startMonth - 1, 1);
+
+							// Get current date
+							const currentDate = new Date();
+
+							// Create a map of existing reports for quick lookup
+							const reportMap = new Map();
+							monthlyReports.forEach(report => {
+								if (report.month) {
+									reportMap.set(report.month, report.netIncome ?? 0);
+								}
+							});
+
+							// Generate data points from firstPaymentDate to current date
+							let iterDate = new Date(startDate);
+							while (iterDate <= currentDate) {
+								const yearStr = iterDate.getFullYear();
+								const monthStr = String(iterDate.getMonth() + 1).padStart(2, '0');
+								const monthKey = `${yearStr}-${monthStr}`;
+
+								data.push({
+									label: `${monthKey}-01`,
+									value: reportMap.get(monthKey) ?? 0
+								});
+
+								// Move to next month
+								iterDate.setMonth(iterDate.getMonth() + 1);
+							}
+						} else {
+							// Fallback to existing behavior if no firstPaymentDate
+							return monthlyReports.map(report => {
+								let dateStr = report.month || '';
+								if (dateStr && !dateStr.includes('-01')) {
+									dateStr = dateStr + '-01';
+								}
+								return {
+									label: dateStr,
+									value: report.netIncome ?? 0
+								};
+							});
+						}
+
+						return data;
+					})()}
 					<div class="flex-1 flex flex-col">
 						<div class="grid md:grid-cols-4 grid-cols-1 gap-6">
 							<div class="bg-white border border-light-gray p-6 md:col-span-3">
@@ -578,17 +631,7 @@ onMount(() => {
 								</div>
 								<div class="w-full relative">
 									<Chart
-										data={monthlyReports.map(report => {
-											// Handle different date formats
-											let dateStr = report.month || '';
-											if (dateStr && !dateStr.includes('-01')) {
-												dateStr = dateStr + '-01';
-											}
-											return {
-												label: dateStr,
-												value: report.netIncome ?? 0
-											};
-										})}
+										data={chartData}
 										width={700}
 										height={350}
 										valuePrefix="$"
@@ -721,12 +764,13 @@ onMount(() => {
 					<h3 class="text-3xl md:text-2xl font-extrabold text-black uppercase tracking-wider mb-8">Token Information</h3>
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
 					{#each assetTokens as token}
-						{@const supply = getTokenSupply(token)}
+						{@const sft = $sfts?.find(s => s.id.toLowerCase() === token.contractAddress.toLowerCase())}
+						{@const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress)}
+						{@const supply = getTokenSupply(token, sft, maxSupply)}
 						{@const hasAvailableSupply = supply && supply.availableSupply > 0}
 						{@const tokenPayoutData = getTokenPayoutHistory(token)}
 						{@const latestPayout = tokenPayoutData?.recentPayouts?.[0]}
-						{@const sft = $sfts?.find(s => s.id.toLowerCase() === token.contractAddress.toLowerCase())}
-						{@const calculatedReturns = calculateTokenReturns(assetData!, token, sft?.totalShares)}
+						{@const calculatedReturns = calculateTokenReturns(assetData!, token, sft?.totalShares, maxSupply)}
 						{@const isFlipped = flippedCards.has(token.contractAddress)}
 						<div id="token-{token.contractAddress}">
 							<Card hoverable clickable paddingClass="p-0" on:click={() => handleCardClick(token.contractAddress)}>
@@ -754,11 +798,11 @@ onMount(() => {
 											<div class="p-8 pt-6 space-y-4">
 												<div class="flex justify-between items-start">
 													<span class="text-base font-medium text-black opacity-70 relative font-figtree">Minted Supply </span>
-													<span class="text-base font-extrabold text-black text-right font-figtree">{Math.floor(Number(formatEther(BigInt(token.supply?.mintedSupply || 0))))}</span>
+													<span class="text-base font-extrabold text-black text-right font-figtree">{supply?.mintedSupply || 0}</span>
 												</div>
 												<div class="flex justify-between items-start">
 													<span class="text-base font-medium text-black opacity-70 relative font-figtree">Max Supply</span>
-													<span class="text-base font-extrabold text-black text-right font-figtree">{Math.floor(Number(formatEther(BigInt(token.supply?.maxSupply || 0))))}</span>
+													<span class="text-base font-extrabold text-black text-right font-figtree">{supply?.maxSupply || 0}</span>
 												</div>
 												<div class="flex justify-between items-start relative">
 													<span class="text-base font-medium text-black opacity-70 relative font-figtree">

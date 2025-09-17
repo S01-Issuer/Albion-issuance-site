@@ -2,7 +2,6 @@
 
 import type {
   GalleryImage,
-  TokenSupply,
   ISOYearMonthString,
   Location,
   Metadata,
@@ -38,8 +37,6 @@ export interface TokenMetadata {
   tokenType: TokenType;
   firstPaymentDate: ISOYearMonthString;
   sharePercentage: number;
-  decimals: number;
-  supply: TokenSupply;
   payoutData: PayoutData[]; // Distributions to claims vaults
   asset: AssetData;
   metadata: Metadata;
@@ -48,7 +45,6 @@ export interface TokenMetadata {
 export interface PayoutData {
   month: ISOYearMonthString; // Format: "YYYY-MM"
   tokenPayout: {
-    date: ISODateTimeString; // ISO datetime string
     totalPayout: number;
     payoutPerToken: number;
     txHash: string;
@@ -61,7 +57,6 @@ export interface Document {
   ipfs: string;
 }
 
-// TokenSupply is imported from sharedTypes.ts
 
 export interface AssetData {
   assetName: string;

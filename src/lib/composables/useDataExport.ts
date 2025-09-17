@@ -93,14 +93,12 @@ export function useDataExport() {
 
     const headers = [
       "Month",
-      "Date",
       "Total Payout (USD)",
       "Payout Per Token (USD)",
     ];
 
     const data = currentToken.payoutData.map((payout) => [
       payout.month,
-      payout.tokenPayout.date,
       payout.tokenPayout.totalPayout.toFixed(2),
       payout.tokenPayout.payoutPerToken.toFixed(4),
     ]);

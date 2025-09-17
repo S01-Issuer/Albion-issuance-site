@@ -6,7 +6,8 @@
 	import { sftMetadata, sfts } from '$lib/stores';
 	import { formatCurrency, formatTokenSupply, formatSmartReturn, formatSmartNumber } from '$lib/utils/formatters';
 	import { formatSupplyAmount, getAvailableSupplyBigInt } from '$lib/utils/tokenSupplyUtils';
-    import { getTokenReturns } from '$lib/utils';
+	import { formatSupplyDisplay } from '$lib/utils/supplyHelpers';
+    import { getTokenReturns, calculateTokenReturns } from '$lib/utils';
     import type { TokenMetadata } from '$lib/types/MetaboardTypes';
     import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 
@@ -25,6 +26,30 @@
 	let isTransitioning = false;
 	let touchStartX = 0;
 	let touchEndX = 0;
+
+	// Calculate supply values for a token
+	function getTokenSupplyValues(token: TokenMetadata) {
+		const sft = $sfts?.find(s => s.id.toLowerCase() === token.contractAddress.toLowerCase());
+		const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress);
+
+		if (sft && maxSupply) {
+			const totalShares = BigInt(sft.totalShares);
+			const maxSupplyBig = BigInt(maxSupply);
+			const availableSupplyBig = maxSupplyBig > totalShares ? maxSupplyBig - totalShares : 0n;
+
+			return {
+				maxSupply: formatSupplyDisplay(maxSupply),
+				mintedSupply: formatSupplyDisplay(sft.totalShares),
+				availableSupply: formatSupplyDisplay(availableSupplyBig.toString())
+			};
+		}
+
+		return {
+			maxSupply: 0,
+			mintedSupply: 0,
+			availableSupply: 0
+		};
+	}
 
 	// Reactive statement to trigger loading when data changes
 	$: if($sfts && $sftMetadata && $sfts.length > 0 && $sftMetadata.length > 0) {
@@ -58,10 +83,27 @@
 				
 				if (assetKey) {
 					const asset = catalog.assets[assetKey];
-					// Only add tokens with available supply
-					const availableSupply = getAvailableSupplyBigInt(token);
-					console.log(`[Carousel] Token ${token.symbol}: has asset ${assetKey}, available supply = ${availableSupply}`);
-					if (availableSupply > 0n) {
+					// Check if token has available supply using real maxSupply data
+					const sft = $sfts?.find(s => s.id.toLowerCase() === token.contractAddress.toLowerCase());
+					const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress);
+					let hasAvailable = false;
+
+					if (sft && maxSupply) {
+						const totalShares = BigInt(sft.totalShares);
+						const maxSupplyBig = BigInt(maxSupply);
+						hasAvailable = totalShares < maxSupplyBig;
+						console.log(`[Carousel] Token ${token.symbol}: totalShares = ${sft.totalShares}, maxSupply = ${maxSupply}, available = ${maxSupplyBig - totalShares}, hasAvailable = ${hasAvailable}`);
+					} else {
+						// Fallback to heuristic if no maxSupply data
+						if (sft) {
+							const totalShares = BigInt(sft.totalShares);
+							const reasonableMax = BigInt('1000000000000000000000000000'); // 1B tokens in wei
+							hasAvailable = totalShares < reasonableMax;
+						}
+						console.log(`[Carousel] Token ${token.symbol}: using fallback heuristic, hasAvailable = ${hasAvailable}`);
+					}
+
+					if (hasAvailable) {
 						featuredTokensWithAssets.push({ token, asset });
 					}
 				} else {
@@ -316,7 +358,10 @@
 				style="transform: translateX(-{currentIndex * 100}%)"
 			>
 				{#each featuredTokensWithAssets as item, index}
-					{@const calculatedReturns = getTokenReturns(item.asset, item.token)}
+					{@const sft = $sfts?.find(s => s.id.toLowerCase() === item.token.contractAddress.toLowerCase())}
+					{@const maxSupply = catalogService.getTokenMaxSupply(item.token.contractAddress)}
+					{@const calculatedReturns = calculateTokenReturns(item.asset, item.token, sft?.totalShares, maxSupply)}
+					{@const supplyValues = getTokenSupplyValues(item.token)}
 					<div class="{carouselSlideClasses} {index === currentIndex ? activeSlideClasses : inactiveSlideClasses}">
 						<div class={bannerCardClasses}>
 							<!-- Token Section -->
@@ -345,8 +390,8 @@
 					<div class="{statItemClasses} hidden sm:block">
 						<div class={statLabelClasses}>Total Supply</div>
 						<div class={statValueClasses}>
-							<FormattedNumber 
-								value={formatSupplyAmount(item.token.supply.maxSupply, item.token.decimals)} 
+							<FormattedNumber
+								value={supplyValues.maxSupply}
 								type="token"
 							/>
 						</div>
@@ -356,8 +401,8 @@
 					<div class={statItemClasses}>
 						<div class={statLabelClasses}>Available Supply</div>
 						<div class={statValueClasses}>
-							<FormattedNumber 
-								value={formatSupplyAmount(getAvailableSupplyBigInt(item.token).toString(), item.token.decimals)} 
+							<FormattedNumber
+								value={supplyValues.availableSupply}
 								type="token"
 							/>
 						</div>

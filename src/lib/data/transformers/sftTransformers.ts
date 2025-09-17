@@ -137,14 +137,6 @@ export class TokenMetadataTransformer extends BaseSftTransformer {
       tokenType: pinnedMetadata.tokenType,
       firstPaymentDate: pinnedMetadata.firstPaymentDate,
       sharePercentage: pinnedMetadata.sharePercentage,
-      decimals:
-        typeof pinnedMetadata.decimals === "number"
-          ? pinnedMetadata.decimals
-          : 18,
-      supply: {
-        maxSupply: maxSupply.toString(),
-        mintedSupply: sft.totalShares.toString(),
-      },
       payoutData: pinnedMetadata.payoutData || [],
       asset: {
         ...(pinnedMetadata.asset || {}),
