@@ -383,7 +383,7 @@ export async function sortClaimsData(
       date: claimDate,
       amount: formatEther(claim.amount),
       asset: feildName || "Unknown Field",
-      txHash: originalLog?.transaction_hash || "N/A",
+      txHash: trades[0].tradeEvent?.transaction?.id || "N/A",
       status: "completed",
     };
   });
