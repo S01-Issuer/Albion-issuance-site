@@ -17,7 +17,6 @@
 	let pageLoading = true;
 	let claiming = false;
 	let claimSuccess = false;
-	let estimatedGas = 0.50; // Placeholder gas estimate
 
 	let holdings: { fieldName: string; totalAmount: number; holdings: any[] }[] = [];
 	let claimHistory: Array<{ date: string; asset: string; amount: string; txHash: string } > = [];
@@ -275,14 +274,13 @@
 			<!-- Claim All Action -->
 			{#if unclaimedPayout > 0}
 				<div class="text-center mt-6 lg:mt-8">
-					<PrimaryButton 
-						on:click={claimAllPayouts} 
+					<PrimaryButton
+						on:click={claimAllPayouts}
 						disabled={claiming}
 						size="large"
 					>
 						{claiming ? 'Processing...' : `Claim All (${formatCurrency(unclaimedPayout)})`}
 					</PrimaryButton>
-					<p class="text-sm text-gray-600 mt-2">Estimated gas fee: ${estimatedGas.toFixed(2)}</p>
 				</div>
 			{/if}
 
