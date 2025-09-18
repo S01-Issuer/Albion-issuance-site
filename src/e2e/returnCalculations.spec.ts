@@ -68,11 +68,6 @@ function makeToken(overrides: Partial<TokenMetadata> = {}): TokenMetadata {
     tokenType: "royalty" as any,
     firstPaymentDate: "2024-01",
     sharePercentage: 10,
-    decimals: 18,
-    supply: {
-      maxSupply: (1000n * 10n ** 18n).toString(),
-      mintedSupply: (500n * 10n ** 18n).toString(),
-    } as any,
     payoutData: [],
     asset: {
       assetName: "Permian Basin-3",
@@ -172,7 +167,6 @@ describe("returnCalculations", () => {
         {
           month: "2024-01",
           tokenPayout: {
-            date: new Date().toISOString(),
             totalPayout: 100,
             payoutPerToken: 0.1,
             txHash: "0x",

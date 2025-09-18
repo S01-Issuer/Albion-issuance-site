@@ -9,6 +9,7 @@ import type { Asset, Token } from "$lib/types/uiTypes";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
 import { ENERGY_FIELDS, type SftToken } from "$lib/network";
 import { useCatalogService } from "$lib/services";
+import { hasAvailableSupplySync } from "$lib/utils/supplyHelpers";
 
 interface AssetDetailState {
   asset: Asset | null;
@@ -195,7 +196,8 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
       (t) => t.contractAddress.toLowerCase() === tokenAddress.toLowerCase(),
     );
     if (token) {
-      return BigInt(token.supply.maxSupply) > BigInt(token.supply.mintedSupply);
+      // Use supply helper to check availability
+      return hasAvailableSupplySync(token);
     }
     return false;
   }

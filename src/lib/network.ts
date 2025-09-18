@@ -135,7 +135,17 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
     sftTokens: [
       {
         address: "0xf836a500910453A397084ADe41321ee20a5AAde1",
-        claims: [],
+        claims: [
+          {
+            orderHash:
+              "0x93f57975d7ecedcbd89aa74e0663e390c4afc7858d37a0d612a986042ae49ebb",
+            csvLink: `${PINATA_GATEWAY}/bafkreigmivteh7rdu2orcascrqje5al52fq2a4yevrp4wjed6mvecqrywm`,
+            expectedMerkleRoot:
+              "0xce5cb11c41c2afae23a5406ffb032e9a2224f7da9dd6fc44a2af9be56f052bd0",
+            expectedContentHash:
+              "bafkreigmivteh7rdu2orcascrqje5al52fq2a4yevrp4wjed6mvecqrywm",
+          },
+        ],
       },
     ],
   },

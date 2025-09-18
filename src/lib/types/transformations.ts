@@ -18,22 +18,17 @@ export class TypeTransformations {
       contractAddress: tokenData.contractAddress,
       name: tokenData.releaseName || tokenData.asset.assetName, // Use releaseName or fall back to asset.assetName
       symbol: tokenData.symbol,
-      decimals: tokenData.decimals,
+      decimals: 18, // Default decimals value
       tokenType: "royalty", // Default type, can be enhanced later
       isActive: true,
       supply: {
-        maxSupply: tokenData.supply.maxSupply,
-        mintedSupply: tokenData.supply.mintedSupply,
+        maxSupply: "0", // Will need to be populated from external source
+        mintedSupply: "0", // Will need to be populated from external source
       },
       // Add converted supply values for calculations
       supplyNumbers: {
-        maxSupply: Number(
-          BigInt(tokenData.supply.maxSupply) / BigInt(10 ** tokenData.decimals),
-        ),
-        mintedSupply: Number(
-          BigInt(tokenData.supply.mintedSupply) /
-            BigInt(10 ** tokenData.decimals),
-        ),
+        maxSupply: 0, // Will need to be populated from external source
+        mintedSupply: 0, // Will need to be populated from external source
       },
       holders: [], // Will be populated by service layer
       payoutHistory:
@@ -44,7 +39,6 @@ export class TypeTransformations {
           );
           return {
             month: payout.month,
-            date: payout.tokenPayout.date.split("T")[0] as any, // Convert to YYYY-MM-DD format
             totalPayout: payout.tokenPayout.totalPayout,
             payoutPerToken: payout.tokenPayout.payoutPerToken,
             oilPrice: receipts?.realisedPrice.oilPrice || 0,

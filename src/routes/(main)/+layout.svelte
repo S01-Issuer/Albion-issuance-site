@@ -203,8 +203,8 @@
                                     on:submit={() => { try { sessionStorage.setItem('lastPageBeforeSubscribe', window.location.pathname + window.location.search + window.location.hash); } catch {} }}
                                 >
                                   <div class="ml-form-formContent horozintalForm">
-                                    <div class="ml-form-horizontalRow">
-                                      <div class="ml-input-horizontal">
+                                    <div class="ml-form-horizontalRow flex gap-2">
+                                      <div class="ml-input-horizontal flex-1">
                                         <div class="horizontal-fields" style="width: 100%;">
                                           <div class="ml-field-group ml-field-email ml-validate-email ml-validate-required">
                                             <input type="email" name="fields[email]" placeholder="Enter email address" autocomplete="email" required class="form-control w-full px-3 py-3 border border-light-gray font-figtree text-sm bg-white text-black transition-colors duration-200 focus:outline-none focus:border-black">
@@ -314,5 +314,32 @@
 .footer-newsletter .ml-form-embedWrapper,
 .footer-newsletter .ml-form-embedBody,
 .footer-newsletter .row-form { background: transparent; border: 0; box-shadow: none; padding: 0; }
+
+/* Ensure horizontal layout of newsletter form */
+.footer-newsletter .ml-form-horizontalRow {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.footer-newsletter .ml-input-horizontal {
+  flex: 1;
+  min-width: 0; /* Allow flexbox to shrink below content width */
+}
+
+.footer-newsletter .ml-button-horizontal {
+  flex-shrink: 0;
+}
+
+/* Mobile responsive: stack on very small screens */
+@media (max-width: 480px) {
+  .footer-newsletter .ml-form-horizontalRow {
+    flex-direction: column;
+  }
+
+  .footer-newsletter .ml-button-horizontal {
+    width: 100%;
+  }
+}
 
 </style>

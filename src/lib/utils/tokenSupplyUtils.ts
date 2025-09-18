@@ -69,10 +69,32 @@ export function formatTokenBalance(balance: number, decimals: number): string {
 }
 
 /**
- * Get available supply as BigInt
+ * Get token supply information from SFT on-chain data
+ * @param token TokenMetadata for contract address lookup
+ * @param sft SFT data from blockchain
+ * @param maxSupply Max supply from authorizer data
+ */
+export function getTokenSupplyFromSft(token: TokenMetadata, sft: any, maxSupply: string) {
+  const maxSupplyBig = BigInt(maxSupply);
+  const mintedSupplyBig = BigInt(sft.totalShares);
+  const availableSupplyBig = maxSupplyBig > mintedSupplyBig ? maxSupplyBig - mintedSupplyBig : 0n;
+
+  return {
+    maxSupply: maxSupplyBig,
+    mintedSupply: mintedSupplyBig,
+    availableSupply: availableSupplyBig,
+    hasAvailableSupply: availableSupplyBig > 0n
+  };
+}
+
+/**
+ * Get available supply as BigInt (legacy function - now returns 0)
+ * Use getTokenSupplyFromSft instead for accurate supply data
  */
 export function getAvailableSupplyBigInt(token: TokenMetadata): bigint {
-  return BigInt(token.supply.maxSupply) - BigInt(token.supply.mintedSupply);
+  // This function is deprecated - components should use SFT data directly
+  // or call getTokenSupplyFromSft with the appropriate SFT data
+  return 0n;
 }
 
 /**

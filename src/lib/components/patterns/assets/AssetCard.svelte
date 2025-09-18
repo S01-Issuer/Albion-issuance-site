@@ -8,6 +8,7 @@
     import type { TokenMetadata } from '$lib/types/MetaboardTypes';
     import FormattedReturn from '$lib/components/components/FormattedReturn.svelte';
     import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
+    import { hasAvailableSupplySync } from '$lib/utils/supplyHelpers';
 
 	export let asset: Asset;
 	export let token: TokenMetadata[];
@@ -61,7 +62,7 @@
 	$: primaryToken = tokensArray.length > 0 ? tokensArray[0] : null;
 	
 	// Check if any tokens are available
-	$: hasAvailableTokens = tokensArray.some(t => BigInt(t.supply.maxSupply) > BigInt(t.supply.mintedSupply));
+	$: hasAvailableTokens = tokensArray.some(t => hasAvailableSupplySync(t));
 
 	// Extract token data with fallbacks
 	$: shareOfAsset = primaryToken?.sharePercentage ? `${primaryToken.sharePercentage}%` : 'TBD';
