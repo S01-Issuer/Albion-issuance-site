@@ -231,7 +231,7 @@
 			<p class="text-lg text-black mb-8">Be part of the next generation of energy investment infrastructure.</p>
 			<div class="flex md:flex-row flex-col gap-4 justify-center items-center">
 				<PrimaryButton href="/assets" size="large">Explore Investments</PrimaryButton>
-				<SecondaryButton href="/contact" size="large">Partner with Us</SecondaryButton>
+				<SecondaryButton href="mailto:contact@albionlabs.org" size="large">Partner with Us</SecondaryButton>
 		</div>
 	</ContentSection>
 </PageLayout>
