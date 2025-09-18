@@ -15,6 +15,7 @@
 	import authorizerAbi from '$lib/abi/authorizer.json';
 	import OffchainAssetReceiptVaultAbi from '$lib/abi/OffchainAssetReceiptVault.json';
     import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
+    import { getTokenTermsPath } from '$lib/utils/tokenTerms';
 
 	export let isOpen = false;
 	export let tokenAddress: string | null = null;
@@ -32,13 +33,16 @@
 	// Data
 	let assetData: Asset | null = null;
 	let tokenData: Token | null = null;
-	let supply: any = null;
-	let currentSft: OffchainAssetReceiptVault;
+let supply: any = null;
+let currentSft: OffchainAssetReceiptVault;
+let tokenTermsUrl: string | null = null;
 
 	// Reactive calculations
 	$: if (isOpen && (tokenAddress || assetId)) {
 		loadTokenData();
 	}
+
+	$: tokenTermsUrl = tokenData ? getTokenTermsPath(tokenData.contractAddress) : null;
 
 	$: order = {
 		investment: investmentAmount,
@@ -365,7 +369,17 @@
 						<div class={formSectionClasses}>
 							<label class={termsCheckboxClasses}>
 								<input type="checkbox" bind:checked={agreedToTerms} class={checkboxInputClasses} />
-								<span>I agree to the terms and conditions and understand the risks involved in this investment.</span>
+								<span>
+									I agree to the
+									{#if tokenTermsUrl}
+										<a href={tokenTermsUrl} target="_blank" rel="noopener noreferrer" class="text-secondary font-semibold no-underline hover:underline">
+											terms and conditions
+										</a>
+									{:else}
+										terms and conditions
+									{/if}
+									and understand the risks involved in this investment.
+								</span>
 							</label>
 						</div>
 
@@ -392,4 +406,3 @@
 		</div>
 	</div>
 {/if}
-

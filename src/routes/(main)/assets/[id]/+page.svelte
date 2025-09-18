@@ -24,6 +24,7 @@
 import { PINATA_GATEWAY } from '$lib/network';
 import { catalogService } from '$lib/services';
 import { onMount } from 'svelte';
+import { getTokenTermsPath } from '$lib/utils/tokenTerms';
 //
 
 	let activeTab = 'overview';
@@ -765,14 +766,15 @@ onMount(() => {
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
 					{#each assetTokens as token}
 						{@const sft = $sfts?.find(s => s.id.toLowerCase() === token.contractAddress.toLowerCase())}
-						{@const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress)}
-						{@const supply = getTokenSupply(token, sft, maxSupply)}
-						{@const hasAvailableSupply = supply && supply.availableSupply > 0}
-						{@const tokenPayoutData = getTokenPayoutHistory(token)}
-						{@const latestPayout = tokenPayoutData?.recentPayouts?.[0]}
-						{@const calculatedReturns = calculateTokenReturns(assetData!, token, sft?.totalShares, maxSupply)}
-						{@const isFlipped = flippedCards.has(token.contractAddress)}
-						<div id="token-{token.contractAddress}">
+					{@const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress)}
+					{@const supply = getTokenSupply(token, sft, maxSupply)}
+					{@const hasAvailableSupply = supply && supply.availableSupply > 0}
+					{@const tokenPayoutData = getTokenPayoutHistory(token)}
+					{@const latestPayout = tokenPayoutData?.recentPayouts?.[0]}
+					{@const calculatedReturns = calculateTokenReturns(assetData!, token, sft?.totalShares, maxSupply)}
+					{@const isFlipped = flippedCards.has(token.contractAddress)}
+					{@const tokenTermsUrl = getTokenTermsPath(token.contractAddress)}
+					<div id="token-{token.contractAddress}">
 							<Card hoverable clickable paddingClass="p-0" on:click={() => handleCardClick(token.contractAddress)}>
 								<CardContent paddingClass="p-0">
 									<div class="relative preserve-3d transform-gpu transition-transform duration-500 {isFlipped ? 'rotate-y-180' : ''} min-h-[700px] sm:min-h-[600px]">
@@ -792,6 +794,11 @@ onMount(() => {
 														</div>
 													</div>
 													<p class="text-sm text-secondary font-medium break-all tracking-tight opacity-80 font-figtree">{token.contractAddress}</p>
+													{#if tokenTermsUrl}
+														<a href={tokenTermsUrl} target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-sm font-semibold text-secondary no-underline hover:underline mt-2 font-figtree">
+															View terms →
+														</a>
+													{/if}
 												</div>
 											</div>
 								
