@@ -230,12 +230,26 @@
 					// Sum all deposits for this SFT
 					let totalInvestedInSft = 0;
 					let tokensOwned = 0;
-					
+
 					if(sftDeposits.length > 0) {
 						for(const deposit of sftDeposits) {
 							const depositAmount = Number(formatEther(deposit.amount));
 							totalInvestedInSft += depositAmount;
 							tokensOwned += depositAmount;
+						}
+					}
+
+					if(tokensOwned === 0 && Array.isArray(sft.tokenHolders)) {
+						const tokenHolder = sft.tokenHolders.find((holder: any) =>
+							holder.address?.toLowerCase() === $signerAddress.toLowerCase()
+						);
+						if(tokenHolder) {
+							// Fallback to on-chain balance when the subgraph has no deposit records
+							const holderBalance = Number(formatEther(tokenHolder.balance));
+							tokensOwned = holderBalance;
+							if(totalInvestedInSft === 0) {
+								totalInvestedInSft = holderBalance;
+							}
 						}
 					}
 					
