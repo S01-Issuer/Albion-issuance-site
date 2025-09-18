@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { writeContract, simulateContract } from '@wagmi/core';
+	import { writeContract, simulateContract, getPublicClient } from '@wagmi/core';
 	import { web3Modal, signerAddress, connected, wagmiConfig } from 'svelte-wagmi';
 	import { Card, CardContent, PrimaryButton, SecondaryButton, StatusBadge, StatsCard, SectionTitle, CollapsibleSection, FormattedNumber } from '$lib/components/components';
 	import { PageLayout, HeroSection, ContentSection } from '$lib/components/layout';
@@ -9,6 +9,7 @@
 	import { useClaimsService } from '$lib/services';
 	import orderbookAbi from '$lib/abi/orderbook.json';
 	import type { Hex } from 'viem';
+	import { formatEther } from 'viem';
 	import { claimsCache } from '$lib/stores/claimsCache';
 
 	let totalEarned = 0;
@@ -17,7 +18,8 @@
 	let pageLoading = true;
 	let claiming = false;
 	let claimSuccess = false;
-	let estimatedGas = 0.50; // Placeholder gas estimate
+	let estimatedGasInUsd = 0;
+	let estimatingGas = false;
 
 	let holdings: { fieldName: string; totalAmount: number; holdings: any[] }[] = [];
 	let claimHistory: Array<{ date: string; asset: string; amount: string; txHash: string } > = [];
@@ -26,6 +28,81 @@
 
 	$: if ($connected && $signerAddress && pageLoading) {
 		loadClaimsData();
+	}
+
+	// Estimate gas whenever holdings change and we have unclaimed payouts
+	$: if (holdings.length > 0 && unclaimedPayout > 0 && $connected && !estimatingGas) {
+		estimateGasForClaimAll();
+	}
+
+	async function estimateGasForClaimAll() {
+		if (holdings.length === 0 || estimatingGas) return;
+
+		estimatingGas = true;
+		try {
+			let orders = [];
+
+			// Collect all orders from all groups
+			for (const group of holdings) {
+				for (const holding of group.holdings) {
+					orders.push({
+						order: holding.order,
+						inputIOIndex: 0,
+						outputIOIndex: 0,
+						signedContext: [holding.signedContext]
+					});
+				}
+			}
+
+			const takeOrdersConfig = {
+				minimumInput: 0n,
+				maximumInput: 2n ** 256n - 1n,
+				maximumIORatio: 2n ** 256n - 1n,
+				orders: orders,
+				data: "0x"
+			};
+
+			const orderbookAddress = holdings[0].holdings[0].orderBookAddress;
+
+			// Get the public client to estimate gas
+			const publicClient = getPublicClient($wagmiConfig);
+
+			if (publicClient && $signerAddress) {
+				// Estimate gas for the transaction
+				const gasEstimate = await publicClient.estimateContractGas({
+					abi: orderbookAbi,
+					address: orderbookAddress as Hex,
+					functionName: 'takeOrders2',
+					args: [takeOrdersConfig],
+					account: $signerAddress as Hex
+				});
+
+				// Get current gas price
+				const gasPrice = await publicClient.getGasPrice();
+
+				// Calculate total cost in ETH
+				const totalCostInWei = gasEstimate * gasPrice;
+				const totalCostInEth = Number(formatEther(totalCostInWei));
+
+				// Fetch ETH price in USD (using a free API)
+				try {
+					const response = await fetch('https://api.coinbase.com/v2/exchange-rates?currency=ETH');
+					const data = await response.json();
+					const ethToUsd = parseFloat(data.data.rates.USD);
+					estimatedGasInUsd = totalCostInEth * ethToUsd;
+				} catch (priceError) {
+					console.error('Error fetching ETH price:', priceError);
+					// Fallback to a reasonable estimate if price fetch fails
+					estimatedGasInUsd = totalCostInEth * 2000; // Assume $2000/ETH as fallback
+				}
+			}
+		} catch (error) {
+			console.error('Error estimating gas:', error);
+			// Set a default if estimation fails
+			estimatedGasInUsd = 0.50;
+		} finally {
+			estimatingGas = false;
+		}
 	}
 
 	async function loadClaimsData(){
@@ -117,15 +194,36 @@
 			});
 
 			// Execute transaction after successful simulation
-			await writeContract($wagmiConfig, request);
+			const hash = await writeContract($wagmiConfig, request);
+
+			// Wait for transaction confirmation
+			const publicClient = getPublicClient($wagmiConfig);
+			if (publicClient && hash) {
+				// Wait for at least 1 confirmation
+				await publicClient.waitForTransactionReceipt({
+					hash,
+					confirmations: 1
+				});
+			}
+
 			claimSuccess = true;
-			
-			// Clear cache and reload claims data after successful claim
+
+			// Clear cache after successful confirmation
 			claimsCache.clear();
-			setTimeout(() => {
+
+			// Wait a bit longer for backend to process the event
+			// Then reload the claims data
+			setTimeout(async () => {
 				pageLoading = true;
-				loadClaimsData();
-			}, 2000);
+				await loadClaimsData();
+				// If still showing unclaimed after reload, try once more after delay
+				if (unclaimedPayout > 0) {
+					setTimeout(async () => {
+						claimsCache.clear();
+						await loadClaimsData();
+					}, 5000);
+				}
+			}, 3000);
 
 		} catch (error) {
 			console.error('Claim all failed:', error);
@@ -170,15 +268,36 @@
 			});
 
 			// Execute transaction after successful simulation
-			await writeContract($wagmiConfig, request);
+			const hash = await writeContract($wagmiConfig, request);
+
+			// Wait for transaction confirmation
+			const publicClient = getPublicClient($wagmiConfig);
+			if (publicClient && hash) {
+				// Wait for at least 1 confirmation
+				await publicClient.waitForTransactionReceipt({
+					hash,
+					confirmations: 1
+				});
+			}
+
 			claimSuccess = true;
-			
-			// Clear cache and reload claims data after successful claim
+
+			// Clear cache after successful confirmation
 			claimsCache.clear();
-			setTimeout(() => {
+
+			// Wait a bit longer for backend to process the event
+			// Then reload the claims data
+			setTimeout(async () => {
 				pageLoading = true;
-				loadClaimsData();
-			}, 2000);
+				await loadClaimsData();
+				// If still showing unclaimed after reload, try once more after delay
+				if (unclaimedPayout > 0) {
+					setTimeout(async () => {
+						claimsCache.clear();
+						await loadClaimsData();
+					}, 5000);
+				}
+			}, 3000);
 
 		} catch (error) {
 			console.error('Claim single failed:', error);
@@ -275,20 +394,31 @@
 			<!-- Claim All Action -->
 			{#if unclaimedPayout > 0}
 				<div class="text-center mt-6 lg:mt-8">
-					<PrimaryButton 
-						on:click={claimAllPayouts} 
+					<PrimaryButton
+						on:click={claimAllPayouts}
 						disabled={claiming}
 						size="large"
 					>
 						{claiming ? 'Processing...' : `Claim All (${formatCurrency(unclaimedPayout)})`}
 					</PrimaryButton>
-					<p class="text-sm text-gray-600 mt-2">Estimated gas fee: ${estimatedGas.toFixed(2)}</p>
+					<p class="text-sm text-gray-600 mt-2">
+						{#if estimatingGas}
+							Estimating gas fee...
+						{:else if estimatedGasInUsd > 0}
+							Estimated gas fee: ${estimatedGasInUsd.toFixed(2)}
+						{:else}
+							Estimated gas fee: Calculating...
+						{/if}
+					</p>
 				</div>
 			{/if}
 
 			{#if claimSuccess}
 				<div class="text-center mt-4 p-4 bg-green-100 text-green-800 rounded-lg max-w-md mx-auto">
 					✅ Claim successful! Tokens have been sent to your wallet.
+					{#if pageLoading}
+						<div class="mt-2 text-sm">Updating your claims data...</div>
+					{/if}
 				</div>
 			{/if}
 		</HeroSection>
