@@ -180,6 +180,7 @@ export class ClaimsService {
         order: decodedOrder,
         signedContext: holdingSignedContext,
         orderBookAddress,
+        csvLink: claim.csvLink,
       };
     });
 
@@ -274,6 +275,14 @@ export class ClaimsService {
     });
 
     await writeContract(cfg, request);
+  }
+
+  /**
+   * Invalidate cached CSV data
+   */
+  invalidateCsv(csvLink: string | undefined): void {
+    if (!csvLink) return;
+    this.csvCache.delete(csvLink);
   }
 
   /**

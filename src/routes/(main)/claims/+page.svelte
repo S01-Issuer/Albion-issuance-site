@@ -11,6 +11,8 @@
 	import type { Hex } from 'viem';
 	import { claimsCache } from '$lib/stores/claimsCache';
 
+	const claimsService = useClaimsService();
+
 	let totalEarned = 0;
 	let totalClaimed = 0;
 	let unclaimedPayout = 0;
@@ -43,8 +45,7 @@
 			}
 
 			console.log('[Claims] Loading fresh data');
-			const claims = useClaimsService();
-			const result = await claims.loadClaimsForWallet($signerAddress || '');
+			const result = await claimsService.loadClaimsForWallet($signerAddress || '');
 			
 			// Store in cache
 			claimsCache.set($signerAddress || '', result);
@@ -120,6 +121,7 @@
 			claimSuccess = true;
 			
 			// Clear cache and reload claims data after successful claim
+			claimsService.clearCache();
 			claimsCache.clear();
 			setTimeout(() => {
 				pageLoading = true;
@@ -172,7 +174,15 @@
 			await writeContract($wagmiConfig, request);
 			claimSuccess = true;
 			
-			// Clear cache and reload claims data after successful claim
+			// Clear cache entry for this claim and reload data after success
+			const csvLinks = new Set(
+				(group.holdings || [])
+					.map((holding: any) => holding?.csvLink)
+					.filter((link: string | undefined) => typeof link === 'string' && link.length > 0)
+			);
+			for (const link of csvLinks) {
+				claimsService.invalidateCsv(link as string);
+			}
 			claimsCache.clear();
 			setTimeout(() => {
 				pageLoading = true;
