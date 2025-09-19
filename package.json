@@ -55,6 +55,7 @@
     "cbor-web": "^9.0.1",
     "ethers": "^6.10.0",
     "lucide-svelte": "^0.525.0",
+    "marked": "^16.3.0",
     "pako": "^2.1.0",
     "svelte-wagmi": "1.0.7",
     "viem": "^2.0.0",
