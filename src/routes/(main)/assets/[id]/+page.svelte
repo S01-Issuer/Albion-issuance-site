@@ -2,13 +2,14 @@
 	import { page } from '$app/stores';
 	import { sftMetadata, sfts, dataLoaded } from '$lib/stores';
 	import type { Asset, Token } from '$lib/types/uiTypes';
-	import { Card, CardContent, PrimaryButton, SecondaryButton, Chart, CollapsibleSection } from '$lib/components/components';
+	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
+	import { Card, CardContent, PrimaryButton, SecondaryButton, Chart, CollapsibleSection, Modal } from '$lib/components/components';
 	import SectionTitle from '$lib/components/components/SectionTitle.svelte';
 
 	import TabButton from '$lib/components/components/TabButton.svelte';
 	import { PageLayout, ContentSection } from '$lib/components/layout';
 	import { getImageUrl } from '$lib/utils/imagePath';
-	import { formatCurrency, formatEndDate, formatSmartReturn } from '$lib/utils/formatters';
+	import { formatCurrency, formatEndDate, formatSmartReturn, formatHash } from '$lib/utils/formatters';
 	import { hasIncompleteReleases } from '$lib/utils/futureReleases';
 	import { 
 		useAssetDetailData,
@@ -25,6 +26,123 @@ import { PINATA_GATEWAY } from '$lib/network';
 import { catalogService } from '$lib/services';
 import { onMount } from 'svelte';
 import { getTokenTermsPath } from '$lib/utils/tokenTerms';
+
+type RevenueReport = {
+	month: string;
+	netIncome: number;
+	revenue: number;
+	expenses: number;
+	production: number;
+};
+
+function safeNumber(value: unknown): number {
+	if (typeof value === 'number' && Number.isFinite(value)) {
+		return value;
+	}
+	if (typeof value === 'string') {
+		const parsed = Number(value.replace(/[^-\d.]/g, ''));
+		return Number.isFinite(parsed) ? parsed : 0;
+	}
+	if (typeof value === 'bigint') {
+		return Number(value);
+	}
+	return 0;
+}
+
+function buildRevenueReports(
+	receipts: any[] | null | undefined,
+	fallback: any[] | null | undefined,
+): RevenueReport[] {
+	const reports: RevenueReport[] = [];
+
+	if (Array.isArray(receipts) && receipts.length > 0) {
+		for (const entry of receipts) {
+			const month = entry?.month;
+			if (!month) continue;
+			const assetEntry = entry?.assetData ?? {};
+			const revenue = safeNumber(assetEntry?.revenue ?? entry?.revenue);
+			const netIncomeRaw = safeNumber(assetEntry?.netIncome ?? entry?.netIncome);
+			const netIncome = netIncomeRaw > 0 ? netIncomeRaw : revenue;
+			reports.push({
+				month,
+				netIncome,
+				revenue,
+				expenses: safeNumber(assetEntry?.expenses ?? entry?.expenses),
+				production: safeNumber(assetEntry?.production ?? entry?.production),
+			});
+		}
+	} else if (Array.isArray(fallback) && fallback.length > 0) {
+		for (const entry of fallback) {
+			const month = entry?.month;
+			if (!month) continue;
+			const revenue = safeNumber(entry?.revenue);
+			const netIncomeRaw = safeNumber(entry?.netIncome);
+			const netIncome = netIncomeRaw > 0 ? netIncomeRaw : revenue;
+			reports.push({
+				month,
+				netIncome,
+				revenue,
+				expenses: safeNumber(entry?.expenses),
+				production: safeNumber(entry?.production),
+			});
+		}
+	}
+
+	reports.sort((a, b) => (a.month > b.month ? 1 : a.month < b.month ? -1 : 0));
+	return reports;
+}
+
+function parseYearMonth(value: string | null | undefined): Date | null {
+	if (!value) {
+		return null;
+	}
+	const parts = value.split('-');
+	if (parts.length < 2) {
+		return null;
+	}
+	const year = Number(parts[0]);
+	const month = Number(parts[1]);
+	const day = parts.length > 2 ? Number(parts[2]) : 1;
+	if (!Number.isFinite(year) || !Number.isFinite(month)) {
+		return null;
+	}
+	return new Date(year, Math.max(0, month - 1), Number.isFinite(day) && day > 0 ? day : 1);
+}
+
+function chartLabelFromMonth(value: string): string {
+	if (!value) {
+		return '';
+	}
+	return value.length === 7 && value.includes('-') ? `${value}-01` : value;
+}
+
+function formatReportMonth(value: string): string {
+	const parsed = parseYearMonth(value);
+	if (!parsed) {
+		return value;
+	}
+	return parsed.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+
+function formatDueDate(date: Date): string {
+	const day = date.getDate();
+	const monthLabel = date.toLocaleString('en-US', { month: 'long' });
+	const suffix = (() => {
+		const mod10 = day % 10;
+		const mod100 = day % 100;
+		if (mod10 === 1 && mod100 !== 11) return 'st';
+		if (mod10 === 2 && mod100 !== 12) return 'nd';
+		if (mod10 === 3 && mod100 !== 13) return 'rd';
+		return 'th';
+	})();
+	return `${monthLabel} ${day}${suffix}`;
+}
+
+function addDays(date: Date, days: number): Date {
+	const result = new Date(date);
+	result.setDate(result.getDate() + days);
+	return result;
+}
 //
 
 	let activeTab = 'overview';
@@ -36,6 +154,18 @@ import { getTokenTermsPath } from '$lib/utils/tokenTerms';
 	
 	// Future releases state
 	let hasFutureReleases = false;
+let primaryToken: TokenMetadata | null = null;
+let receiptsData: any[] = [];
+let revenueReports: RevenueReport[] = [];
+let revenueReportsWithIncome: RevenueReport[] = [];
+let revenueChartData: Array<{ label: string; value: number }> = [];
+let latestRevenueReport: RevenueReport | null = null;
+let revenueAverage = 0;
+let revenueHasData = false;
+let nextReportDue: Date | null = null;
+let revenueSignature = '';
+let payoutSignature = '';
+let receiptsSignature = '';
 	
 	// Get asset ID from URL params
 	$: assetId = $page.params.id;
@@ -68,9 +198,94 @@ import { getTokenTermsPath } from '$lib/utils/tokenTerms';
 	let loadedAssetId = assetId;
 	const { exportProductionData: exportDataFunc, exportPaymentHistory } = useDataExport();
 	const { state: emailState, setEmail, submitEmail } = useEmailNotification();
-	
+
 	// Reactive data from composable
 	$: ({ asset: assetData, tokens: assetTokens, loading, error } = $assetDetailState);
+	$: primaryToken = assetTokens && assetTokens.length > 0 ? assetTokens[0] : null;
+	$: receiptsData = primaryToken?.asset?.receiptsData ?? [];
+$: revenueReports = buildRevenueReports(receiptsData, assetData?.monthlyReports ?? []);
+$: revenueReportsWithIncome = revenueReports.filter((report) => report.revenue > 0);
+$: revenueHasData = revenueReportsWithIncome.length > 0;
+$: revenueAverage = revenueReportsWithIncome.length
+	? revenueReportsWithIncome.reduce((sum, report) => sum + report.revenue, 0) / revenueReportsWithIncome.length
+	: 0;
+$: latestRevenueReport = revenueReports.length
+	? revenueReports[revenueReports.length - 1]
+	: null;
+$: nextReportDue = (() => {
+	if (latestRevenueReport?.month) {
+		const base = parseYearMonth(latestRevenueReport.month);
+		if (base) {
+			const endOfNextMonth = new Date(base.getFullYear(), base.getMonth() + 2, 0);
+			return addDays(endOfNextMonth, 30);
+		}
+	}
+	if (primaryToken?.firstPaymentDate) {
+		const base = parseYearMonth(primaryToken.firstPaymentDate);
+		if (base) {
+			const endOfNextMonth = new Date(base.getFullYear(), base.getMonth() + 1, 0);
+			return addDays(endOfNextMonth, 30);
+		}
+	}
+	return null;
+})();
+$: revenueChartData = revenueReports.map((report) => ({
+	label: chartLabelFromMonth(report.month),
+	value: report.revenue,
+}));
+
+$: {
+	if (primaryToken) {
+		const newReceiptsSignature = JSON.stringify(primaryToken.asset?.receiptsData ?? []);
+		if (newReceiptsSignature !== receiptsSignature) {
+			receiptsSignature = newReceiptsSignature;
+			console.log('[AssetDetailPage] Receipts data', {
+				assetId,
+				contract: primaryToken.contractAddress,
+				records: primaryToken.asset?.receiptsData,
+			});
+		}
+	}
+}
+
+$: {
+	const newRevenueSignature = JSON.stringify(
+		revenueReports.map((report) => ({ month: report.month, revenue: report.revenue, netIncome: report.netIncome })),
+	);
+	if (newRevenueSignature !== revenueSignature) {
+		revenueSignature = newRevenueSignature;
+		console.log('[AssetDetailPage] Revenue reports', {
+			assetId,
+			reports: revenueReports,
+			chart: revenueChartData,
+			revenueAverage,
+			nextReportDue,
+		});
+	}
+}
+
+$: {
+	if (assetTokens && assetTokens.length > 0) {
+		const newPayoutSignature = JSON.stringify(
+			assetTokens.map((token) => ({
+				contract: token.contractAddress,
+				count: token.payoutData?.length ?? 0,
+				months: token.payoutData?.map((payout) => payout.month) ?? [],
+			})),
+		);
+		if (newPayoutSignature !== payoutSignature) {
+			payoutSignature = newPayoutSignature;
+			console.log('[AssetDetailPage] Token payout data', {
+				assetId,
+				entries: assetTokens.map((token) => ({
+					contract: token.contractAddress,
+					symbol: token.symbol,
+					payoutData: token.payoutData,
+				})),
+			});
+		}
+	}
+}
 	
 	// Check for future releases when asset data is available
 	$: if (assetId && assetData) {
@@ -133,40 +348,60 @@ onMount(() => {
 
 	// No custom reCAPTCHA flow; use hosted MailerLite form
 	
-	// Track flipped state for each token card
-	let flippedCards = new Set();
-	
-	// Tooltip state
-	let showTooltip = '';
-	let tooltipTimer: any = null;
-	
-	let failedImages = new Set<string>();
-	
+// History modal state
+let historyModalOpen = false;
+let historyModalToken: string | null = null;
+$: selectedHistoryToken = historyModalToken
+  ? assetTokens.find((token) => token.contractAddress.toLowerCase() === historyModalToken.toLowerCase())
+  : null;
+$: historyPayouts = selectedHistoryToken
+  ? getTokenPayoutHistory(selectedHistoryToken)?.recentPayouts ?? []
+  : [];
+$: if (!historyModalOpen && historyModalToken) {
+  historyModalToken = null;
+}
+
+// Tooltip state
+let showTooltip = '';
+let tooltipTimer: any = null;
+
+let failedImages = new Set<string>();
+
 	function handleImageError(imageUrl: string) {
 		failedImages.add(imageUrl);
-		failedImages = new Set(failedImages); // Trigger reactivity
+	failedImages = new Set(failedImages); // Trigger reactivity
+}
+
+
+function handleCardClick(tokenAddress: string) {
+	handleBuyTokens(tokenAddress);
+}
+
+function openHistoryModal(tokenAddress: string) {
+	if (!assetTokens?.length) {
+		return;
 	}
 
-	
-	function toggleCardFlip(tokenAddress: string) {
-		if (flippedCards.has(tokenAddress)) {
-			flippedCards.delete(tokenAddress);
-		} else {
-			flippedCards.add(tokenAddress);
-		}
-		flippedCards = new Set(flippedCards); // Trigger reactivity
+	const token = assetTokens.find((candidate) =>
+		candidate.contractAddress.toLowerCase() === tokenAddress.toLowerCase(),
+	);
+
+	if (!token) {
+		return;
 	}
 
-	// Decide what to do when the card itself is clicked
-	function handleCardClick(tokenAddress: string) {
-		if (flippedCards.has(tokenAddress)) {
-			// If the card is showing the back, flip it back to the front
-			toggleCardFlip(tokenAddress);
-		} else {
-			// Otherwise open the purchase panel
-			handleBuyTokens(tokenAddress);
-		}
-	}
+	historyModalToken = token.contractAddress;
+	historyModalOpen = true;
+}
+
+function handleHistoryButtonClick(event: MouseEvent, tokenAddress: string) {
+	event.stopPropagation();
+	openHistoryModal(tokenAddress);
+}
+
+function closeHistoryModal() {
+	historyModalOpen = false;
+}
 
 
 
@@ -331,34 +566,31 @@ onMount(() => {
                 </div>
         		</CollapsibleSection>
         		
-        		<CollapsibleSection title="Revenue History" isOpenByDefault={false} alwaysOpenOnDesktop={false}>
-        			{@const monthlyReports = assetData?.monthlyReports || []}
-					{@const reportsWithRevenue = monthlyReports.filter(r => r.netIncome && r.netIncome > 0)}
-					{@const maxRevenue = reportsWithRevenue.length > 0 ? Math.max(...reportsWithRevenue.map(r => r.netIncome || 0)) : 1500}
-					<div class="space-y-4">
-						{#if reportsWithRevenue.length > 0}
-							<div class="bg-white border border-light-gray p-4">
-								<h4 class="text-base font-bold text-black mb-4">Received Revenue</h4>
-								<div class="space-y-2">
-									{#each reportsWithRevenue.slice(-6) as report}
-										<div class="flex justify-between items-center py-2 border-b border-gray-200 last:border-b-0">
-											<div class="text-sm text-black">{report.month}</div>
-											<div class="text-sm font-semibold text-primary">{formatCurrency(report.netIncome || 0)}</div>
-										</div>
-									{/each}
+		<CollapsibleSection title="Revenue History" isOpenByDefault={false} alwaysOpenOnDesktop={false}>
+			<div class="space-y-4">
+				{#if revenueHasData}
+					<div class="bg-white border border-light-gray p-4">
+						<h4 class="text-base font-bold text-black mb-4">Received Revenue</h4>
+						<div class="space-y-2">
+							{#each revenueReportsWithIncome.slice(-6) as report}
+								<div class="flex justify-between items-center py-2 border-b border-gray-200 last:border-b-0">
+									<div class="text-sm text-black">{formatReportMonth(report.month)}</div>
+										<div class="text-sm font-semibold text-primary">{formatCurrency(report.revenue)}</div>
 								</div>
+							{/each}
 							</div>
-						{:else}
-							<div class="bg-white border border-light-gray p-4 opacity-50">
-								<h4 class="text-base font-bold text-gray-400 mb-4">Received Revenue</h4>
-								<div class="text-center py-8 text-gray-400">
-									<div class="text-4xl mb-2">N/A</div>
-									<p>No revenue received yet</p>
-								</div>
-							</div>
-						{/if}
 					</div>
-        		</CollapsibleSection>
+				{:else}
+					<div class="bg-white border border-light-gray p-4 opacity-50">
+						<h4 class="text-base font-bold text-gray-400 mb-4">Received Revenue</h4>
+						<div class="text-center py-8 text-gray-400">
+							<div class="text-4xl mb-2">N/A</div>
+							<p>No revenue received yet</p>
+						</div>
+					</div>
+				{/if}
+			</div>
+		</CollapsibleSection>
         		
         		<CollapsibleSection title="Gallery" isOpenByDefault={false} alwaysOpenOnDesktop={false}>
         			<div class="grid grid-cols-2 gap-4">
@@ -544,83 +776,7 @@ onMount(() => {
 							</div>
 						</div>
 					</div>
-				{:else if activeTab === 'payments'}
-					{@const monthlyReports = assetData?.monthlyReports || []}
-					{@const maxRevenue = monthlyReports.length > 0 ? Math.max(...monthlyReports.map(r => r.netIncome ?? 0)) : 1500}
-					{@const latestReport = monthlyReports[monthlyReports.length - 1]}
-					{@const primaryToken = assetTokens && assetTokens.length > 0 ? assetTokens[0] : null}
-					{@const nextMonth = (() => {
-						// Use first payment date from primary token if no revenue yet
-						if (!latestReport || !latestReport.netIncome || latestReport.netIncome === 0) {
-							if (primaryToken?.firstPaymentDate) {
-								// Parse YYYY-MM format and set to end of month
-								const [year, month] = primaryToken.firstPaymentDate.split('-').map(Number);
-								const date = new Date(year, month - 1, 1);
-								// Get last day of the month
-								return new Date(date.getFullYear(), date.getMonth() + 1, 0);
-							}
-						}
-						// If we have revenue, use month after last report
-						if (latestReport) {
-							const lastDate = new Date(latestReport.month + '-01');
-							return new Date(lastDate.getFullYear(), lastDate.getMonth() + 1, 1);
-						}
-						// Fallback to current date
-						return new Date();
-					})()}
-					{@const avgRevenue = monthlyReports.length > 0 ? monthlyReports.reduce((sum, r) => sum + (r.netIncome ?? 0), 0) / monthlyReports.length : 0}
-					{@const hasRevenue = monthlyReports.some(r => r.netIncome && r.netIncome > 0)}
-					{@const chartData = (() => {
-						// Generate chart data starting from firstPaymentDate
-						const data = [];
-
-						if (primaryToken?.firstPaymentDate) {
-							// Parse the first payment date
-							const [startYear, startMonth] = primaryToken.firstPaymentDate.split('-').map(Number);
-							const startDate = new Date(startYear, startMonth - 1, 1);
-
-							// Get current date
-							const currentDate = new Date();
-
-							// Create a map of existing reports for quick lookup
-							const reportMap = new Map();
-							monthlyReports.forEach(report => {
-								if (report.month) {
-									reportMap.set(report.month, report.netIncome ?? 0);
-								}
-							});
-
-							// Generate data points from firstPaymentDate to current date
-							let iterDate = new Date(startDate);
-							while (iterDate <= currentDate) {
-								const yearStr = iterDate.getFullYear();
-								const monthStr = String(iterDate.getMonth() + 1).padStart(2, '0');
-								const monthKey = `${yearStr}-${monthStr}`;
-
-								data.push({
-									label: `${monthKey}-01`,
-									value: reportMap.get(monthKey) ?? 0
-								});
-
-								// Move to next month
-								iterDate.setMonth(iterDate.getMonth() + 1);
-							}
-						} else {
-							// Fallback to existing behavior if no firstPaymentDate
-							return monthlyReports.map(report => {
-								let dateStr = report.month || '';
-								if (dateStr && !dateStr.includes('-01')) {
-									dateStr = dateStr + '-01';
-								}
-								return {
-									label: dateStr,
-									value: report.netIncome ?? 0
-								};
-							});
-						}
-
-						return data;
-					})()}
+		{:else if activeTab === 'payments'}
 					<div class="flex-1 flex flex-col">
 						<div class="grid md:grid-cols-4 grid-cols-1 gap-6">
 							<div class="bg-white border border-light-gray p-6 md:col-span-3">
@@ -632,7 +788,7 @@ onMount(() => {
 								</div>
 								<div class="w-full relative">
 									<Chart
-										data={chartData}
+										data={revenueChartData}
 										width={700}
 										height={350}
 										valuePrefix="$"
@@ -640,7 +796,7 @@ onMount(() => {
 										animate={true}
 										showGrid={true}
 									/>
-									{#if !hasRevenue}
+									{#if !revenueHasData}
 										<div class="absolute inset-0 bg-gray-100 bg-opacity-90 flex items-center justify-center rounded">
 											<div class="text-center">
 												<div class="text-6xl font-bold text-gray-400 mb-2">N/A</div>
@@ -654,14 +810,14 @@ onMount(() => {
 							<div class="bg-white border border-light-gray p-6">
 								<h4 class="text-lg font-extrabold text-black mb-6">Revenue Metrics</h4>
 								<div class="text-center mb-6 p-4 bg-white">
-									<div class="text-4xl font-extrabold text-black mb-2">{nextMonth.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}</div>
+									<div class="text-4xl font-extrabold text-black mb-2">{nextReportDue ? formatDueDate(nextReportDue) : 'TBD'}</div>
 									<div class="text-base font-medium text-black opacity-70">Next Report Due</div>
 								</div>
 								<div class="grid grid-cols-1 gap-4 mb-6">
 									<div class="text-center p-3 bg-white">
 										<div class="text-3xl font-extrabold text-black mb-1">
-											{#if latestReport?.netIncome !== undefined}
-												US${latestReport.netIncome.toFixed(0)}
+											{#if latestRevenueReport}
+												{formatCurrency(latestRevenueReport.revenue)}
 											{:else}
 												<span class="text-gray-400">N/A</span>
 											{/if}
@@ -671,8 +827,8 @@ onMount(() => {
 								</div>
 								<div class="text-center p-4 bg-white">
 									<div class="text-4xl font-extrabold text-black mb-2">
-										{#if avgRevenue > 0}
-											US${avgRevenue.toFixed(0)}
+										{#if revenueAverage > 0}
+											{formatCurrency(revenueAverage)}
 										{:else}
 											<span class="text-gray-400">N/A</span>
 										{/if}
@@ -764,203 +920,219 @@ onMount(() => {
 				<div class="py-6">
 					<h3 class="text-3xl md:text-2xl font-extrabold text-black uppercase tracking-wider mb-8">Token Information</h3>
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-					{#each assetTokens as token}
-						{@const sft = $sfts?.find(s => s.id.toLowerCase() === token.contractAddress.toLowerCase())}
-					{@const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress)}
-					{@const supply = getTokenSupply(token, sft, maxSupply)}
-					{@const hasAvailableSupply = supply && supply.availableSupply > 0}
-					{@const tokenPayoutData = getTokenPayoutHistory(token)}
-					{@const latestPayout = tokenPayoutData?.recentPayouts?.[0]}
-					{@const calculatedReturns = calculateTokenReturns(assetData!, token, sft?.totalShares, maxSupply)}
-					{@const isFlipped = flippedCards.has(token.contractAddress)}
-					{@const tokenTermsUrl = getTokenTermsPath(token.contractAddress)}
-					<div id="token-{token.contractAddress}">
-							<Card hoverable clickable paddingClass="p-0" on:click={() => handleCardClick(token.contractAddress)}>
-								<CardContent paddingClass="p-0">
-									<div class="relative preserve-3d transform-gpu transition-transform duration-500 {isFlipped ? 'rotate-y-180' : ''} min-h-[700px] sm:min-h-[600px]">
-										<!-- Front of card -->
-										<div class="absolute inset-0 backface-hidden">
-											<!-- Full width availability banner -->
-											<div class="{!hasAvailableSupply ? 'text-base font-extrabold text-white bg-black text-center py-3 uppercase tracking-wider' : 'text-base font-extrabold text-black bg-primary text-center py-3 uppercase tracking-wider'} w-full">
-												{hasAvailableSupply ? 'Available for Purchase' : 'Currently Sold Out'}
-											</div>
-											
-											<div class="p-8 pb-0 relative">
-												<div class="flex-1 mt-6">
-													<div class="flex justify-between items-start mb-3 gap-4">
-														<h4 class="text-2xl font-extrabold text-black font-figtree flex-1">{token.releaseName}</h4>
-														<div class="text-sm font-extrabold text-white bg-secondary px-3 py-1 tracking-wider rounded whitespace-nowrap">
-															{token.sharePercentage || 25}% of Asset
-														</div>
-													</div>
-													<p class="text-sm text-secondary font-medium break-all tracking-tight opacity-80 font-figtree">{token.contractAddress}</p>
-													{#if tokenTermsUrl}
-														<a href={tokenTermsUrl} target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-sm font-semibold text-secondary no-underline hover:underline mt-2 font-figtree">
-															View terms →
-														</a>
-													{/if}
-												</div>
-											</div>
-								
-											<div class="p-8 pt-6 space-y-4">
-												<div class="flex justify-between items-start">
-													<span class="text-base font-medium text-black opacity-70 relative font-figtree">Minted Supply </span>
-													<span class="text-base font-extrabold text-black text-right font-figtree">{supply?.mintedSupply || 0}</span>
-												</div>
-												<div class="flex justify-between items-start">
-													<span class="text-base font-medium text-black opacity-70 relative font-figtree">Max Supply</span>
-													<span class="text-base font-extrabold text-black text-right font-figtree">{supply?.maxSupply || 0}</span>
-												</div>
-												<div class="flex justify-between items-start relative">
-													<span class="text-base font-medium text-black opacity-70 relative font-figtree">
-														Implied Barrels/Token
-														<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100"
-															on:mouseenter={() => showTooltipWithDelay('barrels')}
-															on:mouseleave={hideTooltip}
-															role="button"
-															tabindex="0">ⓘ</span>
-													</span>
-													<span class="text-base font-extrabold text-black text-right">{calculatedReturns?.impliedBarrelsPerToken === Infinity ? '∞' : calculatedReturns?.impliedBarrelsPerToken?.toFixed(6) || '0.000000'}</span>
-													{#if showTooltip === 'barrels'}
-														<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">
-															Estimated barrels of oil equivalent per token based on reserves and token supply
-														</div>
-													{/if}
-												</div>
-												<div class="flex justify-between items-start relative">
-													<span class="text-base font-medium text-black opacity-70 relative font-figtree">
-														Breakeven Oil Price
-														<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100"
-															on:mouseenter={() => showTooltipWithDelay('breakeven')}
-															on:mouseleave={hideTooltip}
-															role="button"
-															tabindex="0">ⓘ</span>
-													</span>
-													<span class="text-base font-extrabold text-black text-right">US${calculatedReturns?.breakEvenOilPrice?.toFixed(2) || '0.00'}</span>
-													{#if showTooltip === 'breakeven'}
-														<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">
-															Oil price required to cover operational costs and maintain profitability
-														</div>
-													{/if}
-												</div>
-											</div>
+	
+				{#each assetTokens as token}
+					{@const sft = $sfts?.find(s => s.id.toLowerCase() === token.contractAddress.toLowerCase())}
+				{@const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress)}
+				{@const supply = getTokenSupply(token, sft, maxSupply)}
+				{@const hasAvailableSupply = supply && supply.availableSupply > 0}
+				{@const tokenPayoutData = getTokenPayoutHistory(token)}
+				{@const latestPayout = tokenPayoutData?.recentPayouts?.[0]}
+				{@const calculatedReturns = calculateTokenReturns(assetData!, token, sft?.totalShares, maxSupply)}
+				{@const tokenTermsUrl = getTokenTermsPath(token.contractAddress)}
+				<div id="token-{token.contractAddress}">
+					<Card hoverable clickable paddingClass="p-0" on:click={() => handleCardClick(token.contractAddress)}>
+						<CardContent paddingClass="p-0">
+							<div class="min-h-[700px] sm:min-h-[600px] flex flex-col">
+								<div class="{!hasAvailableSupply ? 'text-base font-extrabold text-white bg-black text-center py-3 uppercase tracking-wider' : 'text-base font-extrabold text-black bg-primary text-center py-3 uppercase tracking-wider'} w-full">
+									{hasAvailableSupply ? 'Available for Purchase' : 'Currently Sold Out'}
+								</div>
 
-											<div class="p-8 pt-0 border-t border-light-gray">
-												<h5 class="text-sm font-extrabold text-black uppercase tracking-wider mb-4 pt-6">Estimated Returns</h5>
-												<div class="grid grid-cols-3 gap-3">
-													<div class="text-center p-3 bg-white">
-														<span class="text-xs font-medium text-black opacity-70 block mb-1 relative">
-															Base
-															<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100"
-																on:mouseenter={() => showTooltipWithDelay('base')}
-																on:mouseleave={hideTooltip}
-																role="button"
-																tabindex="0">ⓘ</span>
-														</span>
-														<span class="text-xl font-extrabold text-primary">{formatSmartReturn(calculatedReturns?.baseReturn)}</span>
-														{#if showTooltip === 'base'}
-															<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">
-																Conservative return estimate based on current production and oil prices
-															</div>
-														{/if}
-													</div>
-													<div class="text-center p-3 bg-white">
-														<span class="text-xs font-medium text-black opacity-70 block mb-1 relative">
-															Bonus
-															<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100"
-																on:mouseenter={() => showTooltipWithDelay('bonus')}
-																on:mouseleave={hideTooltip}
-																role="button"
-																tabindex="0">ⓘ</span>
-														</span>
-														<span class="text-xl font-extrabold text-primary">{calculatedReturns?.bonusReturn !== undefined ? (formatSmartReturn(calculatedReturns.bonusReturn).startsWith('>') ? formatSmartReturn(calculatedReturns.bonusReturn) : '+' + formatSmartReturn(calculatedReturns.bonusReturn)) : 'TBD'}</span>
-														{#if showTooltip === 'bonus'}
-															<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">
-																Additional potential return from improved oil prices or production efficiency
-															</div>
-														{/if}
-													</div>
-													<div class="text-center p-3 bg-white hidden sm:block">
-														<span class="text-xs font-medium text-black opacity-70 block mb-1 relative">Total Expected</span>
-														<span class="text-xl font-extrabold text-primary">{calculatedReturns ? formatSmartReturn(calculatedReturns.baseReturn + calculatedReturns.bonusReturn) : 'TBD'}</span>
-													</div>
-												</div>
-											</div>
-
-											<div class="px-4 sm:px-8 pb-6 sm:pb-8">
-												<div class="grid grid-cols-2 gap-2 sm:gap-3">
-													{#if hasAvailableSupply}
-														<PrimaryButton fullWidth size="small" on:click={(e) => { e.stopPropagation(); handleBuyTokens(token.contractAddress); }}>
-															<span class="hidden sm:inline">Buy Tokens</span>
-															<span class="sm:hidden">Buy</span>
-														</PrimaryButton>
-													{:else}
-														<PrimaryButton fullWidth size="small" disabled>
-															<span class="hidden sm:inline">Sold Out</span>
-															<span class="sm:hidden">Sold Out</span>
-														</PrimaryButton>
-													{/if}
-													<div on:click|stopPropagation={() => toggleCardFlip(token.contractAddress)} on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleCardFlip(token.contractAddress); }} role="button" tabindex="0" class="cursor-pointer">
-														<SecondaryButton fullWidth size="small">
-															<span class="hidden sm:inline">Distributions History</span>
-															<span class="sm:hidden">History</span>
-														</SecondaryButton>
-													</div>
-												</div>
+								<div class="p-8 pb-0 relative">
+									<div class="flex-1 mt-6">
+										<div class="flex justify-between items-start mb-3 gap-4">
+											<h4 class="text-2xl font-extrabold text-black font-figtree flex-1">{token.releaseName}</h4>
+											<div class="text-sm font-extrabold text-white bg-secondary px-3 py-1 tracking-wider rounded whitespace-nowrap">
+												{token.sharePercentage || 25}% of Asset
 											</div>
 										</div>
+										<p class="text-sm text-secondary font-medium break-all tracking-tight opacity-80 font-figtree">{token.contractAddress}</p>
+										{#if tokenTermsUrl}
+											<a href={tokenTermsUrl} target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-sm font-semibold text-secondary no-underline hover:underline mt-2 font-figtree">
+												View terms →
+											</a>
+										{/if}
 									</div>
-									
-									<!-- Back of card -->
-									<div class="absolute inset-0 backface-hidden rotate-y-180 bg-white">
-										<div class="p-8 flex flex-col h-full">
-											<div class="flex justify-between items-center mb-6">
-												<h4 class="text-xl font-extrabold text-black uppercase tracking-wider">Distributions History</h4>
-												<div on:click|stopPropagation={() => toggleCardFlip(token.contractAddress)} on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleCardFlip(token.contractAddress); }} role="button" tabindex="0">
-													<SecondaryButton>
-														← Back
-													</SecondaryButton>
-												</div>
+								</div>
+
+								<div class="p-8 pt-6 space-y-4">
+									<div class="flex justify-between items-start">
+										<span class="text-base font-medium text-black opacity-70 relative font-figtree">Minted Supply </span>
+										<span class="text-base font-extrabold text-black text-right">{supply?.mintedSupply || 0}</span>
+									</div>
+									<div class="flex justify-between items-start">
+										<span class="text-base font-medium text-black opacity-70 relative font-figtree">Max Supply</span>
+										<span class="text-base font-extrabold text-black text-right">{supply?.maxSupply || 0}</span>
+									</div>
+									<div class="flex justify-between items-start relative">
+										<span class="text-base font-medium text-black opacity-70 relative font-figtree">
+											Implied Barrels/Token
+											<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100" on:mouseenter={() => showTooltipWithDelay('barrels')} on:mouseleave={hideTooltip} role="button" tabindex="0">ⓘ</span>
+										</span>
+										<span class="text-base font-extrabold text-black text-right">{calculatedReturns?.impliedBarrelsPerToken === Infinity ? '∞' : calculatedReturns?.impliedBarrelsPerToken?.toFixed(6) || '0.000000'}</span>
+										{#if showTooltip === 'barrels'}
+											<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">Estimated barrels of oil equivalent per token based on reserves and token supply</div>
+										{/if}
+									</div>
+									<div class="flex justify-between items-start relative">
+										<span class="text-base font-medium text-black opacity-70 relative font-figtree">
+											Breakeven Oil Price
+											<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100" on:mouseenter={() => showTooltipWithDelay('breakeven')} on:mouseleave={hideTooltip} role="button" tabindex="0">ⓘ</span>
+										</span>
+										<span class="text-base font-extrabold text-black text-right">US${calculatedReturns?.breakEvenOilPrice?.toFixed(2) || '0.00'}</span>
+										{#if showTooltip === 'breakeven'}
+											<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">Oil price required to cover operational costs and maintain profitability</div>
+										{/if}
+									</div>
+								</div>
+
+								<div class="p-8 pt-0 border-t border-light-gray">
+									<h5 class="text-sm font-extrabold text-black uppercase tracking-wider mb-4 pt-6 flex items-center gap-1 relative">
+										<span>Estimated IRR</span>
+										<span
+											class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100"
+											on:mouseenter={() => showTooltipWithDelay('irr')}
+											on:mouseleave={hideTooltip}
+											role="button"
+											tabindex="0"
+										>
+											ⓘ
+										</span>
+										{#if showTooltip === 'irr'}
+											<div class="absolute top-full left-0 mt-1 bg-black text-white p-2 rounded text-xs max-w-xs z-[1000]">
+												IRR is a standard oil and gas industry and project finance returns metric that gives the rate of return that would set the NPV of cashflows to 0. It accounts for early repayment of invested capital.
 											</div>
-											
-											{#if tokenPayoutData?.recentPayouts && tokenPayoutData.recentPayouts.length > 0}
-												<div class="flex-1 flex flex-col">
-													<div class="grid grid-cols-3 gap-2 text-xs font-bold text-black uppercase tracking-wider border-b border-light-gray pb-2 mb-4">
-														<div class="text-left">Month</div>
-														<div class="text-center">Total Payments</div>
-														<div class="text-right">Per Token</div>
-													</div>
-													<div class="space-y-2 flex-1">
-														{#each tokenPayoutData.recentPayouts.slice(-6) as payout}
-															<div class="grid grid-cols-3 gap-2 text-sm">
-																<div class="text-left font-medium text-black">{payout.month}</div>
-																<div class="text-center font-semibold text-black">US${payout.totalPayout.toLocaleString()}</div>
-																<div class="text-right font-semibold text-black">US${payout.payoutPerToken.toFixed(5)}</div>
-															</div>
-														{/each}
-													</div>
-													<div class="border-t border-light-gray my-4"></div>
-													<div class="mt-auto">
-														<div class="grid grid-cols-3 gap-2 text-sm font-extrabold">
-															<div class="text-left text-black">Total</div>
-															<div class="text-center text-black">US${tokenPayoutData.recentPayouts.reduce((sum, p) => sum + p.totalPayout, 0).toLocaleString()}</div>
-															<div class="text-right text-black">US${(tokenPayoutData.recentPayouts.reduce((sum, p) => sum + p.payoutPerToken, 0)).toFixed(5)}</div>
-														</div>
-													</div>
-												</div>
-											{:else}
-												<div class="text-center py-8 text-black opacity-70 flex-1 flex flex-col justify-center">
-													<p class="text-sm font-semibold mb-2">No distributions yet</p>
-													<p class="text-xs">No distributions have been made yet.</p>
-													<p class="text-xs">Distributions will appear here once payouts begin.</p>
-												</div>
-											{/if}
+										{/if}
+									</h5>
+									<div class="grid grid-cols-3 gap-3">
+										<div class="text-center p-3 bg-white">
+											<span class="text-xs font-medium text-black opacity-70 block mb-1 relative">Base IRR <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100" on:mouseenter={() => showTooltipWithDelay('base')} on:mouseleave={hideTooltip} role="button" tabindex="0">ⓘ</span></span>
+											<span class="text-xl font-extrabold text-primary">{formatSmartReturn(calculatedReturns?.baseReturn)}</span>
+											{#if showTooltip === 'base'}<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">IRR assuming max supply</div>{/if}
+										</div>
+										<div class="text-center p-3 bg-white">
+											<span class="text-xs font-medium text-black opacity-70 block mb-1 relative">Bonus IRR <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100" on:mouseenter={() => showTooltipWithDelay('bonus')} on:mouseleave={hideTooltip} role="button" tabindex="0">ⓘ</span></span>
+											<span class="text-xl font-extrabold text-primary">{calculatedReturns?.bonusReturn !== undefined ? (formatSmartReturn(calculatedReturns.bonusReturn).startsWith('>') ? formatSmartReturn(calculatedReturns.bonusReturn) : '+' + formatSmartReturn(calculatedReturns.bonusReturn)) : 'TBD'}</span>
+											{#if showTooltip === 'bonus'}<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">Additional IRR where supply is lower than max supply</div>{/if}
+										</div>
+										<div class="text-center p-3 bg-white hidden sm:block">
+											<span class="text-xs font-medium text-black opacity-70 block mb-1 relative">Total Expected</span>
+											<span class="text-xl font-extrabold text-primary">{calculatedReturns ? formatSmartReturn(calculatedReturns.baseReturn + calculatedReturns.bonusReturn) : 'TBD'}</span>
 										</div>
 									</div>
+								</div>
+
+								<div class="px-4 sm:px-8 pb-6 sm:pb-8">
+									<div class="grid grid-cols-2 gap-2 sm:gap-3">
+										{#if hasAvailableSupply}
+											<PrimaryButton fullWidth size="small" on:click={(event) => { event.stopPropagation(); handleBuyTokens(token.contractAddress); }}>
+												<span class="hidden sm:inline">Buy Tokens</span>
+												<span class="sm:hidden">Buy</span>
+											</PrimaryButton>
+										{:else}
+											<PrimaryButton fullWidth size="small" disabled>
+												<span class="hidden sm:inline">Sold Out</span><span class="sm:hidden">Sold Out</span>
+											</PrimaryButton>
+										{/if}
+										<div on:click={(event) => handleHistoryButtonClick(event, token.contractAddress)}>
+											<SecondaryButton
+												fullWidth
+												size="small"
+											>
+												<span class="hidden sm:inline">Distributions History</span>
+												<span class="sm:hidden">History</span>
+											</SecondaryButton>
+										</div>
+									</div>
+								</div>
+							</div>
 						</CardContent>
 					</Card>
 				</div>
-					{/each}
+			{/each}
+
+			{#if historyModalOpen}
+				<Modal
+					bind:isOpen={historyModalOpen}
+					title={`Distributions History`}
+					size="large"
+					on:close={closeHistoryModal}
+				>
+					{#if selectedHistoryToken}
+						<div class="mb-6">
+							<h4 class="text-lg font-extrabold text-black uppercase tracking-wider mb-1">{selectedHistoryToken.releaseName}</h4>
+							<p class="text-xs text-black opacity-70 break-all">{selectedHistoryToken.contractAddress}</p>
+						</div>
+
+						{#if historyPayouts.length > 0}
+								<div class="space-y-4">
+									<div class="grid grid-cols-5 gap-2 text-xs font-bold text-black uppercase tracking-wider border-b border-light-gray pb-2">
+										<div class="text-left">Month</div>
+										<div class="text-center">Total Payments</div>
+										<div class="text-right">Per Token</div>
+										<div class="text-left">Claims Vault</div>
+										<div class="text-left">Payout Transaction</div>
+									</div>
+									<div class="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+										{#each historyPayouts as payout}
+											<div class="grid grid-cols-5 gap-2 text-sm items-center">
+												<div class="text-left font-medium text-black">{formatReportMonth(payout.month)}</div>
+												<div class="text-center font-semibold text-black">{formatCurrency(payout.totalPayout)}</div>
+												<div class="text-right font-semibold text-black">US${payout.payoutPerToken.toFixed(5)}</div>
+												<div class="text-left font-semibold text-secondary">
+													{#if payout.orderHash}
+														<a
+															href={`https://raindex.finance/orders/8453-${payout.orderHash}`}
+															target="_blank"
+															rel="noopener noreferrer"
+															class="hover:underline break-all"
+														>
+															{formatHash(payout.orderHash)}
+														</a>
+													{:else}
+														<span class="text-black opacity-50">—</span>
+													{/if}
+												</div>
+												<div class="text-left font-semibold text-secondary">
+													{#if payout.txHash}
+														<a
+															href={`https://basescan.org/tx/${payout.txHash}`}
+															target="_blank"
+															rel="noopener noreferrer"
+															class="hover:underline break-all"
+														>
+															{formatHash(payout.txHash)}
+														</a>
+													{:else}
+														<span class="text-black opacity-50">—</span>
+													{/if}
+												</div>
+											</div>
+										{/each}
+									</div>
+									<div class="border-t border-light-gray pt-4 grid grid-cols-5 gap-2 text-sm font-extrabold items-center">
+										<div class="text-left text-black">Total</div>
+										<div class="text-center text-black">{formatCurrency(historyPayouts.reduce((sum, p) => sum + p.totalPayout, 0))}</div>
+										<div class="text-right text-black">US${historyPayouts.reduce((sum, p) => sum + p.payoutPerToken, 0).toFixed(5)}</div>
+										<div class="text-left text-black opacity-50">—</div>
+										<div class="text-left text-black opacity-50">—</div>
+									</div>
+							</div>
+						{:else}
+							<div class="text-center py-12 text-black opacity-70">
+								<p class="text-base font-semibold mb-2">No distributions yet</p>
+								<p class="text-sm">No distributions have been made yet.</p>
+								<p class="text-sm">Distributions will appear here once payouts begin.</p>
+							</div>
+						{/if}
+					{:else}
+						<div class="text-center py-12 text-black opacity-70">
+							<p class="text-base font-semibold mb-2">Loading distributions</p>
+							<p class="text-sm">Fetching the latest payout history for this token.</p>
+						</div>
+					{/if}
+				</Modal>
+			{/if}
 					<!-- Future Releases Card -->
 					{#if hasFutureReleases}
 					<Card hoverable>

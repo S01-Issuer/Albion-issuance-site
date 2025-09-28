@@ -48,6 +48,7 @@ export interface PayoutData {
     totalPayout: number;
     payoutPerToken: number;
     txHash: string;
+    orderHash: string;
   };
 }
 

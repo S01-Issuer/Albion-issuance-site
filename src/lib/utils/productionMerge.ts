@@ -28,6 +28,33 @@ export interface MergedReport {
   payoutPerToken: number;
 }
 
+function toNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/[^-\d.]/g, ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+  return 0;
+}
+
+function normalizeRevenue(entry: any): { revenue: number; expenses: number; netIncome: number } {
+  const revenue = toNumber(entry?.revenue);
+  const expenses = toNumber(entry?.expenses);
+  const netIncomeRaw = toNumber(entry?.netIncome);
+  const netIncome = netIncomeRaw > 0 ? netIncomeRaw : revenue - expenses;
+
+  return {
+    revenue,
+    expenses,
+    netIncome,
+  };
+}
+
 export function mergeProductionHistory(
   historicalProduction: HistoricalRecord[] | undefined,
   receiptsData: ReceiptsRecord[] | undefined,
@@ -67,10 +94,8 @@ export function mergeProductionHistory(
         .filter((r) => !maxHistMonth || (r?.month && r.month > maxHistMonth))
         .map((report) => ({
           month: report?.month || "",
-          production: report?.assetData?.production || 0,
-          revenue: report?.assetData?.revenue || 0,
-          expenses: report?.assetData?.expenses || 0,
-          netIncome: report?.assetData?.netIncome || 0,
+          production: toNumber(report?.assetData?.production ?? report?.production),
+          ...normalizeRevenue(report?.assetData ?? report),
           payoutPerToken: payoutByMonth.get(report?.month || "") || 0,
         }))
     : [];

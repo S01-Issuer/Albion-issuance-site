@@ -105,7 +105,7 @@
 	$: tokenPaymentDateClasses = 'text-xs text-secondary font-medium mt-1 hidden lg:block';
 	$: returnsDisplayClasses = 'flex items-center gap-1 lg:gap-2';
 	$: returnItemClasses = 'flex flex-col items-center text-center';
-	$: returnLabelClasses = 'text-[0.6rem] lg:text-xs text-gray-500 font-medium';
+	$: returnLabelClasses = 'text-[0.6rem] lg:text-xs text-gray-500 font-medium whitespace-nowrap';
 	$: returnValueClasses = 'text-sm lg:text-lg text-primary font-extrabold font-figtree';
 	$: returnDividerClasses = 'text-xs lg:text-sm text-gray-500 font-medium mx-1';
 	$: buyCtaClasses = 'text-sm lg:text-base font-extrabold text-black font-figtree';
@@ -215,14 +215,14 @@
 							<div class={tokenButtonRightClasses}>
 								<div class={returnsDisplayClasses}>
 									<div class={returnItemClasses}>
-										<span class={returnLabelClasses}>Base</span>
+										<span class={returnLabelClasses}>Base IRR</span>
 										<span class={returnValueClasses}>
 											<FormattedReturn value={baseReturn} />
 										</span>
 									</div>
 									<div class={returnDividerClasses}>+</div>
 									<div class={returnItemClasses}>
-										<span class={returnLabelClasses}>Bonus</span>
+										<span class={returnLabelClasses}>Bonus IRR</span>
 										<span class={returnValueClasses}>
 											<FormattedReturn value={bonusReturn} />
 										</span>
@@ -239,7 +239,7 @@
 							</div>
 							<div class="flex items-center gap-3">
 								<div class="text-center">
-									<span class="text-sm font-extrabold text-primary">{baseReturn}% + {bonusReturn}%</span>
+										<span class="text-sm font-extrabold text-primary">{baseReturn}% Base IRR + {bonusReturn}% Bonus IRR</span>
 								</div>
 								<span class={buyCtaClasses}>Buy →</span>
 							</div>
@@ -265,4 +265,3 @@
 		{/if}
 	</CardContent>
 </Card>
-

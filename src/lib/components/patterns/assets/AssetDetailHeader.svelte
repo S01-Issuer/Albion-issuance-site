@@ -186,13 +186,13 @@
 				title="Last Revenue"
 				value={(() => {
 					const lastReport = asset?.monthlyReports?.[asset.monthlyReports.length - 1];
-					return lastReport?.netIncome !== undefined && lastReport.netIncome > 0
-						? formatCurrency(lastReport.netIncome)
+					return lastReport?.revenue !== undefined && lastReport.revenue > 0
+						? formatCurrency(lastReport.revenue)
 						: 'N/A';
 				})()}
 				subtitle={(() => {
 					const lastReport = asset?.monthlyReports?.[asset.monthlyReports.length - 1];
-					return lastReport?.netIncome !== undefined && lastReport.netIncome > 0 && lastReport.month
+					return lastReport?.revenue !== undefined && lastReport.revenue > 0 && lastReport.month
 						? new Date(lastReport.month + '-01').toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
 						: '';
 				})()}

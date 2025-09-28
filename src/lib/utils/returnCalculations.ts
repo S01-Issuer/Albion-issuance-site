@@ -301,15 +301,40 @@ export function getTokenSupply(
 export function getTokenPayoutHistory(
   token: TokenMetadata,
 ): { recentPayouts: any[] } | null {
-  if (!token || !token.payoutData) {
+  if (!token || !Array.isArray(token.payoutData)) {
     return null;
   }
 
-  return {
-    recentPayouts: token.payoutData.map((payout) => ({
+  const recentPayouts = token.payoutData
+    .filter((payout) => payout?.month && payout?.tokenPayout)
+    .map((payout) => ({
       month: payout.month,
-      totalPayout: payout.tokenPayout.totalPayout,
-      payoutPerToken: payout.tokenPayout.payoutPerToken,
-    })),
-  };
+      totalPayout: toNumber(payout.tokenPayout.totalPayout),
+      payoutPerToken: toNumber(payout.tokenPayout.payoutPerToken),
+      orderHash: payout.tokenPayout.orderHash,
+      txHash: payout.tokenPayout.txHash,
+    }))
+    .sort((a, b) => (a.month > b.month ? 1 : a.month < b.month ? -1 : 0));
+
+  console.log('[getTokenPayoutHistory] Payout data', {
+    contractAddress: token.contractAddress,
+    count: recentPayouts.length,
+    months: recentPayouts.map((entry) => entry.month),
+  });
+
+  return { recentPayouts };
+}
+
+function toNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/[^-\d.]/g, ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+  return 0;
 }
