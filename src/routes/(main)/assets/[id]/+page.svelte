@@ -1066,16 +1066,16 @@ function closeHistoryModal() {
 
 						{#if historyPayouts.length > 0}
 								<div class="space-y-4">
-									<div class="grid grid-cols-5 gap-2 text-xs font-bold text-black uppercase tracking-wider border-b border-light-gray pb-2">
+									<div class="grid grid-cols-[1.2fr,1fr,1fr,1.6fr,1.6fr] gap-6 text-xs font-bold text-black uppercase tracking-wider border-b border-light-gray pb-2">
 										<div class="text-left">Month</div>
 										<div class="text-center">Total Payments</div>
 										<div class="text-right">Per Token</div>
 										<div class="text-left">Claims Vault</div>
 										<div class="text-left">Payout Transaction</div>
 									</div>
-									<div class="space-y-2 max-h-[400px] overflow-y-auto pr-1">
-										{#each historyPayouts as payout}
-											<div class="grid grid-cols-5 gap-2 text-sm items-center">
+										<div class="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+											{#each historyPayouts as payout}
+												<div class="grid grid-cols-[1.2fr,1fr,1fr,1.6fr,1.6fr] gap-6 text-sm items-center">
 												<div class="text-left font-medium text-black">{formatReportMonth(payout.month)}</div>
 												<div class="text-center font-semibold text-black">{formatCurrency(payout.totalPayout)}</div>
 												<div class="text-right font-semibold text-black">US${payout.payoutPerToken.toFixed(5)}</div>
@@ -1085,9 +1085,12 @@ function closeHistoryModal() {
 															href={`https://raindex.finance/orders/8453-${payout.orderHash}`}
 															target="_blank"
 															rel="noopener noreferrer"
-															class="hover:underline break-all"
+															class="inline-flex items-center gap-1 hover:underline break-all"
 														>
-															{formatHash(payout.orderHash)}
+															<span>{formatHash(payout.orderHash)}</span>
+															<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+																<path stroke-linecap="round" stroke-linejoin="round" d="M10 6h8m0 0v8m0-8L9 15" />
+															</svg>
 														</a>
 													{:else}
 														<span class="text-black opacity-50">—</span>
@@ -1099,9 +1102,12 @@ function closeHistoryModal() {
 															href={`https://basescan.org/tx/${payout.txHash}`}
 															target="_blank"
 															rel="noopener noreferrer"
-															class="hover:underline break-all"
+															class="inline-flex items-center gap-1 hover:underline break-all"
 														>
-															{formatHash(payout.txHash)}
+															<span>{formatHash(payout.txHash)}</span>
+															<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+																<path stroke-linecap="round" stroke-linejoin="round" d="M10 6h8m0 0v8m0-8L9 15" />
+															</svg>
 														</a>
 													{:else}
 														<span class="text-black opacity-50">—</span>
@@ -1110,7 +1116,7 @@ function closeHistoryModal() {
 											</div>
 										{/each}
 									</div>
-									<div class="border-t border-light-gray pt-4 grid grid-cols-5 gap-2 text-sm font-extrabold items-center">
+										<div class="border-t border-light-gray pt-4 grid grid-cols-[1.2fr,1fr,1fr,1.6fr,1.6fr] gap-6 text-sm font-extrabold items-center">
 										<div class="text-left text-black">Total</div>
 										<div class="text-center text-black">{formatCurrency(historyPayouts.reduce((sum, p) => sum + p.totalPayout, 0))}</div>
 										<div class="text-right text-black">US${historyPayouts.reduce((sum, p) => sum + p.payoutPerToken, 0).toFixed(5)}</div>

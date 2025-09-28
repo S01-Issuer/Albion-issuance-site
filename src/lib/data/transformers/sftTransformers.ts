@@ -211,6 +211,12 @@ export class TokenMetadataTransformer extends BaseSftTransformer {
       payout?.payoutPerToken ?? payout?.perToken ?? entry.payoutPerToken,
     );
     const txHash = payout?.txHash || entry.txHash || entry.transactionHash || "";
+    const orderHash =
+      payout?.orderHash ||
+      payout?.order?.orderHash ||
+      entry.orderHash ||
+      entry.order?.orderHash ||
+      "";
 
     return {
       month: monthValue,
@@ -218,6 +224,7 @@ export class TokenMetadataTransformer extends BaseSftTransformer {
         totalPayout,
         payoutPerToken,
         txHash,
+        orderHash,
       },
     };
   }
