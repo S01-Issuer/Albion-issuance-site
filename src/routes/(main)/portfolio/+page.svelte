@@ -16,7 +16,8 @@
 		StatusBadge,
 		ActionCard,
 		FormattedNumber,
-		CollapsibleSection
+		CollapsibleSection,
+		Modal
 	} from '$lib/components/components';
 	import { PageLayout, HeroSection, ContentSection, FullWidthSection } from '$lib/components/layout';
 	import { formatCurrency, formatPercentage, formatNumber, formatSmartNumber } from '$lib/utils/formatters';
@@ -24,7 +25,7 @@
 	import { sfts, sftMetadata } from '$lib/stores';
 	import { formatEther } from 'viem';
 	import { goto } from '$app/navigation';
-	import { useTooltip, useCardFlip } from '$lib/composables';
+	import { useTooltip } from '$lib/composables';
 	import { getImageUrl } from '$lib/utils/imagePath';
 	import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
 	
@@ -48,11 +49,31 @@
 	
 	// Composables
 	const { show: showTooltipWithDelay, hide: hideTooltip, isVisible: isTooltipVisible } = useTooltip();
-	const { toggle: toggleCardFlip, flippedCards, unflipAll } = useCardFlip();
+
+	let historyModalPayoutData: Array<{ date: string; value: number }> = [];
+	let historyModalCumulativeData: Array<{ label: string; value: number }> = [];
+	let historyModalOpen = false;
+	let historyModalHolding: any | null = null;
+
+	$: historyModalPayoutData = historyModalHolding ? getPayoutChartData(historyModalHolding) : [];
+	$: historyModalCumulativeData = historyModalPayoutData.reduce((acc: Array<{ label: string; value: number }>, d, i) => {
+		const prevTotal = i > 0 ? acc[i - 1].value : 0;
+		acc.push({ label: d.date, value: prevTotal + d.value });
+		return acc;
+	}, [] as Array<{ label: string; value: number }>);
+
+	function openHistoryModal(holding: any) {
+		historyModalHolding = holding;
+		historyModalOpen = true;
+	}
+
+	function closeHistoryModal() {
+		historyModalOpen = false;
+		historyModalHolding = null;
+	}
 
 	// Load data when wallet is connected
 	$: if ($connected && $signerAddress) {
-		unflipAll();
 		if ($sfts && $sftMetadata) {
 			loadSftData();
 		}
@@ -481,16 +502,9 @@
 						</Card>
 					{:else}
 						{#each holdings as holding}
-							{@const flipped = $flippedCards.has(holding.id)}
-							{@const payoutData = flipped ? getPayoutChartData(holding) : []}
-							<div class="mb-3" style="perspective: 1000px;">
-								<div class="relative w-full transition-transform duration-500" 
-									style="transform-style: preserve-3d; transform: rotateY({flipped ? 180 : 0}deg); height: 360px;">
-									
-									<!-- Front of card -->
-									<div class="absolute inset-0 w-full h-full" style="backface-visibility: hidden;">
-										<Card hoverable showBorder>
-											<CardContent paddingClass="p-6 lg:p-9 h-full flex flex-col justify-between">
+							<div class="mb-3">
+								<Card hoverable showBorder>
+									<CardContent paddingClass="p-6 lg:p-9 h-full flex flex-col justify-between">
 												<div class="flex justify-between items-start mb-4 lg:mb-7">
 													<div class="flex items-start gap-3 lg:gap-4">
 														<div class="w-12 h-12 lg:w-14 lg:h-14 bg-light-gray rounded-lg overflow-hidden flex items-center justify-center flex-shrink-0">
@@ -523,7 +537,7 @@
 														<SecondaryButton size="small" on:click={() => goto('/claims')}>
 															Claims
 														</SecondaryButton>
-														<SecondaryButton size="small" on:click={() => toggleCardFlip(holding.id)}>
+														<SecondaryButton size="small" on:click={() => openHistoryModal(holding)}>
 															History
 														</SecondaryButton>
 													</div>
@@ -609,81 +623,89 @@
 														</div>
 													</div>
 												</div>
-											</CardContent>
-										</Card>
-									</div>
-									
-									<!-- Back of card (History) -->
-									<div class="absolute inset-0 w-full h-full" 
-										style="backface-visibility: hidden; transform: rotateY(180deg);">
-										<Card hoverable showBorder>
-											<CardContent paddingClass="p-6 h-full flex flex-col">
-												<div class="flex justify-between items-start mb-4">
-													<h4 class="font-extrabold text-black text-lg">{holding.name}</h4>
-													<SecondaryButton size="small" on:click={() => toggleCardFlip(holding.id)}>
-														Back
-													</SecondaryButton>
-												</div>
-												
-												{#if payoutData && payoutData.length > 0}
-													{@const cumulativeData = payoutData.reduce((acc, d, i) => {
-														const prevTotal = i > 0 ? acc[i-1].value : 0;
-														acc.push({ label: d.date, value: prevTotal + d.value });
-														return acc;
-													}, [])}
-													
-													<div class="flex-1 space-y-4">
-														<!-- Monthly Payouts Chart -->
-														<div>
-															<h5 class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-2">
-																Monthly Payouts
-															</h5>
-															<Chart
-																data={payoutData.map(d => ({ label: d.date, value: d.value }))}
-																width={600}
-																height={120}
-																barColor="#08bccc"
-																valuePrefix="$"
-																animate={true}
-																showGrid={true}
-															/>
-														</div>
-														
-														<!-- Cumulative Returns Chart -->
-														<div>
-															<h5 class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-2">
-																Cumulative Returns
-															</h5>
-															<Chart
-																data={cumulativeData}
-																width={600}
-																height={120}
-																barColor="#08bccc"
-																valuePrefix="$"
-																animate={true}
-																showGrid={true}
-																horizontalLine={{
-																	value: holding.totalInvested,
-																	label: 'Breakeven',
-																	color: '#283c84'
-																}}
-															/>
-														</div>
-													</div>
-												{:else}
-													<div class="flex-1 flex items-center justify-center">
-														<div class="text-center text-black opacity-70">
-															<div class="text-3xl mb-2">📊</div>
-															<div class="text-sm">No payout history available yet</div>
-														</div>
-													</div>
-												{/if}
-											</CardContent>
-										</Card>
-									</div>
-								</div>
+								</CardContent>
+								</Card>
 							</div>
 						{/each}
+
+						{#if historyModalOpen && historyModalHolding}
+							<Modal
+								bind:isOpen={historyModalOpen}
+								title={`${historyModalHolding.name} History`}
+								size="large"
+								maxHeight="90vh"
+								on:close={closeHistoryModal}
+							>
+								<div class="space-y-6 px-4 sm:px-6 lg:px-8">
+									<div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+										<div>
+											<h4 class="text-lg font-extrabold text-black">{historyModalHolding.tokenSymbol}</h4>
+											<div class="text-sm text-black opacity-70">{historyModalHolding.name}</div>
+											{#if historyModalHolding.asset?.location}
+												<div class="text-xs text-black opacity-60 mt-1">
+													{historyModalHolding.asset.location.state}, {historyModalHolding.asset.location.country}
+												</div>
+											{/if}
+										</div>
+										<div class="grid grid-cols-2 gap-4 sm:gap-6">
+											<div>
+												<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-1">Tokens</div>
+												<div class="text-lg font-extrabold text-black">{formatNumber(historyModalHolding.tokensOwned)}</div>
+											</div>
+											<div>
+												<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-1">Total Invested</div>
+												<div class="text-lg font-extrabold text-black">{formatCurrency(historyModalHolding.totalInvested)}</div>
+											</div>
+										</div>
+									</div>
+
+									{#if historyModalPayoutData.length > 0}
+										<div class="space-y-6">
+											<div>
+												<h5 class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-2">Monthly Payouts</h5>
+											<div class="overflow-x-auto">
+												<Chart
+													data={historyModalPayoutData.map(d => ({ label: d.date, value: d.value }))}
+													width={760}
+													height={200}
+													barColor="#08bccc"
+													valuePrefix="$"
+													animate={true}
+													showGrid={true}
+													yTickFormat={(value) => `$${Number(value).toFixed(1)}`}
+												/>
+												</div>
+											</div>
+
+											<div>
+												<h5 class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-2">Cumulative Returns</h5>
+										<div class="overflow-x-auto">
+											<Chart
+													data={historyModalCumulativeData}
+													width={760}
+													height={200}
+														barColor="#08bccc"
+														valuePrefix="$"
+														animate={true}
+														showGrid={true}
+														horizontalLine={{
+															value: historyModalHolding.totalInvested,
+															label: 'Breakeven',
+															color: '#283c84'
+														}}
+													/>
+												</div>
+											</div>
+										</div>
+									{:else}
+										<div class="py-12 text-center text-black opacity-70">
+											<div class="text-3xl mb-2">📊</div>
+											<div class="text-sm">No payout history available yet</div>
+										</div>
+									{/if}
+								</div>
+							</Modal>
+						{/if}
 					{/if}
 				</div>
 				

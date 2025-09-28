@@ -335,7 +335,7 @@ describe("Asset Detail Page E2E Tests", () => {
             expect(bodyText).toMatch(/Implied Barrels.*Token/i);
 
             // Returns information
-            expect(bodyText).toMatch(/Base Return|Bonus Return/);
+            expect(bodyText).toMatch(/Base IRR|Bonus IRR/);
 
             // Exact return values from mock
             expect(bodyText).toMatch(/12\.0%|12\.04%/); // Base return

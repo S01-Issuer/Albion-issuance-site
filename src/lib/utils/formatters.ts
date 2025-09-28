@@ -359,6 +359,23 @@ export function formatAddress(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
+export function formatHash(
+  value: string,
+  options: { start?: number; end?: number } = {},
+): string {
+  if (!value) {
+    return "";
+  }
+
+  const { start = 6, end = 4 } = options;
+
+  if (value.length <= start + end) {
+    return value;
+  }
+
+  return `${value.slice(0, start)}...${value.slice(-end)}`;
+}
+
 /**
  * Smart return formatting that switches from % to x multiplier for large values
  * @param returnPercentage - Return value as percentage (e.g., 150 for 150%)

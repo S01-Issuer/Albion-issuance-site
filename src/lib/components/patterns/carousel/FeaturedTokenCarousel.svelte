@@ -124,9 +124,15 @@
 		}
 	}
 
+	let tooltipId = '';
+	let tooltipTimer: ReturnType<typeof setTimeout> | null = null;
+
 	onDestroy(() => {
 		if (autoPlayTimer) {
 			clearInterval(autoPlayTimer);
+		}
+		if (tooltipTimer) {
+			clearTimeout(tooltipTimer);
 		}
 	});
 
@@ -176,6 +182,26 @@
 
 	function handleMouseLeave() {
 		if (autoPlay && featuredTokensWithAssets.length > 1) startAutoPlay();
+	}
+
+	function showTooltipWithDelay(id: string, delay = 300) {
+		if (tooltipTimer) {
+			clearTimeout(tooltipTimer);
+		}
+
+		tooltipTimer = setTimeout(() => {
+			tooltipId = id;
+			tooltipTimer = null;
+		}, delay);
+	}
+
+	function hideTooltip() {
+		if (tooltipTimer) {
+			clearTimeout(tooltipTimer);
+			tooltipTimer = null;
+		}
+
+		tooltipId = '';
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
@@ -408,16 +434,32 @@
 						</div>
 					</div>
 
-					<!-- Returns - responsive label and format -->
-					<div class={statItemClasses}>
-						<div class={statLabelClasses}>
-							<span class="hidden sm:inline">Base Returns</span>
-							<span class="sm:hidden">Est. Return</span>
-						</div>
-						<div class={statValueClasses + ' text-primary'}>
-							<span class="hidden sm:inline">
-								<FormattedReturn value={calculatedReturns?.baseReturn} />
-							</span>
+		<!-- Returns - responsive label and format -->
+		<div class={statItemClasses}>
+			<div class={`${statLabelClasses} relative flex items-center gap-1`}>
+				<span class="hidden sm:inline">Base IRR</span>
+				<span class="sm:hidden">Est. IRR</span>
+				<span
+					class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100"
+					on:mouseenter={() => showTooltipWithDelay('irr-info')}
+					on:mouseleave={hideTooltip}
+					on:focus={() => showTooltipWithDelay('irr-info', 0)}
+					on:blur={hideTooltip}
+					tabindex="0"
+					role="button"
+				>
+					ⓘ
+				</span>
+				{#if tooltipId === 'irr-info'}
+					<div class="absolute top-full left-0 mt-1 bg-black text-white p-2 rounded text-xs max-w-xs z-[1000]">
+						IRR is a standard oil and gas industry and project finance returns metric that gives the rate of return that would set the NPV of cashflows to 0. It accounts for early repayment of invested capital.
+					</div>
+				{/if}
+			</div>
+			<div class={statValueClasses + ' text-primary'}>
+				<span class="hidden sm:inline">
+					<FormattedReturn value={calculatedReturns?.baseReturn} />
+				</span>
 							<span class="sm:hidden flex items-center gap-1">
 								{#if calculatedReturns?.baseReturn !== undefined && calculatedReturns?.bonusReturn !== undefined}
 									<span class="flex items-center gap-1 text-xs">
@@ -432,9 +474,9 @@
 						</div>
 					</div>
 
-					<!-- Bonus Returns - hidden on mobile -->
-					<div class="{statItemClasses} hidden sm:block">
-						<div class={statLabelClasses}>Bonus Returns</div>
+		<!-- Bonus IRR - hidden on mobile -->
+		<div class="{statItemClasses} hidden sm:block">
+			<div class={statLabelClasses}>Bonus IRR</div>
 						<div class={statValueClasses + ' text-primary'}>
 							<FormattedReturn value={calculatedReturns?.bonusReturn} showPlus={true} />
 						</div>

@@ -27,10 +27,11 @@
 	export let valueSuffix: string = '';
 	export let title: string = '';
 	export let showValues: boolean = false;
-	export let animate: boolean = true;
-	export let showGrid: boolean = true;
-	export let showAreaFill: boolean = true;
-	export let horizontalLine: { value: number; label: string; color?: string } | null = null;
+export let animate: boolean = true;
+export let showGrid: boolean = true;
+export let showAreaFill: boolean = true;
+export let horizontalLine: { value: number; label: string; color?: string } | null = null;
+export let yTickFormat: ((value: number) => string) | null = null;
 	
 	// Helper to determine which labels to show based on data density
 	function getLabelsToShow(data: Array<{label: string; value: number}>): {indices: number[], showYear: boolean} {
@@ -183,7 +184,9 @@
 		{#each Array(6) as _, i}
 			{@const value = niceMax - (i / 5) * valueRange}
 			{@const absValue = Math.abs(value)}
-			{@const formattedValue = absValue >= 1000 ? `${value < 0 ? '-' : ''}${Math.round(absValue / 1000)}k` : Math.round(value).toString()}
+		{@const formattedValue = yTickFormat
+			? yTickFormat(value)
+			: (absValue >= 1000 ? `${value < 0 ? '-' : ''}${Math.round(absValue / 1000)}k` : Math.round(value).toString())}
 			<text 
 				x={padding.left - 10} 
 				y={padding.top + i * (chartHeight / 5) + 5} 

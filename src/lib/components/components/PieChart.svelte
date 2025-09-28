@@ -89,7 +89,9 @@
 	})();
 	
 	function createPath(startAngle: number, endAngle: number): string {
-		const largeArcFlag = endAngle - startAngle > Math.PI ? 1 : 0;
+		const angleDiff = endAngle - startAngle;
+		const isFullCircle = angleDiff >= Math.PI * 2 - 0.0001;
+		const largeArcFlag = angleDiff > Math.PI ? 1 : 0;
 		
 		const x1 = centerX + Math.cos(startAngle) * outerRadius;
 		const y1 = centerY + Math.sin(startAngle) * outerRadius;
@@ -97,7 +99,18 @@
 		const y2 = centerY + Math.sin(endAngle) * outerRadius;
 		
 		if (innerRadius > 0) {
-			// Donut chart
+			if (isFullCircle) {
+				return `
+					M ${centerX + outerRadius} ${centerY}
+					A ${outerRadius} ${outerRadius} 0 1 0 ${centerX - outerRadius} ${centerY}
+					A ${outerRadius} ${outerRadius} 0 1 0 ${centerX + outerRadius} ${centerY}
+					M ${centerX + innerRadius} ${centerY}
+					A ${innerRadius} ${innerRadius} 0 1 1 ${centerX - innerRadius} ${centerY}
+					A ${innerRadius} ${innerRadius} 0 1 1 ${centerX + innerRadius} ${centerY}
+					Z
+				`;
+			}
+			
 			const ix1 = centerX + Math.cos(startAngle) * innerRadius;
 			const iy1 = centerY + Math.sin(startAngle) * innerRadius;
 			const ix2 = centerX + Math.cos(endAngle) * innerRadius;
@@ -110,15 +123,24 @@
 				A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${ix1} ${iy1}
 				Z
 			`;
-		} else {
-			// Pie chart
+		}
+		
+		if (isFullCircle) {
 			return `
 				M ${centerX} ${centerY}
-				L ${x1} ${y1}
-				A ${outerRadius} ${outerRadius} 0 ${largeArcFlag} 1 ${x2} ${y2}
+				m ${-outerRadius} 0
+				a ${outerRadius} ${outerRadius} 0 1 0 ${outerRadius * 2} 0
+				a ${outerRadius} ${outerRadius} 0 1 0 ${-outerRadius * 2} 0
 				Z
 			`;
 		}
+		
+		return `
+			M ${centerX} ${centerY}
+			L ${x1} ${y1}
+			A ${outerRadius} ${outerRadius} 0 ${largeArcFlag} 1 ${x2} ${y2}
+			Z
+		`;
 	}
 	
 	function handleMouseMove(event: MouseEvent, segment: any) {
@@ -168,6 +190,7 @@
 				fill={segment.color}
 				stroke="#ffffff"
 				stroke-width="2"
+				fill-rule="evenodd"
 				on:mousemove={(e) => handleMouseMove(e, segment)}
 				on:mouseleave={handleMouseLeave}
 				role="button"
