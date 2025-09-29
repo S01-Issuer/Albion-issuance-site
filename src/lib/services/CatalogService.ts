@@ -28,7 +28,10 @@ export class CatalogService {
   private buildPromise: Promise<CatalogData> | null = null;
   private lastBuildHash: string | null = null;
 
-  private computeDataHash(sftsData: any[], metaData: any[]): string {
+  private computeDataHash(
+    sftsData: any[] | null | undefined,
+    metaData: any[] | null | undefined,
+  ): string {
     // Simple hash to detect data changes
     return JSON.stringify({
       sftsCount: sftsData?.length || 0,
@@ -56,8 +59,8 @@ export class CatalogService {
     }
 
     // Try to use store data first
-    let $sfts = get(sfts);
-    let $sftMetadata = get(sftMetadata);
+    let $sfts = get(sfts) ?? [];
+    let $sftMetadata = get(sftMetadata) ?? [];
 
     console.log("[CatalogService] Store state:", {
       hasSfts: !!$sfts,
@@ -68,47 +71,39 @@ export class CatalogService {
 
     // If stores are null or empty, fetch from repository
     // Check for null explicitly to distinguish "not loaded" from "loaded but empty"
-    if (!$sfts || !Array.isArray($sfts) || $sfts.length === 0) {
+    if (!Array.isArray($sfts) || $sfts.length === 0) {
       console.log(
         "[CatalogService] SFTs not loaded or empty, fetching from repository...",
       );
       const fetchedSfts = await sftRepository.getAllSfts();
       console.log("[CatalogService] Fetched SFTs:", fetchedSfts.length);
       // Convert GraphQL type to store type (they're compatible for our usage)
-      $sfts = fetchedSfts as any;
+      $sfts = fetchedSfts as any[];
       sfts.set($sfts);
     } else {
       console.log("[CatalogService] Using existing SFTs from store");
     }
 
-    if (
-      !$sftMetadata ||
-      !Array.isArray($sftMetadata) ||
-      $sftMetadata.length === 0
-    ) {
+    if (!Array.isArray($sftMetadata) || $sftMetadata.length === 0) {
       console.log(
         "[CatalogService] Metadata not loaded or empty, fetching from repository...",
       );
       const fetchedMetadata = await sftRepository.getSftMetadata();
       console.log("[CatalogService] Fetched metadata:", fetchedMetadata.length);
-      $sftMetadata = fetchedMetadata as any;
+      $sftMetadata = fetchedMetadata as any[];
       sftMetadata.set($sftMetadata);
     } else {
       console.log("[CatalogService] Using existing metadata from store");
     }
 
     // Check if data has changed
-    const currentHash = this.computeDataHash($sfts, $sftMetadata || []);
+    const currentHash = this.computeDataHash($sfts, $sftMetadata);
     if (this.catalog && this.lastBuildHash === currentHash) {
       return this.catalog;
     }
 
     // Start new build
-    this.buildPromise = this._buildInternal(
-      $sfts,
-      $sftMetadata || [],
-      currentHash,
-    );
+    this.buildPromise = this._buildInternal($sfts, $sftMetadata, currentHash);
 
     try {
       const result = await this.buildPromise;
@@ -123,7 +118,7 @@ export class CatalogService {
     $sftMetadata: any[],
     currentHash: string,
   ): Promise<CatalogData> {
-    if (!$sfts || $sfts.length === 0 || !$sftMetadata) {
+    if (!Array.isArray($sfts) || $sfts.length === 0 || !Array.isArray($sftMetadata)) {
       this.catalog = { assets: {}, tokens: {}, maxSupplyByToken: {} };
       this.lastBuildHash = currentHash;
       return this.catalog;
@@ -193,10 +188,12 @@ export class CatalogService {
           : sft.id.toLowerCase();
 
         // Check if asset already exists (multiple tokens for same field)
-        if (assets[assetId]) {
+        const existingAsset = assets[assetId];
+        if (existingAsset) {
           // Add this token to the existing asset's tokenContracts
-          if (!assets[assetId].tokenContracts.includes(sft.id)) {
-            assets[assetId].tokenContracts.push(sft.id);
+          existingAsset.tokenContracts = existingAsset.tokenContracts || [];
+          if (!existingAsset.tokenContracts.includes(sft.id)) {
+            existingAsset.tokenContracts.push(sft.id);
           }
         } else {
           // Create new asset instance

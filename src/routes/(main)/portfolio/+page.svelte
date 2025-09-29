@@ -821,7 +821,6 @@
 										barColor="#283c84"
 										barColor2="#08bccc"
 										valuePrefix="$"
-										animate={true}
 										showGrid={true}
 										series1Name="Mints"
 										series2Name="Payouts"

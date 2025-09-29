@@ -5,31 +5,46 @@ import { vi } from "vitest";
 // This prevents "getTotalLength is not a function" errors in tests
 
 // First, ensure the methods exist on the prototype
+const createDomPoint = (): DOMPoint => ({
+  x: 0,
+  y: 0,
+  z: 0,
+  w: 1,
+  matrixTransform: () => createDomPoint(),
+  toJSON: () => ({ x: 0, y: 0, z: 0, w: 1 }),
+});
+
 if (typeof SVGPathElement !== "undefined") {
   if (!SVGPathElement.prototype.getTotalLength) {
     SVGPathElement.prototype.getTotalLength = vi.fn(() => 100);
   }
 
   if (!SVGPathElement.prototype.getPointAtLength) {
-    SVGPathElement.prototype.getPointAtLength = vi.fn(() => ({ x: 0, y: 0 }));
+    SVGPathElement.prototype.getPointAtLength = vi.fn(() => createDomPoint());
   }
 }
 
 // Also patch Element.prototype since querySelector might return a generic Element
 const originalQuerySelector = Element.prototype.querySelector;
 Element.prototype.querySelector = function (selector: string) {
-  const element = originalQuerySelector.call(this, selector);
+  const element = originalQuerySelector.call(this, selector) as Element | null;
 
-  // If it's supposed to be an SVG path element, add the missing methods
-  if (
-    (element && selector.includes("path")) ||
-    selector.includes(".line-path")
-  ) {
-    if (!element.getTotalLength) {
-      (element as any).getTotalLength = () => 100;
+  if (!element) {
+    return element;
+  }
+
+  const isPathSelector = selector.includes("path") || selector.includes(".line-path");
+
+  if (isPathSelector && !(element instanceof SVGPathElement)) {
+    const pathCandidate = element as SVGPathElement & {
+      getTotalLength?: () => number;
+      getPointAtLength?: () => { x: number; y: number };
+    };
+    if (!pathCandidate.getTotalLength) {
+      pathCandidate.getTotalLength = () => 100;
     }
-    if (!element.getPointAtLength) {
-      (element as any).getPointAtLength = () => ({ x: 0, y: 0 });
+    if (!pathCandidate.getPointAtLength) {
+      pathCandidate.getPointAtLength = () => createDomPoint();
     }
   }
 

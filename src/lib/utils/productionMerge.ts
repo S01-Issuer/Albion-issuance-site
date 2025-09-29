@@ -13,6 +13,10 @@ export interface ReceiptsRecord {
     expenses?: number;
     netIncome?: number;
   };
+  production?: number;
+  revenue?: number;
+  expenses?: number;
+  netIncome?: number;
 }
 export interface PayoutRecord {
   month: string;

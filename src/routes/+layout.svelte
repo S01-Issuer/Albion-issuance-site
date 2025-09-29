@@ -5,7 +5,7 @@
 	import { defaultConfig } from 'svelte-wagmi';
 	import { base } from '@wagmi/core/chains';
 	import { injected, walletConnect } from '@wagmi/connectors';
-	import { fallback, http } from 'viem';
+	import { fallback, http, type Transport } from 'viem';
 	import { onMount } from 'svelte';
 	import { injectAnalytics } from '@vercel/analytics/sveltekit';
 	import { injectSpeedInsights } from '@vercel/speed-insights/sveltekit';
@@ -60,20 +60,18 @@
 		const rpcUrls = baseNetworkFallbackRpcs.rpcUrls.default.http;
 		
 		// Add logging in development to verify RPC rotation
-		const isDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
-		
-		const transport = fallback(
-			rpcUrls.map((url, index) => http(url, {
+		const transports = rpcUrls.map((url, index) => {
+			const httpTransport = http(url, {
 				name: `RPC-${index + 1}`,
 				retryCount: 2,
 				retryDelay: 150,
 				timeout: 10_000,
-				fetchOptions: isDev ? {
-					onRequest: () => {
-						console.log(`[RPC Rotation] Trying RPC #${index + 1}: ${url}`);
-					}
-				} : undefined
-			})),
+			});
+			return httpTransport;
+		});
+
+		const transport = fallback(
+			transports,
 			{
 				rank: {
 					interval: 30_000, // Re-rank RPCs every 30 seconds
@@ -97,6 +95,8 @@
 			transports: {
 				[base.id]: transport
 			}
+		} as Parameters<typeof defaultConfig>[0] & {
+			transports: Record<number, Transport>;
 		});
 		await erckit.init();
 	};

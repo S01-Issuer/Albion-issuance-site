@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { sftMetadata, sfts, dataLoaded } from '$lib/stores';
-	import type { Asset, Token } from '$lib/types/uiTypes';
+	import type { Asset } from '$lib/types/uiTypes';
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import { Card, CardContent, PrimaryButton, SecondaryButton, Chart, CollapsibleSection, Modal } from '$lib/components/components';
 	import SectionTitle from '$lib/components/components/SectionTitle.svelte';
@@ -154,6 +154,10 @@ function addDays(date: Date, days: number): Date {
 	
 	// Future releases state
 	let hasFutureReleases = false;
+let assetData: Asset | null = null;
+let assetTokens: TokenMetadata[] = [];
+let loading = false;
+let error: string | null = null;
 let primaryToken: TokenMetadata | null = null;
 let receiptsData: any[] = [];
 let revenueReports: RevenueReport[] = [];
@@ -351,9 +355,24 @@ onMount(() => {
 // History modal state
 let historyModalOpen = false;
 let historyModalToken: string | null = null;
-$: selectedHistoryToken = historyModalToken
-  ? assetTokens.find((token) => token.contractAddress.toLowerCase() === historyModalToken.toLowerCase())
-  : null;
+let selectedHistoryToken: TokenMetadata | null = null;
+let historyPayouts: Array<{
+  month: string;
+  totalPayout: number;
+  payoutPerToken: number;
+  orderHash: string;
+  txHash?: string;
+}> = [];
+
+$: {
+  const normalizedToken = historyModalToken?.toLowerCase() ?? null;
+  selectedHistoryToken = normalizedToken
+    ? assetTokens.find(
+        (token) => token.contractAddress.toLowerCase() === normalizedToken,
+      ) ?? null
+    : null;
+}
+
 $: historyPayouts = selectedHistoryToken
   ? getTokenPayoutHistory(selectedHistoryToken)?.recentPayouts ?? []
   : [];
@@ -394,7 +413,7 @@ function openHistoryModal(tokenAddress: string) {
 	historyModalOpen = true;
 }
 
-function handleHistoryButtonClick(event: MouseEvent, tokenAddress: string) {
+function handleHistoryButtonClick(event: Event, tokenAddress: string) {
 	event.stopPropagation();
 	openHistoryModal(tokenAddress);
 }
@@ -923,7 +942,7 @@ function closeHistoryModal() {
 	
 				{#each assetTokens as token}
 					{@const sft = $sfts?.find(s => s.id.toLowerCase() === token.contractAddress.toLowerCase())}
-				{@const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress)}
+				{@const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress) ?? undefined}
 				{@const supply = getTokenSupply(token, sft, maxSupply)}
 				{@const hasAvailableSupply = supply && supply.availableSupply > 0}
 				{@const tokenPayoutData = getTokenPayoutHistory(token)}
@@ -1034,15 +1053,14 @@ function closeHistoryModal() {
 												<span class="hidden sm:inline">Sold Out</span><span class="sm:hidden">Sold Out</span>
 											</PrimaryButton>
 										{/if}
-										<div on:click={(event) => handleHistoryButtonClick(event, token.contractAddress)}>
-											<SecondaryButton
-												fullWidth
-												size="small"
-											>
-												<span class="hidden sm:inline">Distributions History</span>
-												<span class="sm:hidden">History</span>
-											</SecondaryButton>
-										</div>
+										<SecondaryButton
+											fullWidth
+											size="small"
+											on:click={(event) => handleHistoryButtonClick(event, token.contractAddress)}
+										>
+											<span class="hidden sm:inline">Distributions History</span>
+											<span class="sm:hidden">History</span>
+										</SecondaryButton>
 									</div>
 								</div>
 							</div>
@@ -1199,7 +1217,7 @@ function closeHistoryModal() {
                                   <input type="hidden" name="ml-submit" value="1">
                                   <div class="ml-form-embedSubmit">
                                     <button type="submit" class="w-full px-6 py-3 bg-black text-white font-extrabold text-sm uppercase tracking-wider cursor-pointer transition-colors duration-200 hover:bg-secondary border-0">Subscribe</button>
-                                    <button disabled="disabled" style="display: none;" type="button" class="loading">
+                                    <button disabled style="display: none;" type="button" class="loading">
                                       <div class="ml-form-embedSubmitLoad"></div>
                                       <span class="sr-only">Loading...</span>
                                     </button>
