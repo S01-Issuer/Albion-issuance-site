@@ -1,3 +1,5 @@
+import { PUBLIC_METABOARD_ADMIN } from "$env/static/public";
+
 export const BASE_SFT_SUBGRAPH_URL =
   "https://api.goldsky.com/api/public/project_cm153vmqi5gke01vy66p4ftzf/subgraphs/sft-offchainassetvaulttest-base/1.0.5/gn";
 export const BASE_ORDERBOOK_SUBGRAPH_URL =
@@ -160,7 +162,6 @@ export function getEnergyFields(metaboardAdmin: string): EnergyField[] {
 
 // Export ENERGY_FIELDS based on the current PUBLIC_METABOARD_ADMIN env var
 // This keeps all consumers consistent (homepage stats, catalog, claims, etc.)
-import { env as publicEnv } from "$env/dynamic/public";
 export const ACTIVE_METABOARD_ADMIN =
-  publicEnv.PUBLIC_METABOARD_ADMIN || DEVELOPMENT_METABOARD_ADMIN;
+  PUBLIC_METABOARD_ADMIN || DEVELOPMENT_METABOARD_ADMIN;
 export const ENERGY_FIELDS = getEnergyFields(ACTIVE_METABOARD_ADMIN);

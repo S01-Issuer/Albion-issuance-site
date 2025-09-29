@@ -4,17 +4,20 @@
 	import type { Asset, Token } from '$lib/types/uiTypes';
 	import { Card, CardImage, CardContent, CardActions, PrimaryButton, SecondaryButton } from '$lib/components/components';
 	import { formatCurrency, formatEndDate, formatSmartNumber } from '$lib/utils/formatters';
-    import { getTokenReturns } from '$lib/utils';
-    import type { TokenMetadata } from '$lib/types/MetaboardTypes';
-    import FormattedReturn from '$lib/components/components/FormattedReturn.svelte';
-    import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
-    import { hasAvailableSupplySync } from '$lib/utils/supplyHelpers';
+	import { getTokenReturns } from '$lib/utils';
+	import { useCatalogService } from '$lib/services';
+	import { sfts } from '$lib/stores';
+	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
+	import FormattedReturn from '$lib/components/components/FormattedReturn.svelte';
+	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
+	import { hasAvailableSupplySync } from '$lib/utils/supplyHelpers';
 
 	export let asset: Asset;
 	export let token: TokenMetadata[];
 	export let energyFieldId: string | undefined = undefined; // Add energy field ID for navigation
 
 	const dispatch = createEventDispatcher();
+	const catalogService = useCatalogService();
 
 	// Generate consistent asset URL from token contract address
 	$: consistentAssetId = token.length > 0 ? getEnergyFieldId(token[0].contractAddress) : (energyFieldId || asset.id);
@@ -189,15 +192,18 @@
 					</button>
 				{/if}
 				
-				<div 
-					bind:this={scrollContainer}
-					on:scroll={handleScroll}
-					class="{tokensArray.length > 2 ? tokensListScrollableClasses : tokensListClasses}">
-					{#each tokensArray as tokenItem}
-					{@const calculatedReturns = getTokenReturns(asset, tokenItem)}
-					{@const baseReturn = calculatedReturns?.baseReturn ? Math.round(calculatedReturns.baseReturn) : 0}
-					{@const bonusReturn = calculatedReturns?.bonusReturn ? Math.round(calculatedReturns.bonusReturn) : 0}
-					{@const firstPaymentMonth = tokenItem.firstPaymentDate || 'TBD'}
+		<div 
+			bind:this={scrollContainer}
+			on:scroll={handleScroll}
+			class="{tokensArray.length > 2 ? tokensListScrollableClasses : tokensListClasses}">
+				{#each tokensArray as tokenItem}
+				{@const sftForToken = $sfts?.find(s => s.id.toLowerCase() === tokenItem.contractAddress.toLowerCase())}
+				{@const maxSupplyForToken = catalogService.getTokenMaxSupply(tokenItem.contractAddress) ?? undefined}
+				{@const mintedSupplyForToken = sftForToken?.totalShares}
+				{@const calculatedReturns = getTokenReturns(asset, tokenItem, mintedSupplyForToken, maxSupplyForToken)}
+				{@const baseReturn = calculatedReturns?.baseReturn ? Math.round(calculatedReturns.baseReturn) : 0}
+				{@const bonusReturn = calculatedReturns?.bonusReturn ? Math.round(calculatedReturns.bonusReturn) : 0}
+				{@const firstPaymentMonth = tokenItem.firstPaymentDate || 'TBD'}
 					<button 
 						class={tokenButtonClasses} 
 						on:click|stopPropagation={() => handleBuyTokens(tokenItem.contractAddress)}

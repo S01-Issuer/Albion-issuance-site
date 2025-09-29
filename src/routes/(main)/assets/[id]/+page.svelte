@@ -958,7 +958,7 @@ function closeHistoryModal() {
 								<div class="p-8 pt-6 space-y-4">
 									<div class="flex justify-between items-start">
 										<span class="text-base font-medium text-black opacity-70 relative font-figtree">Minted Supply </span>
-										<span class="text-base font-extrabold text-black text-right">{supply?.mintedSupply || 0}</span>
+										<span class="text-base font-extrabold text-black text-right">{supply?.mintedSupply !== undefined ? Number(supply.mintedSupply).toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: supply.mintedSupply % 1 === 0 ? 0 : 2 }) : 0}</span>
 									</div>
 									<div class="flex justify-between items-start">
 										<span class="text-base font-medium text-black opacity-70 relative font-figtree">Max Supply</span>
