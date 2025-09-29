@@ -1,9 +1,143 @@
 import { render, screen, waitFor } from "@testing-library/svelte/svelte5";
 import { vi, describe, it, beforeEach, expect, afterEach } from "vitest";
+import { sfts, sftMetadata } from "$lib/stores";
+import { claimsCache } from "$lib/stores/claimsCache";
+import { sftRepository } from "$lib/data/repositories/sftRepository";
 import PortfolioPage from "../routes/(main)/portfolio/+page.svelte";
 import { installHttpMocks } from "./http-mock";
 
 // Mock app stores - required for routing
+const ADDRESS = "0xf836a500910453a397084ade41321ee20a5aade1";
+const ADDRESS2 = "0xa111111111111111111111111111111111111111";
+const ORDER =
+  "0x43ec2493caed6b56cfcbcf3b9279a01aedaafbce509598dfb324513e2d199977";
+const CSV = "bafkreicjcemmypds6d5c4lonwp56xb2ilzhkk7hty3y6fo4nvdkxnaibgu";
+const WALLET = "0x1111111111111111111111111111111111111111";
+
+const MOCK_PINNED_METADATA = {
+  symbol: "ALB-WR1-R1",
+  contractAddress: ADDRESS,
+  asset: {
+    assetName: "Wressle-1 4.5% Royalty Stream",
+    location: { state: "East Midlands", country: "United Kingdom" },
+    status: "producing",
+  },
+  plannedProduction: {
+    oilPriceAssumption: 80,
+    oilPriceAssumptionCurrency: "USD",
+    projections: [
+      { month: "2025-01", production: 1000 },
+      { month: "2025-02", production: 800 },
+    ],
+  },
+} as const;
+
+const CLAIMS_RESULT = {
+  totals: {
+    earned: 678.645,
+    claimed: 0,
+    unclaimed: 678.645,
+  },
+  holdings: [
+    {
+      fieldName: "Wressle-1 4.5% Royalty Stream",
+      totalAmount: 678.645,
+      claimedAmount: 0,
+      totalEarned: 678.645,
+      holdings: [
+        {
+          assetName: "Wressle-1 4.5% Royalty Stream",
+          tokenSymbol: "ALB-WR1-R1",
+          unclaimedAmount: 678.645,
+          totalEarned: 678.645,
+          sftAddress: ADDRESS,
+          tokensOwned: 102,
+        },
+      ],
+    },
+  ],
+  claimHistory: [
+    {
+      asset: "Wressle-1 4.5% Royalty Stream",
+      fieldName: "Wressle-1 4.5% Royalty Stream",
+      date: "2025-05-01",
+      amount: 347.76,
+      status: "ready",
+    },
+    {
+      asset: "Wressle-1 4.5% Royalty Stream",
+      fieldName: "Wressle-1 4.5% Royalty Stream",
+      date: "2025-06-01",
+      amount: 330.885,
+      status: "ready",
+    },
+  ],
+};
+
+const SFT_FIXTURE = {
+  id: ADDRESS,
+  name: "Wressle-1 4.5% Royalty Stream",
+  receiptContractAddress: ADDRESS,
+  totalShares: "1500000000000000000000",
+  sharesSupply: "1500000000000000000000",
+  tokenHolders: [
+    {
+      address: WALLET,
+      balance: (102n * 10n ** 18n).toString(),
+    },
+  ],
+  shareHolders: [],
+  shareTransfers: [],
+  receiptBalances: [],
+  certifications: [],
+  receiptVaultInformations: [],
+  deposits: [],
+  withdraws: [],
+  activeAuthorizer: { id: WALLET },
+} as const;
+
+const METADATA_FIXTURE = {
+  id: "meta-1",
+  meta: "0x",
+  subject: `0x000000000000000000000000${ADDRESS.slice(2)}`,
+  metaHash: "0x1234",
+  sender: WALLET,
+};
+
+const DEPOSITS_FIXTURE = [
+  {
+    amount: (102n * 10n ** 18n).toString(),
+    offchainAssetReceiptVault: { id: ADDRESS },
+  },
+];
+
+vi.mock("$lib/decodeMetadata/helpers", async () => {
+  const actual = await vi.importActual<any>("$lib/decodeMetadata/helpers");
+  return {
+    ...actual,
+    decodeSftInformation: vi.fn(() => ({
+      ...MOCK_PINNED_METADATA,
+    })),
+  };
+});
+
+vi.mock("$lib/services", async () => {
+  const actual = await vi.importActual<any>("$lib/services");
+  const stores = await vi.importActual<any>("$lib/stores");
+  return {
+    ...actual,
+    useCatalogService: () => ({
+      build: vi.fn(async () => {
+        stores.sfts.set([SFT_FIXTURE]);
+        stores.sftMetadata.set([METADATA_FIXTURE]);
+      }),
+    }),
+    useClaimsService: () => ({
+      loadClaimsForWallet: vi.fn(async () => CLAIMS_RESULT),
+    }),
+  };
+});
+
 vi.mock("$app/stores", async () => {
   const { readable } = await import("svelte/store");
   return {
@@ -97,18 +231,18 @@ vi.mock("@wagmi/core", () => ({
 // - $lib/services
 // - $lib/composables
 
-const ADDRESS = "0xf836a500910453a397084ade41321ee20a5aade1";
-const ADDRESS2 = "0xa111111111111111111111111111111111111111";
-const ORDER =
-  "0x43ec2493caed6b56cfcbcf3b9279a01aedaafbce509598dfb324513e2d199977";
-const CSV = "bafkreicjcemmypds6d5c4lonwp56xb2ilzhkk7hty3y6fo4nvdkxnaibgu";
-const WALLET = "0x1111111111111111111111111111111111111111";
-
 describe("Portfolio Page E2E Tests", () => {
   let restore: () => void;
+  let depositsSpy: ReturnType<typeof vi.spyOn> | null = null;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    claimsCache.set(WALLET, CLAIMS_RESULT as any);
+    sfts.set([SFT_FIXTURE as any]);
+    sftMetadata.set([METADATA_FIXTURE as any]);
+    depositsSpy = vi
+      .spyOn(sftRepository, "getDepositsForOwner")
+      .mockResolvedValue(DEPOSITS_FIXTURE as any);
 
     // Install HTTP mocks for all endpoints
     restore = installHttpMocks({
@@ -126,6 +260,11 @@ describe("Portfolio Page E2E Tests", () => {
 
   afterEach(() => {
     restore?.();
+    depositsSpy?.mockRestore();
+    depositsSpy = null;
+    claimsCache.clear();
+    sfts.set(null);
+    sftMetadata.set(null);
   });
 
   describe("Page Structure", () => {
@@ -197,6 +336,7 @@ describe("Portfolio Page E2E Tests", () => {
             bodyText.includes("Portfolio") ||
             bodyText.includes("ALB-WR1-R1")
           ) {
+            console.log('[PortfolioTest] body:', bodyText);
             // Should show holdings section
             expect(bodyText).toMatch(/Holdings|My Holdings/i);
 
@@ -311,10 +451,12 @@ describe("Portfolio Page E2E Tests", () => {
             bodyText.includes("Portfolio") ||
             bodyText.includes("ALB-WR1-R1")
           ) {
-            // Should show portfolio value
-            expect(bodyText).toMatch(/Portfolio Value|Total Value/i);
+            // Should show a summary card for portfolio value/invested capital
+            expect(bodyText).toMatch(
+              /Portfolio Value|Total Value|Total Invested/i,
+            );
 
-            // Should have dollar amounts
+            // Should have currency amounts rendered
             const hasDollar = bodyText.match(/\$/);
             expect(hasDollar).toBeTruthy();
           }

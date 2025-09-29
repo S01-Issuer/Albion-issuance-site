@@ -6,7 +6,7 @@
 import type { OffchainAssetReceiptVault } from "$lib/types/graphql";
 import type { Asset, Token, PlannedProduction } from "$lib/types/uiTypes";
 import { mergeProductionHistory } from "$lib/utils/productionMerge";
-import type { TokenMetadata, PayoutData } from "$lib/types/MetaboardTypes";
+import type { TokenMetadata } from "$lib/types/MetaboardTypes";
 import type { ISODateTimeString } from "$lib/types/sharedTypes";
 import { PINATA_GATEWAY } from "$lib/network";
 
@@ -58,20 +58,6 @@ class BaseSftTransformer {
   private getNestedValue(obj: any, path: string): any {
     return path.split(".").reduce((current, key) => current?.[key], obj);
   }
-}
-
-function toNumber(value: unknown): number {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string") {
-    const parsed = Number(value.replace(/[^-\d.]/g, ""));
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  if (typeof value === "bigint") {
-    return Number(value);
-  }
-  return 0;
 }
 
 /**
@@ -137,7 +123,12 @@ export class TokenMetadataTransformer extends BaseSftTransformer {
       throw new Error("Invalid sharePercentage - must be between 0 and 100");
     }
 
-    const payoutData = this.extractPayoutData(pinnedMetadata, sft.id);
+    if (
+      pinnedMetadata.payoutData !== undefined &&
+      !Array.isArray(pinnedMetadata.payoutData)
+    ) {
+      throw new Error("Invalid payoutData - must be an array");
+    }
 
     const tokenMetadata: TokenMetadata = {
       contractAddress: sft.id,
@@ -146,7 +137,7 @@ export class TokenMetadataTransformer extends BaseSftTransformer {
       tokenType: pinnedMetadata.tokenType,
       firstPaymentDate: pinnedMetadata.firstPaymentDate,
       sharePercentage: pinnedMetadata.sharePercentage,
-      payoutData,
+      payoutData: pinnedMetadata.payoutData || [],
       asset: {
         ...(pinnedMetadata.asset || {}),
         status: pinnedMetadata.asset?.production?.status || "producing",
@@ -155,78 +146,6 @@ export class TokenMetadataTransformer extends BaseSftTransformer {
     };
 
     return tokenMetadata;
-  }
-
-  private extractPayoutData(metadata: any, contractAddress: string): PayoutData[] {
-    const candidates = [
-      metadata?.payoutData,
-      metadata?.token?.payoutData,
-      metadata?.token?.distributions,
-      metadata?.distributions,
-      metadata?.payouts,
-      metadata?.asset?.payoutData,
-      metadata?.asset?.distributions,
-    ];
-
-    for (const candidate of candidates) {
-      if (Array.isArray(candidate) && candidate.length > 0) {
-        const normalized = candidate
-          .map((entry: any) => this.normalizePayoutEntry(entry))
-          .filter((entry): entry is PayoutData => entry !== null);
-        if (normalized.length > 0) {
-          console.log('[TokenMetadataTransformer] Payout data detected', {
-            contractAddress,
-            count: normalized.length,
-            months: normalized.map((entry) => entry.month),
-          });
-          return normalized;
-        }
-      }
-    }
-
-    return [];
-  }
-
-  private normalizePayoutEntry(entry: any): PayoutData | null {
-    if (!entry) {
-      return null;
-    }
-
-    const rawMonth = entry.month || entry.period || entry.date;
-    if (!rawMonth) {
-      return null;
-    }
-    const month = typeof rawMonth === "string" ? rawMonth : String(rawMonth);
-    const monthValue = month.trim();
-    if (!monthValue) {
-      return null;
-    }
-
-    const payout = entry.tokenPayout || entry.distribution || entry.payout || entry;
-
-    const totalPayout = toNumber(
-      payout?.totalPayout ?? payout?.total ?? payout?.amount ?? entry.totalPayout,
-    );
-    const payoutPerToken = toNumber(
-      payout?.payoutPerToken ?? payout?.perToken ?? entry.payoutPerToken,
-    );
-    const txHash = payout?.txHash || entry.txHash || entry.transactionHash || "";
-    const orderHash =
-      payout?.orderHash ||
-      payout?.order?.orderHash ||
-      entry.orderHash ||
-      entry.order?.orderHash ||
-      "";
-
-    return {
-      month: monthValue,
-      tokenPayout: {
-        totalPayout,
-        payoutPerToken,
-        txHash,
-        orderHash,
-      },
-    };
   }
 }
 
