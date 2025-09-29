@@ -30,7 +30,7 @@
 	// Calculate supply values for a token
 	function getTokenSupplyValues(token: TokenMetadata) {
 		const sft = $sfts?.find(s => s.id.toLowerCase() === token.contractAddress.toLowerCase());
-		const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress);
+		const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress) ?? undefined;
 
 		if (sft && maxSupply) {
 			const totalShares = BigInt(sft.totalShares);
@@ -85,7 +85,7 @@
 					const asset = catalog.assets[assetKey];
 					// Check if token has available supply using real maxSupply data
 					const sft = $sfts?.find(s => s.id.toLowerCase() === token.contractAddress.toLowerCase());
-					const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress);
+					const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress) ?? undefined;
 					let hasAvailable = false;
 
 					if (sft && maxSupply) {
@@ -385,7 +385,7 @@
 			>
 				{#each featuredTokensWithAssets as item, index}
 					{@const sft = $sfts?.find(s => s.id.toLowerCase() === item.token.contractAddress.toLowerCase())}
-					{@const maxSupply = catalogService.getTokenMaxSupply(item.token.contractAddress)}
+					{@const maxSupply = catalogService.getTokenMaxSupply(item.token.contractAddress) ?? undefined}
 					{@const calculatedReturns = calculateTokenReturns(item.asset, item.token, sft?.totalShares, maxSupply)}
 					{@const supplyValues = getTokenSupplyValues(item.token)}
 					<div class="{carouselSlideClasses} {index === currentIndex ? activeSlideClasses : inactiveSlideClasses}">

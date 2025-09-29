@@ -10,6 +10,7 @@ import { formatSmartNumber } from "$lib/utils/formatters";
 import { decodeSftInformation } from "$lib/decodeMetadata/helpers";
 import { generateAssetInstanceFromSftMeta } from "$lib/decodeMetadata/addSchemaToReceipts";
 import { ENERGY_FIELDS } from "$lib/network";
+import type { TokenMetadata } from "$lib/types/MetaboardTypes";
 
 interface PlatformStatsState {
   totalAssets: number;
@@ -104,7 +105,7 @@ export function usePlatformStats() {
 
         // Decode metadata to get country information
         const decodedMeta = $sftMetadata.map((metaV1) =>
-          decodeSftInformation(metaV1),
+          decodeSftInformation(metaV1) as TokenMetadata,
         );
         const countries = new Set<string>();
 
@@ -118,7 +119,7 @@ export function usePlatformStats() {
                 (meta) =>
                   meta?.contractAddress?.toLowerCase() ===
                   `0x000000000000000000000000${sft.id.slice(2).toLowerCase()}`,
-              );
+              ) as TokenMetadata | undefined;
               if (
                 pinnedMetadata &&
                 "asset" in pinnedMetadata &&

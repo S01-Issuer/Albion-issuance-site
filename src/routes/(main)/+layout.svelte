@@ -213,7 +213,7 @@
                                       </div>
                                       <div class="ml-button-horizontal primary" style="display:flex; align-items:stretch; min-width: 120px;">
                                         <button type="submit" class="px-4 py-3 bg-black text-white border-none font-figtree font-extrabold text-sm uppercase tracking-wider cursor-pointer transition-colors duration-200 hover:bg-secondary whitespace-nowrap w-full">Sign up</button>
-                                        <button disabled="disabled" style="display:none;" type="button" class="loading">
+                                        <button disabled style="display:none;" type="button" class="loading">
                                           <div class="ml-form-embedSubmitLoad"></div>
                                           <span class="sr-only">Loading...</span>
                                         </button>

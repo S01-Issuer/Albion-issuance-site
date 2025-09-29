@@ -7,6 +7,7 @@
 
 import type { TokenMetadata } from "./MetaboardTypes";
 import type { Token as UIToken } from "./uiTypes";
+import type { ISODateOnlyString } from "./sharedTypes";
 
 export class TypeTransformations {
   /**
@@ -39,6 +40,7 @@ export class TypeTransformations {
           );
           return {
             month: payout.month,
+            date: `${payout.month}-01` as ISODateOnlyString,
             totalPayout: payout.tokenPayout.totalPayout,
             payoutPerToken: payout.tokenPayout.payoutPerToken,
             oilPrice: receipts?.realisedPrice.oilPrice || 0,

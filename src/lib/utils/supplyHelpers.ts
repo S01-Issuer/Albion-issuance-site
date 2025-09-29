@@ -8,6 +8,8 @@ import { get } from 'svelte/store';
 import { sfts } from '$lib/stores';
 import { sftRepository } from '$lib/data/repositories';
 import { catalogService } from '$lib/services';
+import { getMaxSharesSupplyMap } from '$lib/data/clients/onchain';
+import authorizerAbi from '$lib/abi/authorizer.json';
 import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 import type { Hex } from 'viem';
 
@@ -42,8 +44,13 @@ export async function getTokenSupplyInfo(token: TokenMetadata): Promise<TokenSup
 
     if (sftData.activeAuthorizer?.address) {
       try {
-        const maxSupplyData = await sftRepository.getAuthorizerMaxSupply([sftData.activeAuthorizer.address as Hex]);
-        maxSupply = maxSupplyData[sftData.activeAuthorizer.address.toLowerCase()] || sftData.totalShares;
+        const maxSupplyData = await getMaxSharesSupplyMap(
+          [sftData.activeAuthorizer.address as Hex],
+          authorizerAbi,
+        );
+        maxSupply =
+          maxSupplyData[sftData.activeAuthorizer.address.toLowerCase()] ||
+          sftData.totalShares;
       } catch {
         maxSupply = sftData.totalShares;
       }

@@ -8,10 +8,7 @@ import { formatEther, parseEther } from "viem";
 
 // Create a singleton AbiCoder instance for reuse
 // This works in both production and test environments
-const abiCoder =
-  typeof AbiCoder.defaultAbiCoder === "function"
-    ? AbiCoder.defaultAbiCoder()
-    : AbiCoder.defaultAbiCoder;
+const abiCoder = AbiCoder.defaultAbiCoder();
 
 const HYPERSYNC_URL = "https://8453.hypersync.xyz/query";
 const CONTEXT_EVENT_TOPIC =

@@ -241,7 +241,7 @@ describe("Portfolio Page E2E Tests", () => {
     sfts.set([SFT_FIXTURE as any]);
     sftMetadata.set([METADATA_FIXTURE as any]);
     depositsSpy = vi
-      .spyOn(sftRepository, "getDepositsForOwner")
+      .spyOn(sftRepository as unknown as Record<string, any>, "getDepositsForOwner")
       .mockResolvedValue(DEPOSITS_FIXTURE as any);
 
     // Install HTTP mocks for all endpoints

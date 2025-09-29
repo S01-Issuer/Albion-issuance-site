@@ -6,6 +6,8 @@ import {
 } from "$lib/utils/returnCalculations";
 import type { Asset } from "$lib/types/uiTypes";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
+import { TokenType } from "$lib/types/MetaboardTypes";
+import type { ISODateTimeString } from "$lib/types/sharedTypes";
 
 function makeAsset(overrides: Partial<Asset> = {}): Asset {
   return {
@@ -53,8 +55,8 @@ function makeAsset(overrides: Partial<Asset> = {}): Asset {
     plannedProductionData: [] as any,
     historicalProduction: [],
     metadata: {
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString() as ISODateTimeString,
+      updatedAt: new Date().toISOString() as ISODateTimeString,
     },
     ...overrides,
   } as any;
@@ -65,14 +67,10 @@ function makeToken(overrides: Partial<TokenMetadata> = {}): TokenMetadata {
     contractAddress: "0xtoken",
     symbol: "PBR1",
     releaseName: "Permian Basin-3 Release 1",
-    tokenType: "royalty" as any,
+    tokenType: TokenType.Royalty,
     firstPaymentDate: "2024-01",
     sharePercentage: 10,
     payoutData: [],
-    supply: {
-      maxSupply: 1000,
-      mintedSupply: 500,
-    },
     asset: {
       assetName: "Permian Basin-3",
       description: "",
@@ -103,8 +101,8 @@ function makeToken(overrides: Partial<TokenMetadata> = {}): TokenMetadata {
       galleryImages: [],
     },
     metadata: {
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString() as ISODateTimeString,
+      updatedAt: new Date().toISOString() as ISODateTimeString,
     },
     ...overrides,
   };
