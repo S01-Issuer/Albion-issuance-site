@@ -1,25 +1,43 @@
 import type { PageLoad } from "./$types";
 import { error } from "@sveltejs/kit";
 import { renderMarkdown } from "$lib/utils/markdown";
+import { getAddress } from "viem";
 
 export const load: PageLoad = async ({ fetch, params }) => {
-	const contract = params.contract?.toLowerCase();
+	const rawContract = params.contract?.trim();
 
-	if (!contract) {
+	if (!rawContract) {
 		throw error(404, "Token terms not found");
 	}
 
-	const response = await fetch(`/token_terms/${contract}.md`);
+	const normalized = rawContract.toLowerCase();
+	const candidates = new Set<string>();
 
-	if (!response.ok) {
-		throw error(response.status, "Token terms not found");
+	try {
+		const checksum = getAddress(rawContract);
+		candidates.add(checksum);
+	} catch {
+		// Ignore invalid address errors; we'll fall back to lowercase.
 	}
 
-	const markdown = await response.text();
-	const html = renderMarkdown(markdown);
+	candidates.add(normalized);
 
-	return {
-		contract,
-		html,
-	};
+	let lastStatus = 404;
+	for (const candidate of candidates) {
+		const response = await fetch(`/token_terms/${candidate}.md`);
+
+		if (response.ok) {
+			const markdown = await response.text();
+			const html = renderMarkdown(markdown);
+
+			return {
+				contract: candidate,
+				html,
+			};
+		}
+
+		lastStatus = response.status;
+	}
+
+	throw error(lastStatus, "Token terms not found");
 };
