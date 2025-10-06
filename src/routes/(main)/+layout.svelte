@@ -51,9 +51,9 @@
 
 			if (response.ok) {
 				newsletterStatus = 'success';
-				try {
+				if (typeof form.reset === 'function') {
 					form.reset();
-				} catch {}
+				}
 			} else {
 				newsletterStatus = 'error';
 			}
@@ -62,15 +62,16 @@
 			newsletterStatus = 'error';
 		} finally {
 			newsletterSubmitting = false;
-			if (typeof window !== 'undefined' && (window as any).grecaptcha) {
-				try {
-					(window as any).grecaptcha.reset();
-				} catch {}
+			if (typeof window !== 'undefined') {
+				const grecaptcha = (window as typeof window & { grecaptcha?: { reset: () => void } }).grecaptcha;
+				if (typeof grecaptcha?.reset === 'function') {
+					grecaptcha.reset();
+				}
 			}
 		}
 	}
 
-	$: query = createQuery({
+	const query = createQuery({
 		queryKey: ['getSftMetadata'],
 		queryFn: () => {
 			return sftRepository.getSftMetadata();
@@ -80,7 +81,7 @@
 		sftMetadata.set($query.data);
 	}
 
-	$: vaultQuery = createQuery({
+	const vaultQuery = createQuery({
 		queryKey: ['getSfts'],
 		queryFn: () => {
 			return sftRepository.getAllSfts();
@@ -96,53 +97,56 @@
 
 	
 	// Enhanced Tailwind class mappings with better mobile responsiveness
-	$: appClasses = 'min-h-screen flex flex-col';
-	$: headerClasses = 'border-b border-light-gray bg-white sticky top-0 z-[100]';
-	$: navContainerClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-16 sm:h-20 lg:h-24';
-	$: logoClasses = 'flex items-center gap-1';
-	$: logoImageClasses = 'h-12 sm:h-14 lg:h-16 w-auto';
-	$: desktopNavClasses = 'hidden md:flex';
-	$: navLinksClasses = 'flex gap-6 lg:gap-8 items-center';
-	$: navLinkClasses = 'relative text-black no-underline font-medium py-2 transition-colors duration-200 touch-target text-sm lg:text-base after:content-[""] after:absolute after:left-0 after:right-0 after:-bottom-2 after:h-1 after:bg-primary after:opacity-0 after:transition-opacity after:duration-200 hover:text-primary hover:no-underline hover:after:opacity-100';
-	$: navLinkActiveClasses = 'text-primary after:opacity-100';
-	$: mobileNavClasses = 'md:hidden fixed top-16 left-0 right-0 bg-white border-b border-light-gray z-[99] shadow-lg max-h-[calc(100vh-4rem)] overflow-y-auto';
-	$: mobileNavLinksClasses = 'flex flex-col p-0 gap-0';
-	$: mobileNavLinkClasses = 'text-black no-underline font-medium py-4 px-4 sm:px-6 border-b border-light-gray transition-colors duration-200 last:border-b-0 hover:text-primary hover:no-underline hover:bg-light-gray touch-target text-base';
-	$: mobileNavLinkActiveClasses = 'text-primary bg-light-gray';
-	$: mainContentClasses = 'flex-1';
-	$: footerClasses = 'bg-light-gray mt-8 sm:mt-12 lg:mt-16';
-	$: footerContainerClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 sm:pt-10 lg:pt-12 pb-4';
-	$: footerContentClasses = 'grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-12 mb-6 sm:mb-8';
-	$: footerLogoClasses = 'h-8 sm:h-10 mb-3 sm:mb-4';
-	$: footerSectionH4Classes = 'typography-h6 mb-3 sm:mb-4 text-black';
-	$: footerSectionPClasses = 'text-black leading-relaxed text-sm sm:text-base';
-	$: footerSectionUlClasses = 'list-none p-0';
-	$: footerSectionLiClasses = 'mb-2';
-	$: footerSectionLinkClasses = 'text-black no-underline transition-colors duration-200 hover:text-primary text-sm sm:text-base touch-target';
-	$: footerSocialButtonsClasses = 'flex gap-3 sm:gap-4 mt-3 sm:mt-4 justify-center sm:justify-start';
-	$: footerSocialBtnClasses = 'flex items-center justify-center w-10 h-10 rounded-full border-2 border-black text-black no-underline transition-colors duration-200 touch-target';
-	$: footerSocialTwitterClasses = 'hover:border-[#1da1f2] hover:text-[#1da1f2]';
-	$: footerSocialLinkedinClasses = 'hover:border-[#0077b5] hover:text-[#0077b5]';
-	$: footerSocialTelegramClasses = 'hover:border-[#0088cc] hover:text-[#0088cc]';
-	$: footerSocialDiscordClasses = 'hover:border-[#5865f2] hover:text-[#5865f2]';
+	function classNames(...classes: Array<string | false | null | undefined>) {
+		return classes.filter(Boolean).join(' ');
+	}
+
+	const appClasses = 'min-h-screen flex flex-col';
+	const headerClasses = 'border-b border-light-gray bg-white sticky top-0 z-[100]';
+	const navContainerClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-16 sm:h-20 lg:h-24';
+	const logoClasses = 'flex items-center gap-1';
+	const logoImageClasses = 'h-12 sm:h-14 lg:h-16 w-auto';
+	const desktopNavClasses = 'hidden md:flex';
+	const navLinksClasses = 'flex gap-6 lg:gap-8 items-center';
+	const navLinkClasses = String.raw`relative text-black no-underline font-medium py-2 transition-colors duration-200 touch-target text-sm lg:text-base after:content-["""] after:absolute after:left-0 after:right-0 after:-bottom-2 after:h-1 after:bg-primary after:opacity-0 after:transition-opacity after:duration-200 hover:text-primary hover:no-underline hover:after:opacity-100`;
+	const navLinkActiveClasses = 'text-primary after:opacity-100';
+	const mobileNavClasses = 'md:hidden fixed top-16 left-0 right-0 bg-white border-b border-light-gray z-[99] shadow-lg max-h-[calc(100vh-4rem)] overflow-y-auto';
+	const mobileNavLinksClasses = 'flex flex-col p-0 gap-0';
+	const mobileNavLinkClasses = 'text-black no-underline font-medium py-4 px-4 sm:px-6 border-b border-light-gray transition-colors duration-200 last:border-b-0 hover:text-primary hover:no-underline hover:bg-light-gray touch-target text-base';
+	const mobileNavLinkActiveClasses = 'text-primary bg-light-gray';
+	const mainContentClasses = 'flex-1';
+	const footerClasses = 'bg-light-gray mt-8 sm:mt-12 lg:mt-16';
+	const footerContainerClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 sm:pt-10 lg:pt-12 pb-4';
+	const footerContentClasses = 'grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-12 mb-6 sm:mb-8';
+	const footerLogoClasses = 'h-8 sm:h-10 mb-3 sm:mb-4';
+	const footerSectionH4Classes = 'typography-h6 mb-3 sm:mb-4 text-black';
+	const footerSectionPClasses = 'text-black leading-relaxed text-sm sm:text-base';
+	const footerSectionUlClasses = 'list-none p-0';
+	const footerSectionLiClasses = 'mb-2';
+	const footerSectionLinkClasses = 'text-black no-underline transition-colors duration-200 hover:text-primary text-sm sm:text-base touch-target';
+	const footerSocialButtonsClasses = 'flex gap-3 sm:gap-4 mt-3 sm:mt-4 justify-center sm:justify-start';
+	const footerSocialBtnClasses = 'flex items-center justify-center w-10 h-10 rounded-full border-2 border-black text-black no-underline transition-colors duration-200 touch-target';
+	const footerSocialTwitterClasses = 'hover:border-[#1da1f2] hover:text-[#1da1f2]';
+	const footerSocialTelegramClasses = 'hover:border-[#0088cc] hover:text-[#0088cc]';
+
 </script>
 
 <div class={appClasses}>
 	<header class={headerClasses}>
 		<nav>
 			<div class={navContainerClasses}>
-				<a href="/" class="{logoClasses} z-[102]" on:click={closeMobileMenu}>
+				<a href="/" class={classNames(logoClasses, 'z-[102]')} on:click={closeMobileMenu}>
 					<div class="overflow-hidden">
 						<img src="/assets/logo.svg" alt="Albion Logo" class={logoImageClasses} style="margin-left: -0.3rem" />
 					</div>
 				</a>
 				
 				<!-- Desktop navigation - centered -->
-				<div class="{navLinksClasses} {desktopNavClasses}">
-					<a href="/" class="{navLinkClasses} {currentPath === '/' ? navLinkActiveClasses : ''}">Home</a>
-					<a href="/assets" class="{navLinkClasses} {currentPath.startsWith('/assets') ? navLinkActiveClasses : ''}">Invest</a>
-					<a href="/portfolio" class="{navLinkClasses} {currentPath === '/portfolio' ? navLinkActiveClasses : ''}">Portfolio</a>
-					<a href="/claims" class="{navLinkClasses} {currentPath === '/claims' ? navLinkActiveClasses : ''}">Claims</a>
+				<div class={classNames(navLinksClasses, desktopNavClasses)}>
+					<a href="/" class={classNames(navLinkClasses, currentPath === '/' && navLinkActiveClasses)}>Home</a>
+					<a href="/assets" class={classNames(navLinkClasses, currentPath.startsWith('/assets') && navLinkActiveClasses)}>Invest</a>
+					<a href="/portfolio" class={classNames(navLinkClasses, currentPath === '/portfolio' && navLinkActiveClasses)}>Portfolio</a>
+					<a href="/claims" class={classNames(navLinkClasses, currentPath === '/claims' && navLinkActiveClasses)}>Claims</a>
 				</div>
 				
 				<!-- Right side: Wallet button + Mobile menu button -->
@@ -176,9 +180,9 @@
 					<!-- Mobile menu button -->
 					<button class="md:hidden bg-transparent border-none cursor-pointer p-2 z-[101] relative flex-shrink-0 w-10 h-10 flex items-center justify-center" on:click={toggleMobileMenu} aria-label="Toggle menu">
 						<div class="w-6 h-5 relative flex flex-col justify-between">
-							<span class="block w-full h-0.5 bg-black transition-all duration-300 {mobileMenuOpen ? 'rotate-45 translate-y-2' : ''}"></span>
-							<span class="block w-full h-0.5 bg-black transition-all duration-300 {mobileMenuOpen ? 'opacity-0' : ''}"></span>
-							<span class="block w-full h-0.5 bg-black transition-all duration-300 {mobileMenuOpen ? '-rotate-45 -translate-y-2' : ''}"></span>
+							<span class={classNames('block w-full h-0.5 bg-black transition-all duration-300', mobileMenuOpen && 'rotate-45 translate-y-2')}></span>
+							<span class={classNames('block w-full h-0.5 bg-black transition-all duration-300', mobileMenuOpen && 'opacity-0')}></span>
+							<span class={classNames('block w-full h-0.5 bg-black transition-all duration-300', mobileMenuOpen && '-rotate-45 -translate-y-2')}></span>
 						</div>
 					</button>
 				</div>
@@ -188,10 +192,10 @@
 			{#if mobileMenuOpen}
 			<div class={mobileNavClasses} transition:slide={{ duration: 300 }}>
 				<div class={mobileNavLinksClasses}>
-					<a href="/" class="{mobileNavLinkClasses} {currentPath === '/' ? mobileNavLinkActiveClasses : ''}" on:click={closeMobileMenu}>Home</a>
-					<a href="/assets" class="{mobileNavLinkClasses} {currentPath.startsWith('/assets') ? mobileNavLinkActiveClasses : ''}" on:click={closeMobileMenu}>Invest</a>
-					<a href="/portfolio" class="{mobileNavLinkClasses} {currentPath === '/portfolio' ? mobileNavLinkActiveClasses : ''}" on:click={closeMobileMenu}>Portfolio</a>
-					<a href="/claims" class="{mobileNavLinkClasses} {currentPath === '/claims' ? mobileNavLinkActiveClasses : ''}" on:click={closeMobileMenu}>Claims</a>
+					<a href="/" class={classNames(mobileNavLinkClasses, currentPath === '/' && mobileNavLinkActiveClasses)} on:click={closeMobileMenu}>Home</a>
+					<a href="/assets" class={classNames(mobileNavLinkClasses, currentPath.startsWith('/assets') && mobileNavLinkActiveClasses)} on:click={closeMobileMenu}>Invest</a>
+					<a href="/portfolio" class={classNames(mobileNavLinkClasses, currentPath === '/portfolio' && mobileNavLinkActiveClasses)} on:click={closeMobileMenu}>Portfolio</a>
+					<a href="/claims" class={classNames(mobileNavLinkClasses, currentPath === '/claims' && mobileNavLinkActiveClasses)} on:click={closeMobileMenu}>Claims</a>
 				</div>
 			</div>
 			{/if}
@@ -300,12 +304,12 @@
 				<div class="mt-6">
 					<h4 class={footerSectionH4Classes}>Connect with us</h4>
 					<div class={footerSocialButtonsClasses}>
-						<a href="https://x.com/albion_labs" target="_blank" rel="noopener noreferrer" class="{footerSocialBtnClasses} {footerSocialTwitterClasses}" aria-label="Follow Albion on X">
+						<a href="https://x.com/albion_labs" target="_blank" rel="noopener noreferrer" class={classNames(footerSocialBtnClasses, footerSocialTwitterClasses)} aria-label="Follow Albion on X">
 							<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
 								<path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
 							</svg>
 						</a>
-						<a href="https://t.me/albionlabs" target="_blank" rel="noopener noreferrer" class="{footerSocialBtnClasses} {footerSocialTelegramClasses}" aria-label="Join Albion on Telegram">
+						<a href="https://t.me/albionlabs" target="_blank" rel="noopener noreferrer" class={classNames(footerSocialBtnClasses, footerSocialTelegramClasses)} aria-label="Join Albion on Telegram">
 							<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
 								<path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
 							</svg>
@@ -318,16 +322,16 @@
 			<div class="flex flex-col lg:order-3">
 				<div class="grid grid-cols-2 gap-6 lg:gap-8">
 					<div class="lg:text-right">
-						<h4 class="{footerSectionH4Classes} lg:text-right">Platform</h4>
-						<ul class="{footerSectionUlClasses} lg:text-right">
+						<h4 class={classNames(footerSectionH4Classes, 'lg:text-right')}>Platform</h4>
+						<ul class={classNames(footerSectionUlClasses, 'lg:text-right')}>
 							<li class={footerSectionLiClasses}><a href="/assets" class={footerSectionLinkClasses}>Browse Assets</a></li>
 							<li class={footerSectionLiClasses}><a href="/portfolio" class={footerSectionLinkClasses}>Portfolio</a></li>
 							<li class={footerSectionLiClasses}><a href="/claims" class={footerSectionLinkClasses}>Claim Payouts</a></li>
 						</ul>
 					</div>
 					<div class="lg:text-right">
-						<h4 class="{footerSectionH4Classes} lg:text-right">Company</h4>
-						<ul class="{footerSectionUlClasses} lg:text-right">
+						<h4 class={classNames(footerSectionH4Classes, 'lg:text-right')}>Company</h4>
+						<ul class={classNames(footerSectionUlClasses, 'lg:text-right')}>
 							<li class={footerSectionLiClasses}><a href="/about" class={footerSectionLinkClasses}>About</a></li>
 							<li class={footerSectionLiClasses}><a href="/support" class={footerSectionLinkClasses}>Support</a></li>
 							<li class={footerSectionLiClasses}><a href="/legal" class={footerSectionLinkClasses}>Legal</a></li>

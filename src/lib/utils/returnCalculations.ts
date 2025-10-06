@@ -87,7 +87,7 @@ export function calculateTokenReturns(
   maxSupply?: string,
 ): TokenReturns {
   if (!asset.plannedProduction || !token.sharePercentage) {
-    console.log(
+    console.warn(
       `[Returns] Missing data for ${token.symbol}: plannedProduction=${!!asset.plannedProduction}, sharePercentage=${token.sharePercentage}`,
     );
     return {
@@ -102,11 +102,11 @@ export function calculateTokenReturns(
   const { projections, oilPriceAssumption } = plannedProduction;
   const sharePercentage = token.sharePercentage / 100; // Convert to decimal
 
-  console.log(
+  console.warn(
     `[Returns] Token ${token.symbol}: projections length = ${projections?.length}, oilPriceAssumption = ${oilPriceAssumption}`,
   );
   if (!projections || projections.length === 0) {
-    console.log(`[Returns] No projections for ${token.symbol}`);
+    console.warn(`[Returns] No projections for ${token.symbol}`);
     return {
       baseReturn: 0,
       bonusReturn: 0,
@@ -316,7 +316,7 @@ export function getTokenPayoutHistory(
     }))
     .sort((a, b) => (a.month > b.month ? 1 : a.month < b.month ? -1 : 0));
 
-  console.log('[getTokenPayoutHistory] Payout data', {
+  console.warn('[getTokenPayoutHistory] Payout data', {
     contractAddress: token.contractAddress,
     count: recentPayouts.length,
     months: recentPayouts.map((entry) => entry.month),

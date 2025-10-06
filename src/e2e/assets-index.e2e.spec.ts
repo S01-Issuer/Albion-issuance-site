@@ -23,7 +23,7 @@ vi.mock("$app/stores", async () => {
     }),
     navigating: readable(null),
     updated: { subscribe: () => () => {} },
-  } as any;
+  } as typeof import("$app/stores");
 });
 
 // Mock wagmi
@@ -41,7 +41,7 @@ vi.mock("svelte-wagmi", async () => {
     }),
     chainId: writable(8453),
     disconnectWagmi: async () => {},
-  } as any;
+  } as typeof import("$app/stores");
 });
 
 // Mock @wagmi/core
@@ -57,7 +57,7 @@ vi.mock("@wagmi/core", () => ({
 
 // Mock network config with test URLs
 vi.mock("$lib/network", async () => {
-  const actual = await vi.importActual<any>("$lib/network");
+  const actual = await vi.importActual<typeof import("$lib/network")>("$lib/network");
   return {
     ...actual,
     BASE_SFT_SUBGRAPH_URL: "https://example.com/sft",
@@ -84,7 +84,7 @@ const CSV = "bafkreicjcemmypds6d5c4lonwp56xb2ilzhkk7hty3y6fo4nvdkxnaibgu";
 const WALLET = "0x1111111111111111111111111111111111111111";
 
 describe("Assets Index E2E Tests", () => {
-  let cleanupMocks: () => void;
+  let cleanupMocks: (() => void) | undefined;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -120,17 +120,6 @@ describe("Assets Index E2E Tests", () => {
     ]);
 
     // Debug: Check what data we got
-    if ((import.meta as any).env?.MODE === "test") {
-      console.log("Test setup - SFT data count:", sftData?.length);
-      console.log("Test setup - Metadata count:", metaData?.length);
-      if (metaData?.length > 0) {
-        console.log(
-          "Test setup - First metadata subject:",
-          metaData[0].subject,
-        );
-      }
-    }
-
     // Update stores with the fetched data
     sfts.set(sftData);
     sftMetadata.set(metaData);
@@ -271,7 +260,7 @@ describe("Assets Index E2E Tests", () => {
       const bodyText = document.body.textContent || "";
       // This test verifies the toggle appears if there are sold out assets
       // Since we have available tokens, this is optional
-      const hasSoldOutToggle =
+      const _hasSoldOutToggle =
         bodyText.includes("Show Sold Out") ||
         bodyText.includes("Include Sold Out");
       // No assertion needed - this is an optional UI element

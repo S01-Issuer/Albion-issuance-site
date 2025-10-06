@@ -7,8 +7,8 @@ import { catalogService } from "$lib/services";
  * @returns Promise<boolean> - True if there are future releases available
  */
 export async function hasIncompleteReleases(assetId: string): Promise<boolean> {
-  console.log(`[hasIncompleteReleases] Checking assetId: ${assetId}`);
-  console.log(
+  console.warn(`[hasIncompleteReleases] Checking assetId: ${assetId}`);
+  console.warn(
     `[hasIncompleteReleases] Available energy fields:`,
     ENERGY_FIELDS.map((f) => f.name),
   );
@@ -23,10 +23,10 @@ export async function hasIncompleteReleases(assetId: string): Promise<boolean> {
         .replace(/[^a-z0-9-]/g, "") === assetId,
   );
 
-  console.log(`[hasIncompleteReleases] Found energy field:`, energyField?.name);
+  console.warn(`[hasIncompleteReleases] Found energy field:`, energyField?.name);
 
   if (!energyField) {
-    console.log(`[hasIncompleteReleases] No energy field found for ${assetId}`);
+    console.warn(`[hasIncompleteReleases] No energy field found for ${assetId}`);
     return false;
   }
 
@@ -39,10 +39,10 @@ export async function hasIncompleteReleases(assetId: string): Promise<boolean> {
       ),
     );
 
-    console.log(
+    console.warn(
       `[hasIncompleteReleases] Found ${fieldTokens.length} tokens for field`,
     );
-    console.log(
+    console.warn(
       `[hasIncompleteReleases] Token share percentages:`,
       fieldTokens.map((t) => ({
         address: t.contractAddress,
@@ -51,7 +51,7 @@ export async function hasIncompleteReleases(assetId: string): Promise<boolean> {
     );
 
     if (fieldTokens.length === 0) {
-      console.log(
+      console.warn(
         `[hasIncompleteReleases] No tokens found, assuming future releases`,
       );
       return true; // If no tokens, assume future releases
@@ -62,11 +62,11 @@ export async function hasIncompleteReleases(assetId: string): Promise<boolean> {
       0,
     );
 
-    console.log(
+    console.warn(
       `[hasIncompleteReleases] Total share percentage: ${totalSharePercentage}%`,
     );
     const hasIncomplete = totalSharePercentage < 100;
-    console.log(
+    console.warn(
       `[hasIncompleteReleases] Has incomplete releases: ${hasIncomplete}`,
     );
 

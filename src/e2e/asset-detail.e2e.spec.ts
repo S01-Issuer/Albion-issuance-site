@@ -1,9 +1,4 @@
-import {
-  render,
-  screen,
-  waitFor,
-  fireEvent,
-} from "@testing-library/svelte/svelte5";
+import { render, waitFor } from "@testing-library/svelte/svelte5";
 import { vi, describe, it, beforeEach, expect, afterEach } from "vitest";
 import AssetDetailPage from "../routes/(main)/assets/[id]/+page.svelte";
 import { installHttpMocks } from "./http-mock";
@@ -22,7 +17,7 @@ vi.mock("$app/stores", async () => {
     }),
     navigating: readable(null),
     updated: { subscribe: () => () => {} },
-  } as any;
+  } as unknown as Record<string, never>;
 });
 
 // Mock wagmi
@@ -36,13 +31,14 @@ vi.mock("svelte-wagmi", async () => {
     wagmiConfig: readable({ chains: [], transports: {} }),
     chainId: writable(8453),
     disconnectWagmi: async () => {},
-  } as any;
+  } as unknown as Record<string, never>;
 });
 
 // Mock network config - only mock URLs, not data
 vi.mock("$lib/network", async () => {
-  const actual = await vi.importActual<any>("$lib/network");
+  const actual = await vi.importActual<typeof import("$lib/network")>("$lib/network");
   return {
+     
     ...actual,
     BASE_SFT_SUBGRAPH_URL: "https://example.com/sft",
     BASE_METADATA_SUBGRAPH_URL: "https://example.com/meta",
