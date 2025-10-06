@@ -104,8 +104,8 @@ export function usePlatformStats() {
         const totalAssets = ENERGY_FIELDS.length;
 
         // Decode metadata to get country information
-        const decodedMeta = $sftMetadata.map((metaV1) =>
-          decodeSftInformation(metaV1) as TokenMetadata,
+        const decodedMeta = $sftMetadata.map(
+          (metaV1) => decodeSftInformation(metaV1) as TokenMetadata,
         );
         const countries = new Set<string>();
 

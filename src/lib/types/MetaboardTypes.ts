@@ -58,7 +58,6 @@ export interface Document {
   ipfs: string;
 }
 
-
 export interface AssetData {
   assetName: string;
   description: string;

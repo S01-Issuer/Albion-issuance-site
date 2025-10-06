@@ -46,9 +46,15 @@ function toNumber(value: unknown): number {
   return 0;
 }
 
-type RevenueLike = Pick<ReceiptsRecord, "revenue" | "expenses" | "netIncome"> | ReceiptsRecord["assetData"];
+type RevenueLike =
+  | Pick<ReceiptsRecord, "revenue" | "expenses" | "netIncome">
+  | ReceiptsRecord["assetData"];
 
-function normalizeRevenue(entry: RevenueLike): { revenue: number; expenses: number; netIncome: number } {
+function normalizeRevenue(entry: RevenueLike): {
+  revenue: number;
+  expenses: number;
+  netIncome: number;
+} {
   const revenue = toNumber(entry?.revenue);
   const expenses = toNumber(entry?.expenses);
   const netIncomeRaw = toNumber(entry?.netIncome);
@@ -96,7 +102,9 @@ export function mergeProductionHistory(
         .filter((r) => !maxHistMonth || (r?.month && r.month > maxHistMonth))
         .map((report) => ({
           month: report?.month || "",
-          production: toNumber(report?.assetData?.production ?? report?.production),
+          production: toNumber(
+            report?.assetData?.production ?? report?.production,
+          ),
           ...normalizeRevenue(report?.assetData ?? report),
           payoutPerToken: payoutByMonth.get(report?.month || "") || 0,
         }))

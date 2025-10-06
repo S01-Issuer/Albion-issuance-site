@@ -250,7 +250,7 @@
 		font-size: 0.875rem;
 	}
 
-	.legal-subheading {
+	:global(.legal-subheading) {
 		margin-top: 0.5rem;
 	}
 

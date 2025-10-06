@@ -348,14 +348,14 @@
 /* Option A: CSS-only hide/show of visible reCAPTCHA until email is valid */
 @supports selector(:has(*)) {
   /* Hide reCAPTCHA for footer embed until email valid */
-  .footer-newsletter:has(input[name="fields[email]"]) :is(.g-recaptcha, .ml-form-recaptcha, .ml-form-embedReCaptcha, iframe[src*="google.com/recaptcha"]) {
+  :global(.footer-newsletter:has(input[name="fields[email]"]) :is(.g-recaptcha, .ml-form-recaptcha, .ml-form-embedReCaptcha, iframe[src*="google.com/recaptcha"])) {
     visibility: hidden;
     opacity: 0;
     max-height: 0;
     pointer-events: none;
     transition: opacity 150ms ease;
   }
-  .footer-newsletter:has(input[name="fields[email]"]:valid) :is(.g-recaptcha, .ml-form-recaptcha, .ml-form-embedReCaptcha, iframe[src*="google.com/recaptcha"]) {
+  :global(.footer-newsletter:has(input[name="fields[email]"]:valid) :is(.g-recaptcha, .ml-form-recaptcha, .ml-form-embedReCaptcha, iframe[src*="google.com/recaptcha"])) {
     visibility: visible;
     opacity: 1;
     max-height: 120px;

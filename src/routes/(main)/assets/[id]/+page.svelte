@@ -1195,115 +1195,116 @@ function closeHistoryModal() {
 			{/if}
 					<!-- Future Releases Card -->
 					{#if hasFutureReleases}
-					<Card hoverable>
-						<CardContent paddingClass="p-0">
-                        <!-- Flip container for Future Releases card -->
-                <div class="relative preserve-3d transform-gpu transition-transform duration-500 {futureCardFlipped ? 'rotate-y-180' : ''} min-h-[650px]">
-                  <!-- Front -->
-                  <div class="absolute inset-0 backface-hidden">
-                    <div class="flex flex-col justify-center text-center p-12 h-full">
-                      <div class="text-5xl mb-6">🚀</div>
-                      <h4 class="text-xl font-extrabold text-black uppercase tracking-wider mb-4">Future Releases</h4>
-                      <p class="text-base mb-8 text-black opacity-70">Additional token releases planned</p>
-                      <div class="max-w-xs mx-auto w-full">
-                        <SecondaryButton fullWidth on:click={() => { futureCardFlipped = true; }}>
-                          Get Notified
-                        </SecondaryButton>
-                      </div>
-                    </div>
-                  </div>
+						<Card hoverable>
+							<CardContent paddingClass="p-0">
+								<div class="future-release-card">
+									<div class="relative preserve-3d transform-gpu transition-transform duration-500 {futureCardFlipped ? 'rotate-y-180' : ''} min-h-[650px]">
+								<div class="absolute inset-0 backface-hidden">
+									<div class="flex flex-col justify-center text-center p-12 h-full">
+										<div class="text-5xl mb-6">🚀</div>
+										<h4 class="text-xl font-extrabold text-black uppercase tracking-wider mb-4">Future Releases</h4>
+										<p class="text-base mb-8 text-black opacity-70">Additional token releases planned</p>
+										<div class="max-w-xs mx-auto w-full">
+											<SecondaryButton fullWidth on:click={() => { futureCardFlipped = true; }}>
+												Get Notified
+											</SecondaryButton>
+										</div>
+									</div>
+								</div>
 
-                  <!-- Back -->
-                  <div class="absolute inset-0 backface-hidden rotate-y-180 bg-white">
-                    <div class="p-6 sm:p-8 h-full flex flex-col">
-                      <div class="flex items-center justify-between mb-4">
-                        <h4 class="text-lg font-extrabold text-black">Get Notified</h4>
-                        <div>
-                          <SecondaryButton on:click={() => { futureCardFlipped = false; }}>
-                            ← Back
-                          </SecondaryButton>
-                        </div>
-                      </div>
-                      <p class="text-base sm:text-lg text-black opacity-70 mb-6 leading-relaxed">Signup to be notified when the next token release becomes available.</p>
+								<div class="absolute inset-0 backface-hidden rotate-y-180 bg-white">
+									<div class="p-6 sm:p-8 h-full flex flex-col">
+										<div class="flex items-center justify-between mb-4">
+											<h4 class="text-lg font-extrabold text-black">Get Notified</h4>
+											<div>
+												<SecondaryButton on:click={() => { futureCardFlipped = false; }}>
+													← Back
+												</SecondaryButton>
+											</div>
+										</div>
+										<p class="text-base sm:text-lg text-black opacity-70 mb-6 leading-relaxed">Signup to be notified when the next token release becomes available.</p>
 
-                      <!-- MailerLite HTML embed form -->
-                      <div class="text-left max-w-md w-full mx-auto flex-1 future-notify">
-                        <div id="mlb2-30848422" class="ml-form-embedContainer ml-subscribe-form ml-subscribe-form-30848422">
-                          <div class="ml-form-align-center">
-                            <div class="ml-form-embedWrapper embedForm">
-                              <div class="ml-form-embedBody ml-form-embedBodyDefault row-form">
-                                {#if futureSignupStatus === 'success'}
-                                  <div class="py-4">
-                                    <p class="text-black font-semibold">Thank you for subscribing.</p>
-                                  </div>
-                                {:else}
-                                  <form
-                                    class="ml-block-form"
-                                    action="https://assets.mailerlite.com/jsonp/1795576/forms/165461032541620178/subscribe"
-                                    method="post"
-                                    on:submit={handleFutureSignupSubmit}
-                                  >
-                                    <div class="ml-form-formContent">
-                                      <div class="ml-form-fieldRow ml-last-item">
-                                        <div class="ml-field-group ml-field-email ml-validate-email ml-validate-required">
-                                          <input
-                                            aria-label="email"
-                                            aria-required="true"
-                                            type="email"
-                                            name="fields[email]"
-                                            placeholder="Enter your email address"
-                                            autocomplete="email"
-                                            class="form-control w-full px-4 py-3 border border-light-gray bg-white text-black placeholder-black placeholder-opacity-50 focus:outline-none focus:border-primary"
-                                            required
-                                          >
-                                        </div>
-                                      </div>
-                                    </div>
-                                    <div class="ml-form-embedPermissions">
-                                      <div class="ml-form-embedPermissionsContent default privacy-policy">
-                                        <p class="text-base sm:text-lg text-black opacity-70 mb-6 leading-relaxed">Read our privacy policy</p>
-                                      </div>
-                                    </div>
-                                    <div class="ml-form-recaptcha ml-validate-required mb-3">
-                                      <script src="https://www.google.com/recaptcha/api.js"></script>
-                                      <div class="g-recaptcha" data-sitekey="6Lf1KHQUAAAAAFNKEX1hdSWCS3mRMv4FlFaNslaD"></div>
-                                    </div>
-                                    <input type="hidden" name="fields[interest]" value={assetId}>
-                                    <input type="hidden" name="ml-submit" value="1">
-                                    <div class="ml-form-embedSubmit">
-                                      <button
-                                        type="submit"
-                                        class="w-full px-6 py-3 bg-black text-white font-extrabold text-sm uppercase tracking-wider cursor-pointer transition-colors duration-200 hover:bg-secondary border-0 disabled:opacity-60 disabled:cursor-not-allowed"
-                                        disabled={futureSignupSubmitting}
-                                      >
-                                        {futureSignupSubmitting ? 'Submitting…' : 'Subscribe'}
-                                      </button>
-                                    </div>
-                                    <input type="hidden" name="anticsrf" value="true">
-                                  </form>
-                                {/if}
-                              </div>
-                              {#if futureSignupStatus === 'error'}
-                                <div class="py-2">
-                                  <p class="text-sm text-red-600">Something went wrong. Please try again.</p>
-                                </div>
-                              {/if}
-                            </div>
-                          </div>
-                        </div>
-                        <div class="mt-3">
-                        <a
-                            href="/legal?tab=privacy"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="text-sm text-black opacity-70 underline hover:text-primary"
-                          >
-                            See our Privacy Policy
-                          </a>
-                        </div>
-                      </div>
-                </CardContent>
-                </Card>
+										<div class="text-left max-w-md w-full mx-auto flex-1 future-notify">
+											<div id="mlb2-30848422" class="ml-form-embedContainer ml-subscribe-form ml-subscribe-form-30848422">
+												<div class="ml-form-align-center">
+													<div class="ml-form-embedWrapper embedForm">
+														<div class="ml-form-embedBody ml-form-embedBodyDefault row-form">
+															{#if futureSignupStatus === 'success'}
+																<div class="py-4">
+																	<p class="text-black font-semibold">Thank you for subscribing.</p>
+																</div>
+															{:else}
+																<form
+																	class="ml-block-form"
+																	action="https://assets.mailerlite.com/jsonp/1795576/forms/165461032541620178/subscribe"
+																	method="post"
+																	on:submit={handleFutureSignupSubmit}
+																>
+																	<div class="ml-form-formContent">
+																		<div class="ml-form-fieldRow ml-last-item">
+																			<div class="ml-field-group ml-field-email ml-validate-email ml-validate-required">
+																				<input
+																					aria-label="email"
+																					aria-required="true"
+																					type="email"
+																					name="fields[email]"
+																					placeholder="Enter your email address"
+																					autocomplete="email"
+																					class="form-control w-full px-4 py-3 border border-light-gray bg-white text-black placeholder-black placeholder-opacity-50 focus:outline-none focus:border-primary"
+																					required
+																				>
+																			</div>
+																		</div>
+																	</div>
+																	<div class="ml-form-embedPermissions">
+																		<div class="ml-form-embedPermissionsContent default privacy-policy">
+																			<p class="text-base sm:text-lg text-black opacity-70 mb-6 leading-relaxed">Read our privacy policy</p>
+																		</div>
+																	</div>
+																	<div class="ml-form-recaptcha ml-validate-required mb-3">
+																		<script src="https://www.google.com/recaptcha/api.js"></script>
+																		<div class="g-recaptcha" data-sitekey="6Lf1KHQUAAAAAFNKEX1hdSWCS3mRMv4FlFaNslaD"></div>
+																	</div>
+																	<input type="hidden" name="fields[interest]" value={assetId}>
+																	<input type="hidden" name="ml-submit" value="1">
+																	<div class="ml-form-embedSubmit">
+																		<button
+																			type="submit"
+																			class="w-full px-6 py-3 bg-black text-white font-extrabold text-sm uppercase tracking-wider cursor-pointer transition-colors duration-200 hover:bg-secondary border-0 disabled:opacity-60 disabled:cursor-not-allowed"
+																			disabled={futureSignupSubmitting}
+																		>
+																			{futureSignupSubmitting ? 'Submitting…' : 'Subscribe'}
+																		</button>
+																	</div>
+																	<input type="hidden" name="anticsrf" value="true">
+																</form>
+															{/if}
+														</div>
+														{#if futureSignupStatus === 'error'}
+															<div class="py-2">
+																<p class="text-sm text-red-600">Something went wrong. Please try again.</p>
+															</div>
+														{/if}
+												</div>
+											</div>
+										</div>
+										<div class="mt-3">
+											<a
+												href="/legal?tab=privacy"
+												target="_blank"
+												rel="noopener noreferrer"
+												class="text-sm text-black opacity-70 underline hover:text-primary"
+											>
+												See our Privacy Policy
+											</a>
+										</div>
+									</div>
+								</div>
+									</div>
+								</div>
+							</div>
+							</CardContent>
+					</Card>
 					{/if}
 				</div>
 				</div>

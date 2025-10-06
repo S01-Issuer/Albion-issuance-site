@@ -28,6 +28,7 @@
 	import { useTooltip } from '$lib/composables';
 	import { getImageUrl } from '$lib/utils/imagePath';
 	import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
+	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	
 	// Tab state
 	let activeTab: 'overview' | 'performance' | 'allocation' = 'overview';
@@ -429,7 +430,7 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 						}
 						return false;
 					}
-				);
+				) as TokenMetadata | undefined;
 				
 				if(pinnedMetadata) {
 					const asset = (pinnedMetadata as any).asset;

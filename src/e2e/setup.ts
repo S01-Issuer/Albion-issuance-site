@@ -33,7 +33,8 @@ Element.prototype.querySelector = function (selector: string) {
     return element;
   }
 
-  const isPathSelector = selector.includes("path") || selector.includes(".line-path");
+  const isPathSelector =
+    selector.includes("path") || selector.includes(".line-path");
 
   if (isPathSelector && !(element instanceof SVGPathElement)) {
     const pathCandidate = element as SVGPathElement & {

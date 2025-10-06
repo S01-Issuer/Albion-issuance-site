@@ -8,40 +8,65 @@ vi.mock("$env/static/public", () => ({
 
 import AssetsIndex from "../routes/(main)/assets/+page.svelte";
 import { installHttpMocks } from "./http-mock";
+import type { Navigation, Page } from "@sveltejs/kit";
 
 // Mock app stores
 vi.mock("$app/stores", async () => {
   const { readable } = await import("svelte/store");
+
+  const page = readable<Page>({
+    url: new URL("http://localhost/assets"),
+    params: {},
+    route: { id: null },
+    status: 200,
+    error: null,
+    data: {},
+    state: {} as App.PageState,
+    form: null,
+  });
+
+  const navigating = readable<Navigation | null>(null);
+
+  const baseUpdated = readable(false);
+  const updated = {
+    subscribe: baseUpdated.subscribe,
+    async check() {
+      return false;
+    },
+  };
+
   return {
-    page: readable({
-      url: new URL("http://localhost/assets"),
-      params: {},
-      route: {},
-      status: 200,
-      error: null,
-      data: {},
-    }),
-    navigating: readable(null),
-    updated: { subscribe: () => () => {} },
-  } as typeof import("$app/stores");
+    getStores: () => ({ page, navigating, updated }),
+    page,
+    navigating,
+    updated,
+  };
 });
 
 // Mock wagmi
 vi.mock("svelte-wagmi", async () => {
   const { writable, readable } = await import("svelte/store");
+
+  const mockConfig = readable({
+    chains: [],
+    transports: {},
+    getClient: () => ({}),
+  });
+
   return {
     web3Modal: writable({ open: () => {} }),
     signerAddress: writable("0x1111111111111111111111111111111111111111"),
     connected: writable(true),
     loading: writable(false),
-    wagmiConfig: readable({
-      chains: [],
-      transports: {},
-      getClient: () => ({}), // Add getClient method so wagmi config is considered initialized
-    }),
+    wagmiConfig: mockConfig,
     chainId: writable(8453),
     disconnectWagmi: async () => {},
-  } as typeof import("$app/stores");
+    defaultConfig: vi.fn(),
+    configuredConnectors: [],
+    wagmiLoaded: readable(true),
+    init: vi.fn(),
+    WC: {},
+  };
 });
 
 // Mock @wagmi/core
@@ -57,7 +82,8 @@ vi.mock("@wagmi/core", () => ({
 
 // Mock network config with test URLs
 vi.mock("$lib/network", async () => {
-  const actual = await vi.importActual<typeof import("$lib/network")>("$lib/network");
+  const actual =
+    await vi.importActual<typeof import("$lib/network")>("$lib/network");
   return {
     ...actual,
     BASE_SFT_SUBGRAPH_URL: "https://example.com/sft",

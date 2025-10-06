@@ -241,7 +241,10 @@ describe("Portfolio Page E2E Tests", () => {
     sfts.set([SFT_FIXTURE as any]);
     sftMetadata.set([METADATA_FIXTURE as any]);
     depositsSpy = vi
-      .spyOn(sftRepository as unknown as Record<string, any>, "getDepositsForOwner")
+      .spyOn(
+        sftRepository as unknown as Record<string, any>,
+        "getDepositsForOwner",
+      )
       .mockResolvedValue(DEPOSITS_FIXTURE as any);
 
     // Install HTTP mocks for all endpoints
@@ -336,7 +339,7 @@ describe("Portfolio Page E2E Tests", () => {
             bodyText.includes("Portfolio") ||
             bodyText.includes("ALB-WR1-R1")
           ) {
-            console.log('[PortfolioTest] body:', bodyText);
+            console.log("[PortfolioTest] body:", bodyText);
             // Should show holdings section
             expect(bodyText).toMatch(/Holdings|My Holdings/i);
 

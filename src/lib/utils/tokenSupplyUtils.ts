@@ -74,16 +74,21 @@ export function formatTokenBalance(balance: number, decimals: number): string {
  * @param sft SFT data from blockchain
  * @param maxSupply Max supply from authorizer data
  */
-export function getTokenSupplyFromSft(token: TokenMetadata, sft: any, maxSupply: string) {
+export function getTokenSupplyFromSft(
+  token: TokenMetadata,
+  sft: any,
+  maxSupply: string,
+) {
   const maxSupplyBig = BigInt(maxSupply);
   const mintedSupplyBig = BigInt(sft.totalShares);
-  const availableSupplyBig = maxSupplyBig > mintedSupplyBig ? maxSupplyBig - mintedSupplyBig : 0n;
+  const availableSupplyBig =
+    maxSupplyBig > mintedSupplyBig ? maxSupplyBig - mintedSupplyBig : 0n;
 
   return {
     maxSupply: maxSupplyBig,
     mintedSupply: mintedSupplyBig,
     availableSupply: availableSupplyBig,
-    hasAvailableSupply: availableSupplyBig > 0n
+    hasAvailableSupply: availableSupplyBig > 0n,
   };
 }
 

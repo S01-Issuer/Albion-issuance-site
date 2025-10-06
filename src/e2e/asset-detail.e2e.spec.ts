@@ -36,9 +36,9 @@ vi.mock("svelte-wagmi", async () => {
 
 // Mock network config - only mock URLs, not data
 vi.mock("$lib/network", async () => {
-  const actual = await vi.importActual<typeof import("$lib/network")>("$lib/network");
+  const actual =
+    await vi.importActual<typeof import("$lib/network")>("$lib/network");
   return {
-     
     ...actual,
     BASE_SFT_SUBGRAPH_URL: "https://example.com/sft",
     BASE_METADATA_SUBGRAPH_URL: "https://example.com/meta",

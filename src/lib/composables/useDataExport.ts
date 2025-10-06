@@ -90,11 +90,7 @@ export function useDataExport() {
       return;
     }
 
-    const headers = [
-      "Month",
-      "Total Payout (USD)",
-      "Payout Per Token (USD)",
-    ];
+    const headers = ["Month", "Total Payout (USD)", "Payout Per Token (USD)"];
 
     const data = currentToken.payoutData.map((payout) => [
       payout.month,
@@ -102,7 +98,8 @@ export function useDataExport() {
       (payout.tokenPayout.payoutPerToken ?? 0).toFixed(4),
     ]);
 
-    const filename = options.filename ?? `${currentToken.contractAddress}-payment-history.csv`;
+    const filename =
+      options.filename ?? `${currentToken.contractAddress}-payment-history.csv`;
     exportToCSV(data, headers, filename);
   }
 
@@ -142,7 +139,7 @@ export function useDataExport() {
       avgMonthlyRevenue?: number;
       profitMargin?: number;
     },
-    _options: ExportOptions = {},
+    options: ExportOptions = {},
   ): void {
     const headers = ["Metric", "Value"];
 

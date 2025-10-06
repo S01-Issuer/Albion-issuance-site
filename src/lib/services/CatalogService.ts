@@ -101,7 +101,11 @@ export class CatalogService {
     $sftMetadata: MetaV1S[],
     currentHash: string,
   ): Promise<CatalogData> {
-    if (!Array.isArray($sfts) || $sfts.length === 0 || !Array.isArray($sftMetadata)) {
+    if (
+      !Array.isArray($sfts) ||
+      $sfts.length === 0 ||
+      !Array.isArray($sftMetadata)
+    ) {
       this.catalog = { assets: {}, tokens: {}, maxSupplyByToken: {} };
       this.lastBuildHash = currentHash;
       return this.catalog;

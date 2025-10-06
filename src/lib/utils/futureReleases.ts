@@ -23,10 +23,15 @@ export async function hasIncompleteReleases(assetId: string): Promise<boolean> {
         .replace(/[^a-z0-9-]/g, "") === assetId,
   );
 
-  console.warn(`[hasIncompleteReleases] Found energy field:`, energyField?.name);
+  console.warn(
+    `[hasIncompleteReleases] Found energy field:`,
+    energyField?.name,
+  );
 
   if (!energyField) {
-    console.warn(`[hasIncompleteReleases] No energy field found for ${assetId}`);
+    console.warn(
+      `[hasIncompleteReleases] No energy field found for ${assetId}`,
+    );
     return false;
   }
 

@@ -32,9 +32,11 @@ interface HoldingRow {
   [key: string]: unknown;
 }
 
+type SignedContext = ReturnType<typeof signContext>;
+
 interface HoldingWithProof extends HoldingRow {
   order: ReturnType<typeof decodeOrder>;
-  signedContext: Hex;
+  signedContext: SignedContext;
   orderBookAddress: string;
 }
 
@@ -195,8 +197,8 @@ export class ClaimsService {
     )) as SortedClaimsData;
 
     // Generate proofs for holdings
-    const holdingsWithProofs: HoldingWithProof[] = sortedClaimsData.holdings.map(
-      (h) => {
+    const holdingsWithProofs: HoldingWithProof[] =
+      sortedClaimsData.holdings.map((h) => {
         const leaf = getLeaf(h.id, ownerAddress, h.unclaimedAmount);
         const proofForLeaf = getProofForLeaf(merkleTree, leaf);
         const holdingSignedContext = signContext(
@@ -213,8 +215,7 @@ export class ClaimsService {
           signedContext: holdingSignedContext,
           orderBookAddress,
         };
-      },
-    );
+      });
 
     return {
       holdings: holdingsWithProofs,
@@ -273,7 +274,7 @@ export class ClaimsService {
       order: ReturnType<typeof decodeOrder>;
       inputIOIndex: number;
       outputIOIndex: number;
-      signedContext: readonly Hex[];
+      signedContext: readonly SignedContext[];
     }> = [];
     let orderBookAddress: Hex | undefined;
 
