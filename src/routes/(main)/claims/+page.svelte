@@ -432,7 +432,7 @@
 														href={`https://basescan.org/tx/${claim.txHash}`}
 														target="_blank"
 														rel="noopener noreferrer"
-														class="text-secondary hover:underline text-sm"
+														class="text-secondary text-sm no-underline hover:text-primary"
 													>
 														View TX →
 													</a>

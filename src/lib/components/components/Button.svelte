@@ -29,7 +29,7 @@
 		secondary: 'bg-white text-black border-black hover:bg-primary hover:text-white hover:border-primary focus:outline-primary focus:outline-2 focus:outline-offset-2'
 	};
 	
-	$: classes = `inline-flex items-center justify-center font-semibold uppercase tracking-wide cursor-pointer transition-all duration-200 border-2 whitespace-nowrap relative overflow-hidden appearance-none font-figtree active:translate-y-px ${sizeClasses[size]} ${variantClasses[variant]} ${fullWidth ? 'w-full' : ''} ${disabled ? 'opacity-50 cursor-not-allowed hover:bg-inherit hover:text-inherit hover:border-inherit' : ''}`.trim();
+	$: classes = `inline-flex items-center justify-center font-semibold uppercase tracking-wide cursor-pointer transition-all duration-200 border-2 whitespace-nowrap relative overflow-hidden appearance-none font-figtree active:translate-y-px ${sizeClasses[size]} ${variantClasses[variant]} ${fullWidth ? 'w-full' : ''} ${disabled ? 'opacity-50 cursor-not-allowed pointer-events-none hover:bg-inherit hover:text-inherit hover:border-inherit' : ''}`.trim();
 </script>
 
 {#if href && !disabled}
@@ -50,4 +50,3 @@
 		<slot />
 	</button>
 {/if}
-

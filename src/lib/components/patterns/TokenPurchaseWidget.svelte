@@ -7,7 +7,6 @@
 	import { formatEther, parseUnits, type Hex } from 'viem';
 	import {erc20Abi} from 'viem';
 	import { PrimaryButton, SecondaryButton, FormattedNumber } from '$lib/components/components';
-	import { formatCurrency, formatTokenSupply } from '$lib/utils/formatters';
     import { sftMetadata, sfts } from '$lib/stores';
     import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
     import type { OffchainAssetReceiptVault } from '$lib/types/graphql';
@@ -43,16 +42,23 @@ let tokenTermsUrl: string | null = null;
 	}
 
 	$: tokenTermsUrl = tokenData ? getTokenTermsPath(tokenData.contractAddress) : null;
-
+	$: maxInvestmentAmount = (() => {
+		if (!supply) return Number.POSITIVE_INFINITY;
+		const parsed = parseFloat(formatEther(supply.availableSupply));
+		return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+	})();
+	$: normalizedInvestmentAmount = typeof investmentAmount === 'number' && !Number.isNaN(investmentAmount) ? investmentAmount : 0;
+	$: formattedUsdcAmount = `USDC ${normalizedInvestmentAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 	$: order = {
-		investment: investmentAmount,
-		tokens: investmentAmount // 1:1 ratio for simplicity
+		investment: normalizedInvestmentAmount,
+		tokens: normalizedInvestmentAmount // 1:1 ratio for simplicity
 	};
 
 	$: canProceed = () => {
+		const withinSupplyLimit = Number.isFinite(maxInvestmentAmount) ? normalizedInvestmentAmount <= maxInvestmentAmount : true;
 		return agreedToTerms && 
-			   investmentAmount > 0 && 
-			   investmentAmount <= (supply?.availableSupply || 0) && 
+			   normalizedInvestmentAmount > 0 &&
+			   withinSupplyLimit &&
 			   !purchasing &&
 			   !isSoldOut();
 	};
@@ -129,7 +135,7 @@ let tokenTermsUrl: string | null = null;
 				args: [$signerAddress as Hex, currentSft.activeAuthorizer?.address as Hex]
 			});
 
-			const requiredAmount = BigInt(parseUnits(investmentAmount.toString(), paymentTokenDecimals));
+			const requiredAmount = BigInt(parseUnits(normalizedInvestmentAmount.toString(), paymentTokenDecimals));
 			// Only approve if current allowance is insufficient
 			if (currentAllowance < requiredAmount) {
 				// Simulate approval first
@@ -153,7 +159,7 @@ let tokenTermsUrl: string | null = null;
 				abi: OffchainAssetReceiptVaultAbi,
 				address: tokenAddress as Hex,
 				functionName: 'deposit',
-				args: [BigInt(parseUnits(investmentAmount.toString(), 18)), $signerAddress as Hex, BigInt(0n), "0x"]
+				args: [BigInt(parseUnits(normalizedInvestmentAmount.toString(), 18)), $signerAddress as Hex, BigInt(0n), "0x"]
 			});
 
 			// Execute deposit transaction
@@ -163,7 +169,7 @@ let tokenTermsUrl: string | null = null;
 			dispatch('purchaseSuccess', {
 				tokenAddress,
 				assetId,
-				amount: investmentAmount,
+				amount: normalizedInvestmentAmount,
 				tokens: order.tokens
 			});
 			
@@ -216,7 +222,7 @@ let tokenTermsUrl: string | null = null;
 	$: titleRowClasses = 'flex justify-between items-center gap-4';
 	$: mainTitleClasses = 'text-2xl font-bold text-black m-0';
 	$: assetNameClasses = 'text-secondary text-sm mt-2 m-0';
-	$: viewDetailsClasses = 'text-black px-3 py-2 text-sm font-medium hover:underline transition-all duration-200 no-underline whitespace-nowrap';
+	$: viewDetailsClasses = 'text-black px-3 py-2 text-sm font-medium no-underline whitespace-nowrap transition-colors duration-200 hover:text-primary';
 	$: closeClasses = 'bg-transparent border-none text-2xl cursor-pointer text-black p-0 w-8 h-8 flex items-center justify-center rounded transition-colors duration-200 hover:bg-light-gray';
 	$: contentClasses = 'flex-1 p-8 overflow-y-auto min-h-0';
 	$: formClasses = 'flex flex-col gap-8';
@@ -226,7 +232,9 @@ let tokenTermsUrl: string | null = null;
 	$: detailLabelClasses = 'text-xs text-gray-500 uppercase tracking-wider';
 	$: detailValueClasses = 'text-lg font-bold text-secondary';
 	$: formSectionClasses = 'flex flex-col gap-2';
-	$: formLabelClasses = 'font-medium text-black text-sm';
+	$: formLabelClasses = 'text-black text-lg font-semibold';
+	$: usdcBadgeClasses = 'flex items-center gap-2 text-lg font-medium text-black opacity-80';
+	$: usdcIconClasses = 'h-5 w-5';
 	$: amountInputClasses = 'p-4 border-2 border-light-gray text-lg text-left transition-colors duration-200 focus:outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed';
 	$: availableTokensClasses = 'mt-2 text-sm text-secondary font-medium';
 	$: soldOutClasses = 'text-red-600';
@@ -333,13 +341,21 @@ let tokenTermsUrl: string | null = null;
 
 						<!-- Investment Amount -->
 						<div class={formSectionClasses}>
-							<label class={formLabelClasses} for="amount">Investment Amount</label>
+							<div class="flex items-baseline justify-between gap-3">
+								<label class={formLabelClasses} for="amount">Investment Amount</label>
+								<span class={usdcBadgeClasses}>
+									With
+									<img src="/assets/usdc.svg" alt="USDC" class={usdcIconClasses} loading="lazy" />
+								</span>
+							</div>
 							<input 
 								id="amount"
 								type="number" 
 								bind:value={investmentAmount}
-								min={1}
-								max={formatEther(supply?.availableSupply || BigInt(999999))}
+								min={0.01}
+								step={0.01}
+								inputmode="decimal"
+								max={Number.isFinite(maxInvestmentAmount) ? maxInvestmentAmount : undefined}
 								class={amountInputClasses}
 								disabled={isSoldOut()}
 							/>
@@ -350,7 +366,7 @@ let tokenTermsUrl: string | null = null;
 									<span>Available: <FormattedNumber value={formatEther(supply?.availableSupply || BigInt(0))} type="number" compact={false} /> tokens</span>
 								{/if}
 							</div>
-							{#if !isSoldOut() && supply?.availableSupply && investmentAmount > Number(formatEther(supply.availableSupply))}
+							{#if !isSoldOut() && Number.isFinite(maxInvestmentAmount) && normalizedInvestmentAmount > maxInvestmentAmount}
 								<div class={warningNoteClasses}>
 									Investment amount exceeds available supply.
 								</div>
@@ -360,8 +376,8 @@ let tokenTermsUrl: string | null = null;
 						<!-- Order Summary -->
 						<div class={orderSummaryClasses}>
 							<h4 class={orderSummaryTitleClasses}>Investment Amount</h4>
-							<div class="text-center">
-								<span class="text-2xl font-extrabold text-black">{formatCurrency(investmentAmount, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+							<div class="text-left">
+								<span class="text-2xl font-extrabold text-black">{formattedUsdcAmount}</span>
 							</div>
 						</div>
 
@@ -372,7 +388,7 @@ let tokenTermsUrl: string | null = null;
 								<span>
 									I agree to the
 									{#if tokenTermsUrl}
-										<a href={tokenTermsUrl} target="_blank" rel="noopener noreferrer" class="text-secondary font-semibold no-underline hover:underline">
+										<a href={tokenTermsUrl} target="_blank" rel="noopener noreferrer" class="text-secondary font-semibold no-underline hover:text-primary">
 											terms and conditions
 										</a>
 									{:else}
@@ -388,9 +404,10 @@ let tokenTermsUrl: string | null = null;
 							<SecondaryButton on:click={closeWidget}>
 								Cancel
 							</SecondaryButton>
-							<PrimaryButton 
-								on:click={handlePurchase}
-							>
+						<PrimaryButton 
+							on:click={handlePurchase}
+							disabled={!canProceed()}
+						>
 								{#if isSoldOut()}
 									Sold Out
 								{:else if purchasing}

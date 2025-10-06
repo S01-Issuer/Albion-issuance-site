@@ -44,8 +44,9 @@
 	let claimHistory: any[] = [];
 	let monthlyPayouts: any[] = [];
 	let tokenAllocations: any[] = [];
-	let allDepositsData: any[] = [];
-	let claimsHoldings: any[] = [];
+let allDepositsData: any[] = [];
+let claimsHoldings: any[] = [];
+let hasPortfolioHistory = false;
 	
 	// Composables
 	const { show: showTooltipWithDelay, hide: hideTooltip, isVisible: isTooltipVisible } = useTooltip();
@@ -56,11 +57,13 @@
 	let historyModalHolding: any | null = null;
 
 	$: historyModalPayoutData = historyModalHolding ? getPayoutChartData(historyModalHolding) : [];
-	$: historyModalCumulativeData = historyModalPayoutData.reduce((acc: Array<{ label: string; value: number }>, d, i) => {
-		const prevTotal = i > 0 ? acc[i - 1].value : 0;
-		acc.push({ label: d.date, value: prevTotal + d.value });
-		return acc;
-	}, [] as Array<{ label: string; value: number }>);
+$: historyModalCumulativeData = historyModalPayoutData.reduce((acc: Array<{ label: string; value: number }>, d, i) => {
+	const prevTotal = i > 0 ? acc[i - 1].value : 0;
+	acc.push({ label: d.date, value: prevTotal + d.value });
+	return acc;
+}, [] as Array<{ label: string; value: number }>);
+
+$: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.length > 0) || (Array.isArray(claimHistory) && claimHistory.length > 0);
 
 	function openHistoryModal(holding: any) {
 		historyModalHolding = holding;
@@ -118,6 +121,121 @@
 		URL.revokeObjectURL(url);
 	}
 
+	function normalizeDate(value: unknown): string {
+		if (value instanceof Date && !Number.isNaN(value.getTime())) {
+			return value.toISOString();
+		}
+		if (typeof value === 'string' && value) {
+			const parsed = Date.parse(value);
+			if (!Number.isNaN(parsed)) {
+				return new Date(parsed).toISOString();
+			}
+			const numeric = Number(value);
+			if (!Number.isNaN(numeric)) {
+				return normalizeDate(numeric);
+			}
+		}
+		if (typeof value === 'number' && Number.isFinite(value)) {
+			const milliseconds = value > 1e12 ? value : value * 1000;
+			const date = new Date(milliseconds);
+			if (!Number.isNaN(date.getTime())) {
+				return date.toISOString();
+			}
+		}
+		return '';
+	}
+
+	function toCsvValue(value: unknown): string {
+		if (value === null || value === undefined) return '';
+		const stringValue = String(value);
+		if (stringValue.includes('"') || stringValue.includes(',') || stringValue.includes('\n')) {
+			return '"' + stringValue.replace(/"/g, '""') + '"';
+		}
+		return stringValue;
+	}
+
+	function downloadCsvFile(filename: string, content: string) {
+		const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = filename;
+		link.click();
+		URL.revokeObjectURL(url);
+	}
+
+	function getTimestampValue(value: string): number {
+		if (!value) return 0;
+		const parsed = Date.parse(value);
+		return Number.isNaN(parsed) ? 0 : parsed;
+	}
+
+	function exportPortfolioHistory() {
+		const rows: Array<Record<string, string>> = [];
+		const assetNameByAddress = new Map<string, string>();
+		for (const holding of holdings) {
+			if (holding?.sftAddress) {
+				assetNameByAddress.set(String(holding.sftAddress).toLowerCase(), holding.name);
+			}
+		}
+
+		for (const deposit of allDepositsData || []) {
+			try {
+				const amountRaw = deposit?.amount ?? '0';
+				const amountWei = typeof amountRaw === 'bigint' ? amountRaw : BigInt(amountRaw);
+				const amountUsdcNumber = Number(formatEther(amountWei));
+				const amountUsdc = Number.isFinite(amountUsdcNumber) ? amountUsdcNumber : 0;
+				const assetId = deposit?.sftAddress ? String(deposit.sftAddress).toLowerCase() : deposit?.offchainAssetReceiptVault?.id?.toLowerCase();
+				const assetName = deposit?.sftName || (assetId ? assetNameByAddress.get(assetId) : '') || 'Unknown Asset';
+				const date = normalizeDate(deposit?.timestamp || deposit?.createdAt || deposit?.updatedAt);
+				rows.push({
+					type: 'deposit',
+					asset: assetName,
+					date,
+					amount_usdc: amountUsdc.toFixed(2),
+					tokens: amountUsdc.toFixed(4),
+					tx_hash: deposit?.transactionHash || deposit?.txHash || '',
+					status: 'completed',
+					reference: deposit?.id || ''
+				});
+			} catch (error) {
+				console.error('Failed to format deposit for export:', error);
+			}
+		}
+
+		for (const claim of claimHistory || []) {
+			const amount = Number(claim?.amount ?? 0);
+			const safeAmount = Number.isFinite(amount) ? amount : 0;
+			const status = claim?.status || 'completed';
+			const assetName = claim?.asset || claim?.fieldName || 'Unknown Asset';
+			const date = normalizeDate(claim?.date);
+			rows.push({
+				type: 'claim',
+				asset: assetName,
+				date,
+				amount_usdc: safeAmount.toFixed(2),
+				tokens: '',
+				tx_hash: claim?.txHash || claim?.transactionHash || '',
+				status,
+				reference: claim?.orderHash || claim?.id || ''
+			});
+		}
+
+		if (rows.length === 0) {
+			alert('No portfolio history available to export yet.');
+			return;
+		}
+
+		rows.sort((a, b) => getTimestampValue(b.date) - getTimestampValue(a.date));
+		const headers = ['type', 'asset', 'date', 'amount_usdc', 'tokens', 'tx_hash', 'status', 'reference'];
+		const csvLines = [headers.join(',')];
+		for (const row of rows) {
+			csvLines.push(headers.map((header) => toCsvValue(row[header] ?? '')).join(','));
+		}
+		const filename = `albion-portfolio-history-${new Date().toISOString().split('T')[0]}.csv`;
+		downloadCsvFile(filename, csvLines.join('\n'));
+	}
+
 	async function loadAllClaimsData() {
 		// Use ClaimsService for efficient parallel loading with caching
 		const claims = useClaimsService();
@@ -166,14 +284,29 @@
 				totalClaimed = claimsResult.totals.claimed;
 				unclaimedPayout = claimsResult.totals.unclaimed;
 				
-				// Map holdings to claimsHoldings format for compatibility
-				claimsHoldings = claimsResult.holdings.map((group: any) => ({
+			// Map holdings to claimsHoldings format with derived totals
+			claimsHoldings = claimsResult.holdings.map((group: any) => {
+				const groupClaims = claimsResult.claimHistory.filter((claim: any) => {
+					return claim.fieldName === group.fieldName || claim.asset === group.fieldName;
+				});
+				const totalEarned = groupClaims.reduce((sum: number, claim: any) => {
+					const amount = Number(claim?.amount ?? 0);
+					return sum + (Number.isFinite(amount) ? amount : 0);
+				}, 0);
+				const claimedAmount = groupClaims.reduce((sum: number, claim: any) => {
+					const amount = Number(claim?.amount ?? 0);
+					const isCompleted = !claim?.status || claim.status === 'completed';
+					return sum + (isCompleted && Number.isFinite(amount) ? amount : 0);
+				}, 0);
+				const unclaimedAmount = Number(group?.totalAmount ?? 0);
+				return {
 					fieldName: group.fieldName,
-					unclaimedAmount: group.totalAmount,
-					claimedAmount: 0, // Will be calculated from claim history
-					totalEarned: group.totalAmount,
+					unclaimedAmount: Number.isFinite(unclaimedAmount) ? unclaimedAmount : 0,
+					claimedAmount,
+					totalEarned,
 					holdings: group.holdings
-				}));
+				};
+			});
 			}
 
 			// Get deposits data
@@ -254,7 +387,9 @@
 
 					if(sftDeposits.length > 0) {
 						for(const deposit of sftDeposits) {
-							const depositAmount = Number(formatEther(deposit.amount));
+							const amountRaw = deposit?.amount ?? '0';
+							const amountWei = typeof amountRaw === 'bigint' ? amountRaw : BigInt(amountRaw);
+							const depositAmount = Number(formatEther(amountWei));
 							totalInvestedInSft += depositAmount;
 							tokensOwned += depositAmount;
 						}
@@ -292,23 +427,54 @@
 					
 					// Get claim history for this asset
 					const sftClaims = claimHistory.filter((claim: any) => {
-						// Match by asset name since that's what ClaimsService provides
 						return claim.asset === asset?.assetName || claim.fieldName === asset?.assetName;
 					});
+					const totalEarnedFromHistory = sftClaims.reduce((sum: number, claim: any) => {
+						const amount = Number(claim?.amount ?? 0);
+						return sum + (Number.isFinite(amount) ? amount : 0);
+					}, 0);
+					const claimedFromHistory = sftClaims.reduce((sum: number, claim: any) => {
+						const amount = Number(claim?.amount ?? 0);
+						const isCompleted = !claim?.status || claim.status === 'completed';
+						return sum + (isCompleted && Number.isFinite(amount) ? amount : 0);
+					}, 0);
+					if (!totalEarnedForSft && totalEarnedFromHistory) {
+						totalEarnedForSft = totalEarnedFromHistory;
+					}
+					if (!claimedAmountForSft && claimedFromHistory) {
+						claimedAmountForSft = claimedFromHistory;
+					}
+					if (!unclaimedAmountForSft) {
+						const pending = totalEarnedForSft - claimedAmountForSft;
+						unclaimedAmountForSft = pending > 0 ? pending : 0;
+					}
+					const productionHistoryRecords = Array.isArray(asset?.productionHistory) && asset.productionHistory.length > 0
+						? asset.productionHistory
+						: (asset?.monthlyReports || []);
+					const totalHistoricalProduction = productionHistoryRecords.reduce((sum: number, record: any) => {
+						const volume = Number(record?.production ?? 0);
+						return sum + (Number.isFinite(volume) ? volume : 0);
+					}, 0);
+					const totalForecastProduction = asset?.plannedProduction?.projections?.reduce((sum: number, projection: any) => {
+						const volume = Number(projection?.production ?? 0);
+						return sum + (Number.isFinite(volume) ? volume : 0);
+					}, 0) ?? 0;
+					const assetDepletionPercentage = totalForecastProduction > 0
+						? Math.min((totalHistoricalProduction / totalForecastProduction) * 100, 100)
+						: null;
 					
 					// Only add to holdings if user actually owns tokens
 					if(pinnedMetadata && tokensOwned > 0) {
 						const capitalReturned = totalInvestedInSft > 0 
 							? (totalEarnedForSft / totalInvestedInSft) * 100 
 							: 0;
-						
+
 						const unrecoveredCapital = Math.max(0, totalInvestedInSft - totalEarnedForSft);
-						
-						// Get last payout info from claims
+
 						const lastClaim = sftClaims
-							.filter(claim => !claim.status || claim.status === 'completed')
+							.filter((claim: any) => !claim.status || claim.status === 'completed')
 							.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-						
+
 						holdings.push({
 							id: sft.id.toLowerCase(),
 							name: asset?.assetName || `SFT ${sft.id.slice(0, 8)}...`,
@@ -316,6 +482,7 @@
 							totalInvested: totalInvestedInSft,
 							totalPayoutsEarned: totalEarnedForSft,
 							unclaimedAmount: unclaimedAmountForSft,
+							claimedAmount: claimedAmountForSft,
 							lastPayoutAmount: lastClaim ? Number(lastClaim.amount) : 0,
 							lastPayoutDate: lastClaim ? lastClaim.date : null,
 							status: asset?.production?.status || 'producing',
@@ -323,7 +490,7 @@
 							tokenSymbol: (pinnedMetadata as any)?.symbol || sft.id.slice(0, 6).toUpperCase(),
 							capitalReturned,
 							unrecoveredCapital,
-							assetDepletion: 0,
+							assetDepletion: assetDepletionPercentage,
 							asset: asset,
 							sftAddress: sft.id,
 							claimHistory: sftClaims,
@@ -379,7 +546,12 @@
 
 			// Calculate portfolio stats
 			if (allDepositsData.length > 0) {
-				totalInvested = allDepositsData.reduce((sum, deposit) => sum + Number(formatEther(deposit.amount)), 0);
+				totalInvested = allDepositsData.reduce((sum, deposit) => {
+					const amountRaw = deposit?.amount ?? '0';
+					const amountWei = typeof amountRaw === 'bigint' ? amountRaw : BigInt(amountRaw);
+					const amount = Number(formatEther(amountWei));
+					return sum + (Number.isFinite(amount) ? amount : 0);
+				}, 0);
 			} else if (holdings.length > 0) {
 				totalInvested = holdings.reduce((sum, holding) => sum + holding.totalInvested, 0);
 			} else {
@@ -389,9 +561,11 @@
 			if (holdings.length > 0) {
 				totalPayoutsEarned = holdings.reduce((sum, holding) => sum + holding.totalPayoutsEarned, 0);
 				unclaimedPayout = holdings.reduce((sum, holding) => sum + holding.unclaimedAmount, 0);
+				totalClaimed = holdings.reduce((sum, holding) => sum + (holding.claimedAmount || 0), 0);
 			} else {
-				totalPayoutsEarned = 0;
-				unclaimedPayout = 0;
+				totalPayoutsEarned = claimsResult?.totals.earned ?? 0;
+				unclaimedPayout = claimsResult?.totals.unclaimed ?? 0;
+				totalClaimed = claimsResult?.totals.claimed ?? 0;
 			}
 
 			activeAssetsCount = holdings.length;
@@ -599,9 +773,9 @@
 																role="button"
 																tabindex="0">ⓘ</span>
 														</div>
-														<div class="text-lg lg:text-xl font-extrabold text-black">
-															{holding.assetDepletion > 0 ? `${holding.assetDepletion.toFixed(1)}%` : 'TBD'}
-														</div>
+									<div class="text-lg lg:text-xl font-extrabold text-black">
+										{holding.assetDepletion !== null && holding.assetDepletion !== undefined ? `${holding.assetDepletion.toFixed(1)}%` : 'TBD'}
+									</div>
 														<div class="text-xs lg:text-sm text-black opacity-70">To Date</div>
 														{#if isTooltipVisible('depletion-' + holding.id)}
 															<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-3 rounded text-xs z-[1000] mb-2 w-48">
@@ -1046,6 +1220,8 @@
 						actionText="Download"
 						actionVariant="secondary"
 						size="medium"
+						disabled={!hasPortfolioHistory}
+						on:action={exportPortfolioHistory}
 					/>
 				</div>
 			</div>

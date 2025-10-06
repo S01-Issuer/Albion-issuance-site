@@ -6,12 +6,13 @@
 	import { web3Modal, signerAddress, connected, loading, disconnectWagmi } from 'svelte-wagmi';
     import { formatAddress } from '$lib/utils/formatters';
     import { slide } from 'svelte/transition';
-    import { onMount } from 'svelte';
 	
 	$: currentPath = $page.url.pathname;
 	let mobileMenuOpen = false;
-    // Newsletter form uses hosted MailerLite + built-in reCAPTCHA
-	
+    // Newsletter subscription state
+    let newsletterSubmitting = false;
+    let newsletterStatus: 'idle' | 'success' | 'error' = 'idle';
+
 	// Real wallet connection
 	async function connectWallet() {
 		if ($connected && $signerAddress) {
@@ -31,13 +32,43 @@
 	function closeMobileMenu() {
 		mobileMenuOpen = false;
 	}
+	async function handleNewsletterSubmit(event: SubmitEvent) {
+		event.preventDefault();
+		if (newsletterSubmitting) return;
 
-    // MailerLite success redirect overrides (fallback if ML redirect not set)
-    onMount(() => {
-        (window as any).ml_webform_success_30848031 = function () {
-            try { window.location.assign('/thank-you?source=newsletter'); } catch {}
-        };
-    });
+		newsletterSubmitting = true;
+		newsletterStatus = 'idle';
+
+		const form = event.currentTarget as HTMLFormElement;
+		const formData = new FormData(form);
+
+		try {
+			const response = await fetch(form.action, {
+				method: 'POST',
+				body: formData,
+				headers: { Accept: 'application/json' }
+			});
+
+			if (response.ok) {
+				newsletterStatus = 'success';
+				try {
+					form.reset();
+				} catch {}
+			} else {
+				newsletterStatus = 'error';
+			}
+		} catch (error) {
+			console.error('Newsletter signup failed:', error);
+			newsletterStatus = 'error';
+		} finally {
+			newsletterSubmitting = false;
+			if (typeof window !== 'undefined' && (window as any).grecaptcha) {
+				try {
+					(window as any).grecaptcha.reset();
+				} catch {}
+			}
+		}
+	}
 
 	$: query = createQuery({
 		queryKey: ['getSftMetadata'],
@@ -72,11 +103,11 @@
 	$: logoImageClasses = 'h-12 sm:h-14 lg:h-16 w-auto';
 	$: desktopNavClasses = 'hidden md:flex';
 	$: navLinksClasses = 'flex gap-6 lg:gap-8 items-center';
-	$: navLinkClasses = 'text-black no-underline font-medium py-2 relative transition-colors duration-200 hover:text-primary touch-target text-sm lg:text-base';
-	$: navLinkActiveClasses = 'text-primary after:content-[""] after:absolute after:bottom-0 after:left-0 after:w-full after:h-0.5 after:bg-primary';
+	$: navLinkClasses = 'relative text-black no-underline font-medium py-2 transition-colors duration-200 touch-target text-sm lg:text-base after:content-[""] after:absolute after:left-0 after:right-0 after:-bottom-2 after:h-1 after:bg-primary after:opacity-0 after:transition-opacity after:duration-200 hover:text-primary hover:no-underline hover:after:opacity-100';
+	$: navLinkActiveClasses = 'text-primary after:opacity-100';
 	$: mobileNavClasses = 'md:hidden fixed top-16 left-0 right-0 bg-white border-b border-light-gray z-[99] shadow-lg max-h-[calc(100vh-4rem)] overflow-y-auto';
 	$: mobileNavLinksClasses = 'flex flex-col p-0 gap-0';
-	$: mobileNavLinkClasses = 'text-black no-underline font-medium py-4 px-4 sm:px-6 border-b border-light-gray transition-colors duration-200 last:border-b-0 hover:text-primary hover:bg-light-gray touch-target text-base';
+	$: mobileNavLinkClasses = 'text-black no-underline font-medium py-4 px-4 sm:px-6 border-b border-light-gray transition-colors duration-200 last:border-b-0 hover:text-primary hover:no-underline hover:bg-light-gray touch-target text-base';
 	$: mobileNavLinkActiveClasses = 'text-primary bg-light-gray';
 	$: mainContentClasses = 'flex-1';
 	$: footerClasses = 'bg-light-gray mt-8 sm:mt-12 lg:mt-16';
@@ -187,107 +218,126 @@
 				<div class="flex flex-col lg:order-2">
 					<h4 class={footerSectionH4Classes}>Get the latest updates</h4>
 
-					<!-- MailerLite Newsletter Signup Form -->
 					<div class="mt-4">
-                    <div class="footer-newsletter">
-                        <div id="mlb2-30848031" class="ml-form-embedContainer ml-subscribe-form ml-subscribe-form-30848031">
-                          <div class="ml-form-align-center">
-                            <div class="ml-form-embedWrapper embedForm">
-                              <div class="ml-form-embedBody ml-form-embedBodyHorizontal row-form">
-                                <div class="ml-form-embedContent" style="margin: 0 0 0 0;">
-                                  <!-- optional heading left empty to keep compact footer -->
-                                </div>
-                                <form class="ml-block-form"
-                                    action="https://assets.mailerlite.com/jsonp/1795576/forms/165459421552445204/subscribe"
-                                    method="post"
-                                    on:submit={() => { try { sessionStorage.setItem('lastPageBeforeSubscribe', window.location.pathname + window.location.search + window.location.hash); } catch {} }}
-                                >
-                                  <div class="ml-form-formContent horozintalForm">
-                                    <div class="ml-form-horizontalRow flex gap-2">
-                                      <div class="ml-input-horizontal flex-1">
-                                        <div class="horizontal-fields" style="width: 100%;">
-                                          <div class="ml-field-group ml-field-email ml-validate-email ml-validate-required">
-                                            <input type="email" name="fields[email]" placeholder="Enter email address" autocomplete="email" required class="form-control w-full px-3 py-3 border border-light-gray font-figtree text-sm bg-white text-black transition-colors duration-200 focus:outline-none focus:border-black">
-                                          </div>
-                                        </div>
-                                      </div>
-                                      <div class="ml-button-horizontal primary" style="display:flex; align-items:stretch; min-width: 120px;">
-                                        <button type="submit" class="px-4 py-3 bg-black text-white border-none font-figtree font-extrabold text-sm uppercase tracking-wider cursor-pointer transition-colors duration-200 hover:bg-secondary whitespace-nowrap w-full">Sign up</button>
-                                        <button disabled style="display:none;" type="button" class="loading">
-                                          <div class="ml-form-embedSubmitLoad"></div>
-                                          <span class="sr-only">Loading...</span>
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </div>
+						<div class="footer-newsletter">
+							<div id="mlb2-30848031" class="ml-form-embedContainer ml-subscribe-form ml-subscribe-form-30848031">
+								<div class="ml-form-align-center">
+									<div class="ml-form-embedWrapper embedForm">
+										<div class="ml-form-embedBody ml-form-embedBodyHorizontal row-form">
+											<div class="ml-form-embedContent" style="margin: 0"></div>
+											{#if newsletterStatus === 'success'}
+												<div class="py-4 text-left">
+													<p class="text-black font-semibold">Thank you for subscribing.</p>
+												</div>
+											{:else}
+												<form
+													class="ml-block-form"
+													action="https://assets.mailerlite.com/jsonp/1795576/forms/165459421552445204/subscribe"
+													method="post"
+													on:submit={handleNewsletterSubmit}
+												>
+													<div class="ml-form-formContent horozintalForm">
+														<div class="ml-form-horizontalRow flex gap-2">
+															<div class="ml-input-horizontal flex-1">
+																<div class="horizontal-fields" style="width: 100%;">
+																	<div class="ml-field-group ml-field-email ml-validate-email ml-validate-required">
+																		<input
+																			 type="email"
+																			 name="fields[email]"
+																			 placeholder="Enter email address"
+																			 autocomplete="email"
+																			 required
+																			 class="form-control w-full px-3 py-3 border border-light-gray font-figtree text-sm bg-white text-black transition-colors duration-200 focus:outline-none focus:border-black"
+																			 aria-label="Email address"
+																		/>
+																	</div>
+																</div>
+															</div>
+															<div class="ml-button-horizontal primary" style="display:flex; align-items:stretch; min-width: 120px;">
+																<button
+																	type="submit"
+																	class="px-4 py-3 bg-black text-white border-none font-figtree font-extrabold text-sm uppercase tracking-wider cursor-pointer transition-colors duration-200 hover:bg-secondary whitespace-nowrap w-full disabled:opacity-60 disabled:cursor-not-allowed"
+																	disabled={newsletterSubmitting}
+																>
+																	{newsletterSubmitting ? 'Submitting…' : 'Sign up'}
+																</button>
+															</div>
+														</div>
+													</div>
 
-                                  <!-- Captcha (hidden until email valid via CSS) -->
-                                  <div class="ml-form-recaptcha ml-validate-required" style="float: left; margin-top: 8px;">
-                                    <script src="https://www.google.com/recaptcha/api.js"></script>
-                                    <div class="g-recaptcha" data-sitekey="6Lf1KHQUAAAAAFNKEX1hdSWCS3mRMv4FlFaNslaD"></div>
-                                  </div>
+													<!-- Captcha (hidden until email valid via CSS) -->
+													<div class="ml-form-recaptcha ml-validate-required" style="float: left; margin-top: 8px;">
+														<script src="https://www.google.com/recaptcha/api.js"></script>
+														<div class="g-recaptcha" data-sitekey="6Lf1KHQUAAAAAFNKEX1hdSWCS3mRMv4FlFaNslaD"></div>
+													</div>
 
-                                  <input type="hidden" name="ml-submit" value="1">
-                                  <input type="hidden" name="anticsrf" value="true">
-                                </form>
-                              </div>
-                              <div class="ml-form-successBody row-success" style="display:none;">
-                                <div class="ml-form-successContent">
-                                  <h4>Thank you!</h4>
-                                  <p>You have successfully joined our subscriber list.</p>
-                        </div>
-                      </div>
-                    </div>
-                    <!-- MailerLite embed init (required for success handling) -->
-                    <script>
-                      try { fetch("https://assets.mailerlite.com/jsonp/1795576/forms/165459421552445204/takel"); } catch {}
-                    </script>
-                  </div>
-                </div>
-                    </div>
-					</div>
-
-					<div class="mt-6">
-						<h4 class={footerSectionH4Classes}>Connect with us</h4>
-						<div class={footerSocialButtonsClasses}>
-							<a href="https://x.com/albion_labs" target="_blank" rel="noopener noreferrer" class="{footerSocialBtnClasses} {footerSocialTwitterClasses}" aria-label="Follow Albion on X">
-								<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-									<path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-								</svg>
-							</a>
-							<a href="https://t.me/albionlabs" target="_blank" rel="noopener noreferrer" class="{footerSocialBtnClasses} {footerSocialTelegramClasses}" aria-label="Join Albion on Telegram">
-								<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-									<path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
-								</svg>
-							</a>
+													<input type="hidden" name="ml-submit" value="1" />
+													<input type="hidden" name="anticsrf" value="true" />
+												</form>
+											{/if}
+									</div>
+									{#if newsletterStatus === 'error'}
+										<div class="py-2 text-left">
+											<p class="text-sm text-red-600">Something went wrong. Please try again.</p>
+										</div>
+									{/if}
+								</div>
+							</div>
 						</div>
+					</div>
+					<div class="mt-3 text-left">
+						<a
+							href="/legal?tab=privacy"
+							target="_blank"
+							rel="noopener noreferrer"
+							class="text-sm text-black opacity-70 underline hover:text-primary"
+						>
+							See our Privacy Policy
+						</a>
 					</div>
 				</div>
 
-				<!-- Right Column: Navigation -->
-				<div class="flex flex-col lg:order-3">
-					<div class="grid grid-cols-2 gap-6 lg:gap-8">
-						<div class="lg:text-right">
-							<h4 class="{footerSectionH4Classes} lg:text-right">Platform</h4>
-							<ul class="{footerSectionUlClasses} lg:text-right">
-								<li class={footerSectionLiClasses}><a href="/assets" class={footerSectionLinkClasses}>Browse Assets</a></li>
-								<li class={footerSectionLiClasses}><a href="/portfolio" class={footerSectionLinkClasses}>Portfolio</a></li>
-								<li class={footerSectionLiClasses}><a href="/claims" class={footerSectionLinkClasses}>Claim Payouts</a></li>
-							</ul>
-						</div>
-						<div class="lg:text-right">
-							<h4 class="{footerSectionH4Classes} lg:text-right">Company</h4>
-							<ul class="{footerSectionUlClasses} lg:text-right">
-								<li class={footerSectionLiClasses}><a href="/about" class={footerSectionLinkClasses}>About</a></li>
-								<li class={footerSectionLiClasses}><a href="/support" class={footerSectionLinkClasses}>Support</a></li>
-								<li class={footerSectionLiClasses}><a href="/legal" class={footerSectionLinkClasses}>Legal</a></li>
-							</ul>
-						</div>
+				<div class="mt-6">
+					<h4 class={footerSectionH4Classes}>Connect with us</h4>
+					<div class={footerSocialButtonsClasses}>
+						<a href="https://x.com/albion_labs" target="_blank" rel="noopener noreferrer" class="{footerSocialBtnClasses} {footerSocialTwitterClasses}" aria-label="Follow Albion on X">
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+								<path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+							</svg>
+						</a>
+						<a href="https://t.me/albionlabs" target="_blank" rel="noopener noreferrer" class="{footerSocialBtnClasses} {footerSocialTelegramClasses}" aria-label="Join Albion on Telegram">
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+								<path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+							</svg>
+						</a>
 					</div>
 				</div>
 			</div>
+
+			<!-- Right Column: Navigation -->
+			<div class="flex flex-col lg:order-3">
+				<div class="grid grid-cols-2 gap-6 lg:gap-8">
+					<div class="lg:text-right">
+						<h4 class="{footerSectionH4Classes} lg:text-right">Platform</h4>
+						<ul class="{footerSectionUlClasses} lg:text-right">
+							<li class={footerSectionLiClasses}><a href="/assets" class={footerSectionLinkClasses}>Browse Assets</a></li>
+							<li class={footerSectionLiClasses}><a href="/portfolio" class={footerSectionLinkClasses}>Portfolio</a></li>
+							<li class={footerSectionLiClasses}><a href="/claims" class={footerSectionLinkClasses}>Claim Payouts</a></li>
+						</ul>
+					</div>
+					<div class="lg:text-right">
+						<h4 class="{footerSectionH4Classes} lg:text-right">Company</h4>
+						<ul class="{footerSectionUlClasses} lg:text-right">
+							<li class={footerSectionLiClasses}><a href="/about" class={footerSectionLinkClasses}>About</a></li>
+							<li class={footerSectionLiClasses}><a href="/support" class={footerSectionLinkClasses}>Support</a></li>
+							<li class={footerSectionLiClasses}><a href="/legal" class={footerSectionLinkClasses}>Legal</a></li>
+						</ul>
+					</div>
+				</div>
+			</div>
+			</div>
 		</div>
-    </footer>
+	</footer>
 </div>
 
 <style>

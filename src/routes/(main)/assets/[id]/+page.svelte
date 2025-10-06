@@ -24,7 +24,6 @@
     import { formatEther } from 'viem';
 import { PINATA_GATEWAY } from '$lib/network';
 import { catalogService } from '$lib/services';
-import { onMount } from 'svelte';
 import { getTokenTermsPath } from '$lib/utils/tokenTerms';
 
 type RevenueReport = {
@@ -145,6 +144,10 @@ function addDays(date: Date, days: number): Date {
 }
 //
 
+const metricCardClasses = 'text-center p-4 bg-white border border-light-gray rounded-lg';
+const metricValueClasses = 'text-3xl font-extrabold text-black mb-2';
+const metricLabelClasses = 'text-sm font-medium text-black opacity-70';
+
 	let activeTab = 'overview';
 	let unclaimedPayout = 0; // Will be calculated from actual token holdings
 	
@@ -165,6 +168,7 @@ let revenueReportsWithIncome: RevenueReport[] = [];
 let revenueChartData: Array<{ label: string; value: number }> = [];
 let latestRevenueReport: RevenueReport | null = null;
 let revenueAverage = 0;
+let revenueTotal = 0;
 let revenueHasData = false;
 let nextReportDue: Date | null = null;
 let revenueSignature = '';
@@ -211,8 +215,9 @@ $: revenueReports = buildRevenueReports(receiptsData, assetData?.monthlyReports 
 $: revenueReportsWithIncome = revenueReports.filter((report) => report.revenue > 0);
 $: revenueHasData = revenueReportsWithIncome.length > 0;
 $: revenueAverage = revenueReportsWithIncome.length
-	? revenueReportsWithIncome.reduce((sum, report) => sum + report.revenue, 0) / revenueReportsWithIncome.length
-	: 0;
+    ? revenueReportsWithIncome.reduce((sum, report) => sum + report.revenue, 0) / revenueReportsWithIncome.length
+    : 0;
+$: revenueTotal = revenueReportsWithIncome.reduce((sum, report) => sum + report.revenue, 0);
 $: latestRevenueReport = revenueReports.length
 	? revenueReports[revenueReports.length - 1]
 	: null;
@@ -338,17 +343,46 @@ $: {
 let showEmailPopup = false; // legacy modal (to be removed)
 // Future releases flip state
 let futureCardFlipped = false;
+let futureSignupSubmitting = false;
+let futureSignupStatus: 'idle' | 'success' | 'error' = 'idle';
 
-onMount(() => {
-    // Redirect to local thank-you page on successful MailerLite submit for Future Releases form
-    (window as any).ml_webform_success_30848422 = function () {
-        try {
-            window.location.assign('/thank-you?source=releases');
-        } catch {
-            // no-op
+async function handleFutureSignupSubmit(event: SubmitEvent) {
+    event.preventDefault();
+    if (futureSignupSubmitting) return;
+
+    futureSignupSubmitting = true;
+    futureSignupStatus = 'idle';
+
+    const form = event.currentTarget as HTMLFormElement;
+    const formData = new FormData(form);
+
+    try {
+        const response = await fetch(form.action, {
+            method: 'POST',
+            body: formData,
+            headers: { Accept: 'application/json' }
+        });
+
+        if (response.ok) {
+            futureSignupStatus = 'success';
+            try {
+                form.reset();
+            } catch {}
+        } else {
+            futureSignupStatus = 'error';
         }
-    };
-});
+    } catch (error) {
+        console.error('Future releases signup failed:', error);
+        futureSignupStatus = 'error';
+    } finally {
+        futureSignupSubmitting = false;
+        if (typeof window !== 'undefined' && (window as any).grecaptcha) {
+            try {
+                (window as any).grecaptcha.reset();
+            } catch {}
+        }
+    }
+}
 
 	// No custom reCAPTCHA flow; use hosted MailerLite form
 	
@@ -754,45 +788,45 @@ function closeHistoryModal() {
 								</div>
 							</div>
 
-							<div class="bg-white border border-light-gray p-6">
-								<h4 class="text-lg font-extrabold text-black mb-6">Production Metrics</h4>
-								<div class="text-center mb-6 p-4 bg-white">
-									<div class="text-4xl font-extrabold text-black mb-2">
+						<div class="bg-white border border-light-gray p-6">
+							<h4 class="text-lg font-extrabold text-black mb-6">Production Metrics</h4>
+							<div class="mb-6">
+								<div class={metricCardClasses}>
+									<div class={metricValueClasses}>
 										{#if assetData?.operationalMetrics?.uptime?.percentage !== undefined}
 											{assetData.operationalMetrics.uptime.percentage.toFixed(1)}%
 										{:else}
 											<span class="text-gray-400">N/A</span>
 										{/if}
 									</div>
-									<div class="text-base font-medium text-black opacity-70">
+									<div class={metricLabelClasses}>
 										Uptime {assetData?.operationalMetrics?.uptime?.period?.replace('_', ' ') || 'N/A'}
 									</div>
 								</div>
-								<div class="grid grid-cols-1 gap-4 mb-6">
-									<div class="text-center p-3 bg-white">
-										<div class="text-3xl font-extrabold text-black mb-1">
-											{#if (() => { const list = productionReports || []; return list.length > 0 && list[list.length-1]?.production !== undefined; })()}
-												{(() => { const list = productionReports || []; const last = list[list.length-1]; const val = (last.production || 0) * 12 / 365; return val.toFixed(1); })()}
-											{:else}
-												<span class="text-gray-400">N/A</span>
-											{/if}
-										</div>
-										<div class="text-sm font-medium text-black opacity-70">
-											Current Daily Production (BOE/day)
-										</div>
-									</div>
-								</div>
-								<div class="text-center p-4 bg-white">
-									<div class="text-4xl font-extrabold text-black mb-2">
-										{#if assetData?.operationalMetrics?.hseMetrics?.incidentFreeDays !== undefined}
-											{assetData.operationalMetrics.hseMetrics.incidentFreeDays}
+							</div>
+							<div class="grid grid-cols-1 gap-4 mb-6">
+								<div class={metricCardClasses}>
+									<div class={metricValueClasses}>
+										{#if (() => { const list = productionReports || []; return list.length > 0 && list[list.length-1]?.production !== undefined; })()}
+											{(() => { const list = productionReports || []; const last = list[list.length - 1]; const val = (last.production || 0) * 12 / 365; return val.toFixed(1); })()}
 										{:else}
 											<span class="text-gray-400">N/A</span>
 										{/if}
 									</div>
-									<div class="text-base font-medium text-black opacity-70">Days Since Last HSE Incident</div>
+									<div class={metricLabelClasses}>Current Daily Production (BOE/day)</div>
 								</div>
 							</div>
+							<div class={metricCardClasses}>
+								<div class={metricValueClasses}>
+									{#if assetData?.operationalMetrics?.hseMetrics?.incidentFreeDays !== undefined}
+										{assetData.operationalMetrics.hseMetrics.incidentFreeDays}
+									{:else}
+										<span class="text-gray-400">N/A</span>
+									{/if}
+								</div>
+								<div class={metricLabelClasses}>Days Since Last HSE Incident</div>
+							</div>
+						</div>
 						</div>
 					</div>
 		{:else if activeTab === 'payments'}
@@ -828,31 +862,47 @@ function closeHistoryModal() {
 
 							<div class="bg-white border border-light-gray p-6">
 								<h4 class="text-lg font-extrabold text-black mb-6">Revenue Metrics</h4>
-								<div class="text-center mb-6 p-4 bg-white">
-									<div class="text-4xl font-extrabold text-black mb-2">{nextReportDue ? formatDueDate(nextReportDue) : 'TBD'}</div>
-									<div class="text-base font-medium text-black opacity-70">Next Report Due</div>
+								<div class="mb-6">
+									<div class={metricCardClasses}>
+										<div class={metricValueClasses}>{nextReportDue ? formatDueDate(nextReportDue) : 'TBD'}</div>
+										<div class={metricLabelClasses}>Next Revenue Report Due</div>
+									</div>
 								</div>
 								<div class="grid grid-cols-1 gap-4 mb-6">
-									<div class="text-center p-3 bg-white">
-										<div class="text-3xl font-extrabold text-black mb-1">
+									<div class={metricCardClasses}>
+										<div class={metricValueClasses}>
 											{#if latestRevenueReport}
 												{formatCurrency(latestRevenueReport.revenue)}
 											{:else}
 												<span class="text-gray-400">N/A</span>
 											{/if}
 										</div>
-										<div class="text-sm font-medium text-black opacity-70">Latest Monthly Revenue</div>
+										<div class={metricLabelClasses}>Latest Monthly Revenue</div>
+									</div>
+									<div class={metricCardClasses}>
+										<div class={metricValueClasses}>
+											{#if revenueTotal > 0}
+												{formatCurrency(revenueTotal)}
+											{:else}
+												<span class="text-gray-400">N/A</span>
+											{/if}
+										</div>
+										<div class={metricLabelClasses}>Total Revenue to Date</div>
 									</div>
 								</div>
-								<div class="text-center p-4 bg-white">
-									<div class="text-4xl font-extrabold text-black mb-2">
+								<div class={metricCardClasses}>
+									<div class={metricValueClasses}>
 										{#if revenueAverage > 0}
 											{formatCurrency(revenueAverage)}
 										{:else}
 											<span class="text-gray-400">N/A</span>
 										{/if}
 									</div>
-									<div class="text-base font-medium text-black opacity-70">Avg Monthly Revenue</div>
+									<div class={metricLabelClasses}>Average Monthly Revenue</div>
+								</div>
+								<div class={metricCardClasses}>
+									<div class={metricValueClasses}>{latestRevenueReport ? formatCurrency(latestRevenueReport.netIncome) : formatCurrency(0)}</div>
+									<div class={metricLabelClasses}>Latest Reported Net Income</div>
 								</div>
 							</div>
 						</div>
@@ -967,7 +1017,7 @@ function closeHistoryModal() {
 										</div>
 										<p class="text-sm text-secondary font-medium break-all tracking-tight opacity-80 font-figtree">{token.contractAddress}</p>
 										{#if tokenTermsUrl}
-											<a href={tokenTermsUrl} target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-sm font-semibold text-secondary no-underline hover:underline mt-2 font-figtree">
+											<a href={tokenTermsUrl} target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-sm font-semibold text-secondary no-underline hover:text-primary mt-2 font-figtree">
 												View terms →
 											</a>
 										{/if}
@@ -1103,7 +1153,7 @@ function closeHistoryModal() {
 															href={`https://raindex.finance/orders/8453-${payout.orderHash}`}
 															target="_blank"
 															rel="noopener noreferrer"
-															class="inline-flex items-center gap-1 hover:underline break-all"
+															class="inline-flex items-center gap-1 no-underline hover:text-primary break-all"
 														>
 															<span>{formatHash(payout.orderHash)}</span>
 															<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -1120,7 +1170,7 @@ function closeHistoryModal() {
 															href={`https://basescan.org/tx/${payout.txHash}`}
 															target="_blank"
 															rel="noopener noreferrer"
-															class="inline-flex items-center gap-1 hover:underline break-all"
+															class="inline-flex items-center gap-1 no-underline hover:text-primary break-all"
 														>
 															<span>{formatHash(payout.txHash)}</span>
 															<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
@@ -1193,51 +1243,79 @@ function closeHistoryModal() {
                       <!-- MailerLite HTML embed form -->
                       <div class="text-left max-w-md w-full mx-auto flex-1 future-notify">
                         <div id="mlb2-30848422" class="ml-form-embedContainer ml-subscribe-form ml-subscribe-form-30848422">
-                          <div class="ml-form-align-center ">
+                          <div class="ml-form-align-center">
                             <div class="ml-form-embedWrapper embedForm">
                               <div class="ml-form-embedBody ml-form-embedBodyDefault row-form">
-                                <form class="ml-block-form" action="https://assets.mailerlite.com/jsonp/1795576/forms/165461032541620178/subscribe" method="post" on:submit={() => { try { sessionStorage.setItem('lastPageBeforeSubscribe', window.location.pathname + window.location.search + window.location.hash); } catch {} }}>
-                                  <div class="ml-form-formContent">
-                                    <div class="ml-form-fieldRow ml-last-item">
-                                      <div class="ml-field-group ml-field-email ml-validate-email ml-validate-required">
-                                        <input aria-label="email" aria-required="true" type="email" name="fields[email]" placeholder="Enter your email address" autocomplete="email" class="form-control w-full px-4 py-3 border border-light-gray bg-white text-black placeholder-black placeholder-opacity-50 focus:outline-none focus:border-primary" required>
+                                {#if futureSignupStatus === 'success'}
+                                  <div class="py-4">
+                                    <p class="text-black font-semibold">Thank you for subscribing.</p>
+                                  </div>
+                                {:else}
+                                  <form
+                                    class="ml-block-form"
+                                    action="https://assets.mailerlite.com/jsonp/1795576/forms/165461032541620178/subscribe"
+                                    method="post"
+                                    on:submit={handleFutureSignupSubmit}
+                                  >
+                                    <div class="ml-form-formContent">
+                                      <div class="ml-form-fieldRow ml-last-item">
+                                        <div class="ml-field-group ml-field-email ml-validate-email ml-validate-required">
+                                          <input
+                                            aria-label="email"
+                                            aria-required="true"
+                                            type="email"
+                                            name="fields[email]"
+                                            placeholder="Enter your email address"
+                                            autocomplete="email"
+                                            class="form-control w-full px-4 py-3 border border-light-gray bg-white text-black placeholder-black placeholder-opacity-50 focus:outline-none focus:border-primary"
+                                            required
+                                          >
+                                        </div>
                                       </div>
                                     </div>
-                                  </div>
-                                  <div class="ml-form-embedPermissions" style="">
-                                    <div class="ml-form-embedPermissionsContent default privacy-policy">
-                                      <p class="text-base sm:text-lg text-black opacity-70 mb-6 leading-relaxed">You can unsubscribe anytime. For more details, review our Privacy Policy.</p>
+                                    <div class="ml-form-embedPermissions">
+                                      <div class="ml-form-embedPermissionsContent default privacy-policy">
+                                        <p class="text-base sm:text-lg text-black opacity-70 mb-6 leading-relaxed">Read our privacy policy</p>
                                       </div>
-                                  </div>
-                                  <div class="ml-form-recaptcha ml-validate-required mb-3">
-                                    <script src="https://www.google.com/recaptcha/api.js"></script>
-                                    <div class="g-recaptcha" data-sitekey="6Lf1KHQUAAAAAFNKEX1hdSWCS3mRMv4FlFaNslaD"></div>
-                                  </div>
-                                  <input type="hidden" name="fields[interest]" value={assetId}>
-                                  <input type="hidden" name="ml-submit" value="1">
-                                  <div class="ml-form-embedSubmit">
-                                    <button type="submit" class="w-full px-6 py-3 bg-black text-white font-extrabold text-sm uppercase tracking-wider cursor-pointer transition-colors duration-200 hover:bg-secondary border-0">Subscribe</button>
-                                    <button disabled style="display: none;" type="button" class="loading">
-                                      <div class="ml-form-embedSubmitLoad"></div>
-                                      <span class="sr-only">Loading...</span>
-                                    </button>
-                                  </div>
-                                  <input type="hidden" name="anticsrf" value="true">
-                                </form>
+                                    </div>
+                                    <div class="ml-form-recaptcha ml-validate-required mb-3">
+                                      <script src="https://www.google.com/recaptcha/api.js"></script>
+                                      <div class="g-recaptcha" data-sitekey="6Lf1KHQUAAAAAFNKEX1hdSWCS3mRMv4FlFaNslaD"></div>
+                                    </div>
+                                    <input type="hidden" name="fields[interest]" value={assetId}>
+                                    <input type="hidden" name="ml-submit" value="1">
+                                    <div class="ml-form-embedSubmit">
+                                      <button
+                                        type="submit"
+                                        class="w-full px-6 py-3 bg-black text-white font-extrabold text-sm uppercase tracking-wider cursor-pointer transition-colors duration-200 hover:bg-secondary border-0 disabled:opacity-60 disabled:cursor-not-allowed"
+                                        disabled={futureSignupSubmitting}
+                                      >
+                                        {futureSignupSubmitting ? 'Submitting…' : 'Subscribe'}
+                                      </button>
+                                    </div>
+                                    <input type="hidden" name="anticsrf" value="true">
+                                  </form>
+                                {/if}
                               </div>
-                              <div class="ml-form-successBody row-success" style="display: none">
-                                <div class="ml-form-successContent">
-                                  <h4>Thank you!</h4>
-                                  <p>You have successfully joined our subscriber list.</p>
+                              {#if futureSignupStatus === 'error'}
+                                <div class="py-2">
+                                  <p class="text-sm text-red-600">Something went wrong. Please try again.</p>
                                 </div>
-                              </div>
+                              {/if}
                             </div>
                           </div>
                         </div>
+                        <div class="mt-3">
+                        <a
+                            href="/legal?tab=privacy"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="text-sm text-black opacity-70 underline hover:text-primary"
+                          >
+                            See our Privacy Policy
+                          </a>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                  </div>
                 </CardContent>
                 </Card>
 					{/if}
