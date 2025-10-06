@@ -121,6 +121,32 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 		URL.revokeObjectURL(url);
 	}
 
+	function toNumeric(value: unknown): number {
+		if (typeof value === 'number' && Number.isFinite(value)) {
+			return value;
+		}
+		if (typeof value === 'string' && value.trim().length > 0) {
+			const sanitized = value.replace(/[^0-9+\-\.]+/g, '');
+			const parsed = Number(sanitized);
+			return Number.isFinite(parsed) ? parsed : 0;
+		}
+		if (typeof value === 'bigint') {
+			return Number(value);
+		}
+		return 0;
+	}
+
+	function normalizeMonth(value: unknown): string {
+		if (typeof value !== 'string') return '';
+		const trimmed = value.trim();
+		if (!trimmed) return '';
+		if (/^\d{4}-\d{2}$/.test(trimmed)) {
+			return trimmed;
+		}
+		const match = trimmed.match(/^(\d{4})-(\d{2})/);
+		return match ? `${match[1]}-${match[2]}` : '';
+	}
+
 	function normalizeDate(value: unknown): string {
 		if (value instanceof Date && !Number.isNaN(value.getTime())) {
 			return value.toISOString();
@@ -480,24 +506,65 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 						const pending = totalEarnedForSft - claimedAmountForSft;
 						unclaimedAmountForSft = pending > 0 ? pending : 0;
 					}
-					const productionHistoryRecords = Array.isArray(asset?.productionHistory) && asset.productionHistory.length > 0
-						? asset.productionHistory
-						: (asset?.monthlyReports || []);
-					const totalHistoricalProduction = productionHistoryRecords.reduce((sum: number, record: any) => {
-						const volume = Number(record?.production ?? 0);
-						return sum + (Number.isFinite(volume) ? volume : 0);
+					const plannedProjections = Array.isArray(asset?.plannedProduction?.projections)
+						? asset.plannedProduction.projections
+						: [];
+					const receiptsRecords = Array.isArray(asset?.receiptsData)
+						? asset.receiptsData
+						: [];
+					const payoutMonths = Array.isArray(pinnedMetadata?.payoutData)
+						? pinnedMetadata.payoutData
+							.map((p: any) => normalizeMonth(p?.month))
+							.filter((month: string) => month.length > 0)
+						: [];
+					let earliestObservedMonth = '';
+					if (payoutMonths.length > 0) {
+						earliestObservedMonth = payoutMonths.sort()[0];
+					}
+					if (!earliestObservedMonth) {
+						const receiptMonths = receiptsRecords
+							.map((entry: any) => normalizeMonth(entry?.month))
+							.filter((month: string) => month.length > 0);
+						if (receiptMonths.length > 0) {
+							earliestObservedMonth = receiptMonths.sort()[0];
+						}
+					}
+					const hasRelevantReceipts = receiptsRecords.some((entry: any) => {
+						const month = normalizeMonth(entry?.month);
+						return !earliestObservedMonth || (month && month >= earliestObservedMonth);
+					});
+					const receiptsProductionTotal = receiptsRecords.reduce((sum: number, entry: any) => {
+						const month = normalizeMonth(entry?.month);
+						if (!earliestObservedMonth || (month && month >= earliestObservedMonth)) {
+							const value = entry?.assetData?.production ?? entry?.production;
+							return sum + toNumeric(value ?? 0);
+						}
+						return sum;
 					}, 0);
-					const totalForecastProduction = asset?.plannedProduction?.projections?.reduce((sum: number, projection: any) => {
-						const volume = Number(projection?.production ?? 0);
-						return sum + (Number.isFinite(volume) ? volume : 0);
-					}, 0) ?? 0;
-					const totalExpectedProduction = totalHistoricalProduction + Math.max(totalForecastProduction, 0);
+					const plannedFromStart = plannedProjections.reduce((sum: number, projection: any) => {
+						const month = normalizeMonth(projection?.month);
+						if (!earliestObservedMonth || (month && month >= earliestObservedMonth)) {
+							return sum + toNumeric(projection?.production ?? 0);
+						}
+						return sum;
+					}, 0);
+					console.log('[Portfolio] Depletion calc', {
+						assetId: sft.id,
+						assetName: asset?.assetName,
+						earliestObservedMonth,
+						receiptsProductionTotal,
+						plannedFromStart,
+						receiptsCount: receiptsRecords.length,
+						plannedCount: plannedProjections.length,
+						hasRelevantReceipts,
+					});
 					let assetDepletionPercentage: number | null = null;
 
-					if (totalExpectedProduction > 0) {
-						const rawDepletion = Math.min((totalHistoricalProduction / totalExpectedProduction) * 100, 100);
+					if (plannedFromStart > 0) {
+						const numeratorSource = hasRelevantReceipts ? receiptsProductionTotal : 0;
+						const rawDepletion = Math.min((numeratorSource / plannedFromStart) * 100, 100);
 						assetDepletionPercentage = rawDepletion;
-						if (totalHistoricalProduction > 0 && rawDepletion > 0 && rawDepletion < 0.1) {
+						if (numeratorSource > 0 && rawDepletion > 0 && rawDepletion < 0.1) {
 							assetDepletionPercentage = 0.1;
 						}
 					}
