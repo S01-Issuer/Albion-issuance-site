@@ -25,11 +25,15 @@
 	};
 	
 	const variantClasses = {
-		primary: 'bg-black text-white border-black hover:bg-secondary focus:outline-primary focus:outline-2 focus:outline-offset-2',
-		secondary: 'bg-white text-black border-black hover:bg-primary hover:text-white hover:border-primary focus:outline-primary focus:outline-2 focus:outline-offset-2'
+		primary:
+			'bg-black text-white border-black hover:bg-secondary focus:outline-primary focus:outline-2 focus:outline-offset-2',
+		secondary:
+			'bg-white text-black border-black hover:bg-primary hover:text-white hover:border-primary focus:outline-primary focus:outline-2 focus:outline-offset-2'
 	};
-	
-	$: classes = `inline-flex items-center justify-center font-semibold uppercase tracking-wide cursor-pointer transition-all duration-200 border-2 whitespace-nowrap relative overflow-hidden appearance-none font-figtree active:translate-y-px ${sizeClasses[size]} ${variantClasses[variant]} ${fullWidth ? 'w-full' : ''} ${disabled ? 'opacity-50 cursor-not-allowed pointer-events-none hover:bg-inherit hover:text-inherit hover:border-inherit' : ''}`.trim();
+
+	const disabledClasses = 'disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none disabled:bg-gray-200 disabled:border-gray-300 disabled:text-gray-500 disabled:hover:bg-gray-200 disabled:hover:text-gray-500 disabled:hover:border-gray-300 disabled:focus:outline-none disabled:active:translate-y-0';
+
+	$: classes = `inline-flex items-center justify-center font-semibold uppercase tracking-wide cursor-pointer transition-all duration-200 border-2 whitespace-nowrap relative overflow-hidden appearance-none font-figtree active:translate-y-px ${sizeClasses[size]} ${variantClasses[variant]} ${fullWidth ? 'w-full' : ''} ${disabledClasses}`.trim();
 </script>
 
 {#if href && !disabled}

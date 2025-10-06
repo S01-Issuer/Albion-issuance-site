@@ -213,7 +213,7 @@
 							<div class={tokenButtonLeftClasses}>
 								<div class="flex items-center gap-2 w-full">
 									<span class={tokenSymbolClasses}>{tokenItem.symbol}</span>
-									<span class="text-xs font-extrabold text-white bg-secondary px-2 py-1 tracking-wider rounded whitespace-nowrap">{tokenItem.sharePercentage ? `${tokenItem.sharePercentage}%` : shareOfAsset} of Asset</span>
+									<span class="text-xs font-extrabold text-white bg-secondary px-2 py-1 tracking-wider rounded-none whitespace-nowrap">{tokenItem.sharePercentage ? `${tokenItem.sharePercentage}%` : shareOfAsset} of Asset</span>
 								</div>
 								<span class={tokenNameClasses}>{tokenItem.releaseName}</span>
 								<span class={tokenPaymentDateClasses}>First payment: {firstPaymentMonth}</span>

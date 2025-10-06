@@ -202,7 +202,7 @@ let tokenTermsUrl: string | null = null;
 		dispatch('close');
 	}
 
-	function handleBackdropClick(event: MouseEvent) {
+	function handleBackdropPointerDown(event: PointerEvent) {
 		if (event.target === event.currentTarget) {
 			closeWidget();
 		}
@@ -261,7 +261,7 @@ let tokenTermsUrl: string | null = null;
 
 <!-- Widget Overlay -->
 {#if isOpen}
-	<div class={overlayClasses} on:click={handleBackdropClick} on:keydown={handleKeydown} role="dialog" aria-modal="true" tabindex="-1" transition:fade={{ duration: 200 }}>
+	<div class={overlayClasses} on:pointerdown={handleBackdropPointerDown} on:keydown={handleKeydown} role="dialog" aria-modal="true" tabindex="-1" transition:fade={{ duration: 200 }}>
 		<div class={containerClasses} transition:fly={{ x: 500, duration: 300 }}>
 			<!-- Header -->
 			<div class={headerClasses}>
@@ -345,7 +345,7 @@ let tokenTermsUrl: string | null = null;
 								<label class={formLabelClasses} for="amount">Investment Amount</label>
 								<span class={usdcBadgeClasses}>
 									With
-									<img src="/assets/usdc.svg" alt="USDC" class={usdcIconClasses} loading="lazy" />
+									<img src="/images/USDC.png" alt="USDC" class={usdcIconClasses} loading="lazy" />
 								</span>
 							</div>
 							<input 

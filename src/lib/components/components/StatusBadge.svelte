@@ -27,7 +27,7 @@
 		pending: 'bg-gray-100 text-gray-600 border border-gray-300'
 	};
 	
-	$: classes = `inline-flex items-center gap-1 font-bold uppercase tracking-wide rounded whitespace-nowrap hover:brightness-95 ${sizeClasses[size]} ${variantClasses[computedVariant]} ${animated && computedVariant === 'producing' ? 'relative overflow-hidden' : ''}`;
+	$: classes = `inline-flex items-center gap-1 font-bold uppercase tracking-wide whitespace-nowrap rounded-none ${sizeClasses[size]} ${variantClasses[computedVariant]} ${animated && computedVariant === 'producing' ? 'relative overflow-hidden' : ''}`;
 	
 	// Additional Tailwind class mappings
 	$: shineEffectClasses = 'absolute top-0 left-[-100%] w-full h-full bg-gradient-to-r from-transparent via-white/40 to-transparent animate-[shine_2s_infinite] motion-reduce:animate-none';
@@ -67,4 +67,3 @@
 	{/if}
 	{uppercase ? (status || '').toUpperCase() : (status || '')}
 </span>
-

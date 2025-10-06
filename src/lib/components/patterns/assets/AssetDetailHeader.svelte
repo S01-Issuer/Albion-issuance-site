@@ -187,7 +187,7 @@
 				value={(() => {
 					const lastReport = asset?.monthlyReports?.[asset.monthlyReports.length - 1];
 					return lastReport?.revenue !== undefined && lastReport.revenue > 0
-						? formatCurrency(lastReport.revenue)
+						? formatCurrency(lastReport.revenue, { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 						: 'N/A';
 				})()}
 				subtitle={(() => {

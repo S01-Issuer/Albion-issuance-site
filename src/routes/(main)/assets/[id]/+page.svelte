@@ -145,8 +145,8 @@ function addDays(date: Date, days: number): Date {
 //
 
 const metricCardClasses = 'text-center p-4 bg-white border border-light-gray rounded-lg';
-const metricValueClasses = 'text-3xl font-extrabold text-black mb-2';
-const metricLabelClasses = 'text-sm font-medium text-black opacity-70';
+const metricValueClasses = 'text-2xl font-extrabold text-black mb-1';
+const metricLabelClasses = 'text-xs font-medium text-black opacity-70';
 
 	let activeTab = 'overview';
 	let unclaimedPayout = 0; // Will be calculated from actual token holdings
@@ -871,18 +871,8 @@ function closeHistoryModal() {
 								<div class="grid grid-cols-1 gap-4 mb-6">
 									<div class={metricCardClasses}>
 										<div class={metricValueClasses}>
-											{#if latestRevenueReport}
-												{formatCurrency(latestRevenueReport.revenue)}
-											{:else}
-												<span class="text-gray-400">N/A</span>
-											{/if}
-										</div>
-										<div class={metricLabelClasses}>Latest Monthly Revenue</div>
-									</div>
-									<div class={metricCardClasses}>
-										<div class={metricValueClasses}>
 											{#if revenueTotal > 0}
-												{formatCurrency(revenueTotal)}
+												{formatCurrency(revenueTotal, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
 											{:else}
 												<span class="text-gray-400">N/A</span>
 											{/if}
@@ -893,16 +883,12 @@ function closeHistoryModal() {
 								<div class={metricCardClasses}>
 									<div class={metricValueClasses}>
 										{#if revenueAverage > 0}
-											{formatCurrency(revenueAverage)}
+											{formatCurrency(revenueAverage, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
 										{:else}
 											<span class="text-gray-400">N/A</span>
 										{/if}
 									</div>
 									<div class={metricLabelClasses}>Average Monthly Revenue</div>
-								</div>
-								<div class={metricCardClasses}>
-									<div class={metricValueClasses}>{latestRevenueReport ? formatCurrency(latestRevenueReport.netIncome) : formatCurrency(0)}</div>
-									<div class={metricLabelClasses}>Latest Reported Net Income</div>
 								</div>
 							</div>
 						</div>

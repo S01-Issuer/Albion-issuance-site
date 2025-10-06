@@ -164,75 +164,107 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 		URL.revokeObjectURL(url);
 	}
 
-	function getTimestampValue(value: string): number {
-		if (!value) return 0;
-		const parsed = Date.parse(value);
-		return Number.isNaN(parsed) ? 0 : parsed;
-	}
-
 	function exportPortfolioHistory() {
-		const rows: Array<Record<string, string>> = [];
-		const assetNameByAddress = new Map<string, string>();
-		for (const holding of holdings) {
-			if (holding?.sftAddress) {
-				assetNameByAddress.set(String(holding.sftAddress).toLowerCase(), holding.name);
-			}
-		}
-
-		for (const deposit of allDepositsData || []) {
-			try {
-				const amountRaw = deposit?.amount ?? '0';
-				const amountWei = typeof amountRaw === 'bigint' ? amountRaw : BigInt(amountRaw);
-				const amountUsdcNumber = Number(formatEther(amountWei));
-				const amountUsdc = Number.isFinite(amountUsdcNumber) ? amountUsdcNumber : 0;
-				const assetId = deposit?.sftAddress ? String(deposit.sftAddress).toLowerCase() : deposit?.offchainAssetReceiptVault?.id?.toLowerCase();
-				const assetName = deposit?.sftName || (assetId ? assetNameByAddress.get(assetId) : '') || 'Unknown Asset';
-				const date = normalizeDate(deposit?.timestamp || deposit?.createdAt || deposit?.updatedAt);
-				rows.push({
-					type: 'deposit',
-					asset: assetName,
-					date,
-					amount_usdc: amountUsdc.toFixed(2),
-					tokens: amountUsdc.toFixed(4),
-					tx_hash: deposit?.transactionHash || deposit?.txHash || '',
-					status: 'completed',
-					reference: deposit?.id || ''
-				});
-			} catch (error) {
-				console.error('Failed to format deposit for export:', error);
-			}
-		}
-
-		for (const claim of claimHistory || []) {
-			const amount = Number(claim?.amount ?? 0);
-			const safeAmount = Number.isFinite(amount) ? amount : 0;
-			const status = claim?.status || 'completed';
-			const assetName = claim?.asset || claim?.fieldName || 'Unknown Asset';
-			const date = normalizeDate(claim?.date);
-			rows.push({
-				type: 'claim',
-				asset: assetName,
-				date,
-				amount_usdc: safeAmount.toFixed(2),
-				tokens: '',
-				tx_hash: claim?.txHash || claim?.transactionHash || '',
-				status,
-				reference: claim?.orderHash || claim?.id || ''
-			});
-		}
-
-		if (rows.length === 0) {
-			alert('No portfolio history available to export yet.');
+		const activeHoldings = (holdings || []).filter((holding) => Number.isFinite(holding?.tokensOwned) && holding.tokensOwned > 0);
+		if (activeHoldings.length === 0) {
+			alert('No token holdings available to export yet.');
 			return;
 		}
 
-		rows.sort((a, b) => getTimestampValue(b.date) - getTimestampValue(a.date));
-		const headers = ['type', 'asset', 'date', 'amount_usdc', 'tokens', 'tx_hash', 'status', 'reference'];
+		const toCurrency = (value: unknown): string => {
+			if (value === null || value === undefined) return '0.00';
+			const numeric = Number(value);
+			return Number.isFinite(numeric) ? numeric.toFixed(2) : '0.00';
+		};
+
+		const toTokens = (value: unknown): string => {
+			if (value === null || value === undefined) return '0.000';
+			const numeric = Number(value);
+			return Number.isFinite(numeric) ? numeric.toFixed(3) : '0.000';
+		};
+
+		const toPercent = (value: unknown, allowBlank = false): string => {
+			if (value === null || value === undefined) {
+				return allowBlank ? '' : '0.00';
+			}
+			const numeric = Number(value);
+			if (!Number.isFinite(numeric)) {
+				return allowBlank ? '' : '0.00';
+			}
+			return numeric.toFixed(2);
+		};
+
+		const totalInvestedAcrossHoldings = activeHoldings.reduce((sum: number, holding: any) => {
+			const value = Number(holding?.totalInvested ?? 0);
+			return sum + (Number.isFinite(value) ? value : 0);
+		}, 0);
+
+		const headers = [
+			'asset',
+			'token_symbol',
+			'share_percentage',
+			'tokens_owned',
+			'allocation_percent',
+			'status',
+			'location',
+			'total_invested_usdc',
+			'total_earned_usdc',
+			'claimed_usdc',
+			'unclaimed_usdc',
+			'capital_returned_percent',
+			'unrecovered_capital_usdc',
+			'last_payout_usdc',
+			'last_payout_date',
+			'asset_depletion_percent',
+			'token_contract'
+		];
+
+		const rows = activeHoldings.map((holding: any) => {
+			const sharePercentage = typeof holding?.pinnedMetadata?.sharePercentage === 'number'
+				? holding.pinnedMetadata.sharePercentage
+				: typeof holding?.asset?.sharePercentage === 'number'
+				? holding.asset.sharePercentage
+				: typeof holding?.asset?.assetTerms?.sharePercentage === 'number'
+				? holding.asset.assetTerms.sharePercentage
+				: null;
+
+			const allocationPercent = totalInvestedAcrossHoldings > 0
+				? ((Number(holding?.totalInvested) || 0) / totalInvestedAcrossHoldings) * 100
+				: 0;
+
+			const location = holding?.asset?.location
+				? [holding.asset.location.state, holding.asset.location.country].filter(Boolean).join(', ')
+				: (holding?.location || '');
+
+			return {
+				asset: holding?.asset?.assetName || holding?.name || 'Unknown Asset',
+				token_symbol: holding?.tokenSymbol || '',
+				share_percentage: toPercent(sharePercentage, true),
+				tokens_owned: toTokens(holding?.tokensOwned),
+				allocation_percent: toPercent(allocationPercent),
+				status: holding?.status || '',
+				location,
+				total_invested_usdc: toCurrency(holding?.totalInvested),
+				total_earned_usdc: toCurrency(holding?.totalPayoutsEarned),
+				claimed_usdc: toCurrency(holding?.claimedAmount),
+				unclaimed_usdc: toCurrency(holding?.unclaimedAmount),
+				capital_returned_percent: toPercent(holding?.capitalReturned),
+				unrecovered_capital_usdc: toCurrency(holding?.unrecoveredCapital),
+				last_payout_usdc: toCurrency(holding?.lastPayoutAmount),
+				last_payout_date: holding?.lastPayoutDate ? normalizeDate(holding.lastPayoutDate) : '',
+				asset_depletion_percent: toPercent(holding?.assetDepletion, true),
+				token_contract: holding?.sftAddress || ''
+			};
+		});
+
+		rows.sort((a, b) => a.asset.localeCompare(b.asset));
+
 		const csvLines = [headers.join(',')];
 		for (const row of rows) {
-			csvLines.push(headers.map((header) => toCsvValue(row[header] ?? '')).join(','));
+			csvLines.push(headers.map((header) => toCsvValue((row as Record<string, string>)[header])).join(','));
 		}
-		const filename = `albion-portfolio-history-${new Date().toISOString().split('T')[0]}.csv`;
+
+		const filename = `albion-portfolio-holdings-${new Date().toISOString().split('T')[0]}.csv`;
 		downloadCsvFile(filename, csvLines.join('\n'));
 	}
 
@@ -459,9 +491,16 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 						const volume = Number(projection?.production ?? 0);
 						return sum + (Number.isFinite(volume) ? volume : 0);
 					}, 0) ?? 0;
-					const assetDepletionPercentage = totalForecastProduction > 0
-						? Math.min((totalHistoricalProduction / totalForecastProduction) * 100, 100)
-						: null;
+					const totalExpectedProduction = totalHistoricalProduction + Math.max(totalForecastProduction, 0);
+					let assetDepletionPercentage: number | null = null;
+
+					if (totalExpectedProduction > 0) {
+						const rawDepletion = Math.min((totalHistoricalProduction / totalExpectedProduction) * 100, 100);
+						assetDepletionPercentage = rawDepletion;
+						if (totalHistoricalProduction > 0 && rawDepletion > 0 && rawDepletion < 0.1) {
+							assetDepletionPercentage = 0.1;
+						}
+					}
 					
 					// Only add to holdings if user actually owns tokens
 					if(pinnedMetadata && tokensOwned > 0) {
@@ -723,8 +762,8 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 														<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-2 h-8">
 															Tokens
 														</div>
-														<div class="text-lg lg:text-xl font-extrabold text-black">
-															{formatNumber(holding.tokensOwned)}
+										<div class="text-lg lg:text-xl font-extrabold text-black">
+											{formatNumber(holding.tokensOwned, { decimals: 3 })}
 														</div>
 														<div class="text-xs lg:text-sm text-black opacity-70">
 															<FormattedNumber value={holding.totalInvested} type="currency" compact={true} />
@@ -824,7 +863,7 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 										<div class="grid grid-cols-2 gap-4 sm:gap-6">
 											<div>
 												<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-1">Tokens</div>
-												<div class="text-lg font-extrabold text-black">{formatNumber(historyModalHolding.tokensOwned)}</div>
+												<div class="text-lg font-extrabold text-black">{formatNumber(historyModalHolding.tokensOwned, { decimals: 3 })}</div>
 											</div>
 											<div>
 												<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-1">Total Invested</div>
@@ -1166,8 +1205,8 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 											</div>
 											<div>
 												<div class="font-extrabold text-black text-sm">{allocation.assetName}</div>
-												<div class="text-xs text-black opacity-70">
-													{allocation.tokenSymbol} • {formatNumber(allocation.tokensOwned)} tokens
+											<div class="text-xs text-black opacity-70">
+												{allocation.tokenSymbol} • {formatNumber(allocation.tokensOwned, { decimals: 3 })} tokens
 												</div>
 											</div>
 										</div>
