@@ -8,19 +8,8 @@ import { sfts, sftMetadata } from "$lib/stores";
 import { formatEther } from "viem";
 import { formatSmartNumber } from "$lib/utils/formatters";
 import { decodeSftInformation } from "$lib/decodeMetadata/helpers";
-import { generateAssetInstanceFromSftMeta } from "$lib/decodeMetadata/addSchemaToReceipts";
 import { ENERGY_FIELDS } from "$lib/network";
-import type { TokenMetadata } from "$lib/types/MetaboardTypes";
-
-interface PlatformStatsState {
-  totalAssets: number;
-  totalInvested: number;
-  activeInvestors: number;
-  totalRegions: number;
-  monthlyGrowthRate: number;
-  loading: boolean;
-  error: string | null;
-}
+import type { PinnedMetadata } from "$lib/types/PinnedMetadata";
 
 /**
  * Composable for platform statistics that uses sfts data
@@ -53,7 +42,6 @@ export function usePlatformStats() {
 
         // Collect unique addresses across ENERGY_FIELDS contracts only
         const uniqueHolders = new Set<string>();
-        const holderDetails = new Map<string, string[]>(); // Map of holder address to array of contract addresses
 
         $sfts.forEach((sft) => {
           // Only process SFTs that are in ENERGY_FIELDS
@@ -73,30 +61,10 @@ export function usePlatformStats() {
                 uniqueHolders.add(holderAddr);
 
                 // Track which contracts this holder has tokens in
-                if (!holderDetails.has(holderAddr)) {
-                  holderDetails.set(holderAddr, []);
-                }
-                holderDetails.get(holderAddr)!.push(sft.address || sft.id);
               }
             });
           }
         });
-
-        // Log all unique holders with their contract holdings
-        console.log(
-          `Total unique investors (ENERGY_FIELDS only): ${uniqueHolders.size}`,
-        );
-        console.log("Investor details:");
-        holderDetails.forEach((contracts, holder) => {
-          console.log(`  ${holder}:`);
-          contracts.forEach((contract) => {
-            console.log(`    - ${contract}`);
-          });
-        });
-        console.log(
-          "Valid ENERGY_FIELDS tokens:",
-          Array.from(validTokenAddresses),
-        );
 
         const totalTokenHolders = uniqueHolders.size;
 
@@ -104,9 +72,9 @@ export function usePlatformStats() {
         const totalAssets = ENERGY_FIELDS.length;
 
         // Decode metadata to get country information
-        const decodedMeta = $sftMetadata.map(
-          (metaV1) => decodeSftInformation(metaV1) as TokenMetadata,
-        );
+        const decodedMeta = $sftMetadata
+          .map((metaV1) => decodeSftInformation(metaV1))
+          .filter((meta): meta is PinnedMetadata => Boolean(meta));
         const countries = new Set<string>();
 
         // Only process tokens that are in ENERGY_FIELDS
@@ -117,14 +85,10 @@ export function usePlatformStats() {
             if (sft) {
               const pinnedMetadata = decodedMeta.find(
                 (meta) =>
-                  meta?.contractAddress?.toLowerCase() ===
+                  meta.contractAddress?.toLowerCase() ===
                   `0x000000000000000000000000${sft.id.slice(2).toLowerCase()}`,
-              ) as TokenMetadata | undefined;
-              if (
-                pinnedMetadata &&
-                "asset" in pinnedMetadata &&
-                pinnedMetadata.asset
-              ) {
+              );
+              if (pinnedMetadata?.asset) {
                 // Add country to set
                 const country = pinnedMetadata.asset.location?.country;
                 if (country && country.trim() !== "") {

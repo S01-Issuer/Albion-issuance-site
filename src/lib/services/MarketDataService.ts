@@ -21,6 +21,7 @@ interface AlphaVantageResponse {
   interval?: string;
   unit?: string;
   data: CommodityData[];
+  [key: string]: unknown;
 }
 
 interface MarketIndicator {
@@ -42,7 +43,10 @@ interface MarketData {
 }
 
 class MarketDataService {
-  private cache: Map<string, { data: any; timestamp: number }> = new Map();
+  private cache: Map<
+    string,
+    { data: AlphaVantageResponse; timestamp: number }
+  > = new Map();
   private readonly CACHE_DURATION = 1000 * 60 * 60 * 24; // 24 hours
 
   /**
@@ -67,14 +71,22 @@ class MarketDataService {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as AlphaVantageResponse;
 
       // Check if API returned an error
-      if (data["Error Message"] || data["Note"]) {
-        console.error(
-          "AlphaVantage API Error:",
-          data["Error Message"] || data["Note"],
-        );
+      const apiError =
+        typeof data["Error Message"] === "string"
+          ? (data["Error Message"] as string)
+          : undefined;
+      const apiNote =
+        typeof data["Note"] === "string" ? (data["Note"] as string) : undefined;
+
+      if (apiError || apiNote) {
+        console.error("AlphaVantage API Error:", apiError || apiNote);
+        return null;
+      }
+
+      if (!data.data || !Array.isArray(data.data)) {
         return null;
       }
 
@@ -91,7 +103,10 @@ class MarketDataService {
   /**
    * Parse AlphaVantage commodity response and extract latest price with change
    */
-  private parseCommodity(data: any, unit: string): MarketIndicator | null {
+  private parseCommodity(
+    data: AlphaVantageResponse,
+    unit: string,
+  ): MarketIndicator | null {
     if (
       !data ||
       !data.data ||
@@ -102,11 +117,13 @@ class MarketDataService {
     }
 
     // Debug logging
-    console.log(`Parsing ${data.name || "commodity"} data:`, {
-      todayDate: new Date().toISOString().split("T")[0],
-      latestDataDate: data.data[0]?.date,
-      dataPoints: data.data.length,
-    });
+    if (import.meta.env?.DEV) {
+      console.warn(`Parsing ${data.name || "commodity"} data:`, {
+        todayDate: new Date().toISOString().split("T")[0],
+        latestDataDate: data.data[0]?.date,
+        dataPoints: data.data.length,
+      });
+    }
 
     const sortedData = data.data.sort(
       (a: CommodityData, b: CommodityData) =>

@@ -9,14 +9,13 @@ import {
   signContext,
   sortClaimsData,
   type ClaimHistory,
+  type CsvClaimRow,
 } from "$lib/utils/claims";
 import { formatEther, parseEther, type Hex } from "viem";
 import { wagmiConfig } from "svelte-wagmi";
 import { simulateContract, writeContract } from "@wagmi/core";
 import { get } from "svelte/store";
 import orderbookAbi from "$lib/abi/orderbook.json";
-
-type CsvRow = Record<string, unknown>;
 
 type SortClaimsBase = Awaited<ReturnType<typeof sortClaimsData>>;
 type SortedClaimsData = SortClaimsBase & {
@@ -65,7 +64,7 @@ export interface ClaimsResult {
 }
 
 export class ClaimsService {
-  private csvCache = new Map<string, CsvRow[]>();
+  private csvCache = new Map<string, CsvClaimRow[]>();
   private repository = claimsRepository;
 
   /**
@@ -75,7 +74,7 @@ export class ClaimsService {
     csvLink: string,
     expectedMerkleRoot: string,
     expectedContentHash: string,
-  ): Promise<CsvRow[] | null> {
+  ): Promise<CsvClaimRow[] | null> {
     const cached = this.csvCache.get(csvLink);
     if (cached) {
       return cached;

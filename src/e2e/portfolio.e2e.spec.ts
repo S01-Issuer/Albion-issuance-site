@@ -1,14 +1,21 @@
-import { render, screen, waitFor } from "@testing-library/svelte/svelte5";
+import { render, waitFor } from "@testing-library/svelte/svelte5";
 import { vi, describe, it, beforeEach, expect, afterEach } from "vitest";
+import type { Navigation, Page } from "@sveltejs/kit";
 import { sfts, sftMetadata } from "$lib/stores";
 import { claimsCache } from "$lib/stores/claimsCache";
 import { sftRepository } from "$lib/data/repositories/sftRepository";
 import PortfolioPage from "../routes/(main)/portfolio/+page.svelte";
 import { installHttpMocks } from "./http-mock";
+import type { ClaimsResult } from "$lib/services/ClaimsService";
+import type {
+  DepositWithReceipt,
+  MetaV1S,
+  OffchainAssetReceiptVault,
+} from "$lib/types/graphql";
+import type { CatalogData } from "$lib/services/CatalogService";
 
 // Mock app stores - required for routing
 const ADDRESS = "0xf836a500910453a397084ade41321ee20a5aade1";
-const ADDRESS2 = "0xa111111111111111111111111111111111111111";
 const ORDER =
   "0x43ec2493caed6b56cfcbcf3b9279a01aedaafbce509598dfb324513e2d199977";
 const CSV = "bafkreicjcemmypds6d5c4lonwp56xb2ilzhkk7hty3y6fo4nvdkxnaibgu";
@@ -72,7 +79,7 @@ const CLAIMS_RESULT = {
       status: "ready",
     },
   ],
-};
+} as unknown as ClaimsResult;
 
 const SFT_FIXTURE = {
   id: ADDRESS,
@@ -109,49 +116,80 @@ const DEPOSITS_FIXTURE = [
     amount: (102n * 10n ** 18n).toString(),
     offchainAssetReceiptVault: { id: ADDRESS },
   },
-];
+] as unknown as DepositWithReceipt[];
 
 vi.mock("$lib/decodeMetadata/helpers", async () => {
-  const actual = await vi.importActual<any>("$lib/decodeMetadata/helpers");
+  const actual = await vi.importActual<
+    typeof import("$lib/decodeMetadata/helpers")
+  >("$lib/decodeMetadata/helpers");
   return {
     ...actual,
-    decodeSftInformation: vi.fn(() => ({
-      ...MOCK_PINNED_METADATA,
-    })),
+    decodeSftInformation: vi.fn(() => ({ ...MOCK_PINNED_METADATA })),
   };
 });
 
 vi.mock("$lib/services", async () => {
-  const actual = await vi.importActual<any>("$lib/services");
-  const stores = await vi.importActual<any>("$lib/stores");
+  const actual =
+    await vi.importActual<typeof import("$lib/services")>("$lib/services");
+  const stores =
+    await vi.importActual<typeof import("$lib/stores")>("$lib/stores");
   return {
     ...actual,
-    useCatalogService: () => ({
-      build: vi.fn(async () => {
-        stores.sfts.set([SFT_FIXTURE]);
-        stores.sftMetadata.set([METADATA_FIXTURE]);
-      }),
-    }),
-    useClaimsService: () => ({
-      loadClaimsForWallet: vi.fn(async () => CLAIMS_RESULT),
-    }),
+    useCatalogService: (): ReturnType<typeof actual.useCatalogService> => {
+      const catalog = actual.useCatalogService();
+      const originalBuild = catalog.build.bind(catalog);
+
+      vi.spyOn(catalog, "build").mockImplementation(
+        async (): Promise<CatalogData> => {
+          stores.sfts.set([
+            SFT_FIXTURE as unknown as OffchainAssetReceiptVault,
+          ]);
+          stores.sftMetadata.set([METADATA_FIXTURE as unknown as MetaV1S]);
+          return originalBuild();
+        },
+      );
+
+      return catalog;
+    },
+    useClaimsService: (): ReturnType<typeof actual.useClaimsService> => {
+      const claims = actual.useClaimsService();
+      vi.spyOn(claims, "loadClaimsForWallet").mockImplementation(
+        async () => CLAIMS_RESULT,
+      );
+      return claims;
+    },
   };
 });
 
 vi.mock("$app/stores", async () => {
   const { readable } = await import("svelte/store");
+  const page = readable<Page>({
+    url: new URL("http://localhost/portfolio"),
+    params: {},
+    route: { id: null },
+    status: 200,
+    error: null,
+    data: {},
+    state: {} as App.PageState,
+    form: null,
+  });
+
+  const navigating = readable<Navigation | null>(null);
+
+  const baseUpdated = readable(false);
+  const updated = {
+    subscribe: baseUpdated.subscribe,
+    async check() {
+      return false;
+    },
+  };
+
   return {
-    page: readable({
-      url: new URL("http://localhost/portfolio"),
-      params: {},
-      route: {},
-      status: 200,
-      error: null,
-      data: {},
-    }),
-    navigating: readable(null),
-    updated: { subscribe: () => () => {} },
-  } as any;
+    getStores: () => ({ page, navigating, updated }),
+    page,
+    navigating,
+    updated,
+  };
 });
 
 // Mock wagmi with connected wallet
@@ -165,12 +203,18 @@ vi.mock("svelte-wagmi", async () => {
     wagmiConfig: readable({ chains: [], transports: {} }),
     chainId: writable(8453),
     disconnectWagmi: async () => {},
-  } as any;
+    defaultConfig: vi.fn(),
+    configuredConnectors: [],
+    wagmiLoaded: readable(true),
+    init: vi.fn(),
+    WC: {},
+  };
 });
 
 // Mock network config - only mock URLs, not data
 vi.mock("$lib/network", async () => {
-  const actual = await vi.importActual<any>("$lib/network");
+  const actual =
+    await vi.importActual<typeof import("$lib/network")>("$lib/network");
   return {
     ...actual,
     BASE_SFT_SUBGRAPH_URL: "https://example.com/sft",
@@ -237,15 +281,17 @@ describe("Portfolio Page E2E Tests", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    claimsCache.set(WALLET, CLAIMS_RESULT as any);
-    sfts.set([SFT_FIXTURE as any]);
-    sftMetadata.set([METADATA_FIXTURE as any]);
+    claimsCache.set(WALLET, CLAIMS_RESULT);
+    sfts.set([SFT_FIXTURE as unknown as OffchainAssetReceiptVault]);
+    sftMetadata.set([METADATA_FIXTURE as unknown as MetaV1S]);
     depositsSpy = vi
-      .spyOn(
-        sftRepository as unknown as Record<string, any>,
-        "getDepositsForOwner",
-      )
-      .mockResolvedValue(DEPOSITS_FIXTURE as any);
+      .spyOn<
+        typeof sftRepository,
+        "getDepositsForOwner"
+      >(sftRepository, "getDepositsForOwner")
+      .mockResolvedValue(
+        DEPOSITS_FIXTURE as unknown as DepositWithReceipt[],
+      ) as ReturnType<typeof vi.spyOn>;
 
     // Install HTTP mocks for all endpoints
     restore = installHttpMocks({
@@ -339,7 +385,9 @@ describe("Portfolio Page E2E Tests", () => {
             bodyText.includes("Portfolio") ||
             bodyText.includes("ALB-WR1-R1")
           ) {
-            console.log("[PortfolioTest] body:", bodyText);
+            if (import.meta.env?.DEV) {
+              console.warn("[PortfolioTest] body:", bodyText);
+            }
             // Should show holdings section
             expect(bodyText).toMatch(/Holdings|My Holdings/i);
 

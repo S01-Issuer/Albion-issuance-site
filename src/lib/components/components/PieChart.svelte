@@ -1,12 +1,23 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import ChartTooltip from './ChartTooltip.svelte';
 	
-	export let data: Array<{
+	type PieDatum = {
 		label: string;
 		value: number;
 		percentage: number;
-	}> = [];
+	};
+
+	interface PieSegment extends PieDatum {
+		startAngle: number;
+		endAngle: number;
+		midAngle: number;
+		labelX: number;
+		labelY: number;
+		color: string;
+		path: string;
+	}
+
+	export let data: PieDatum[] = [];
 	export let width: number = 300;
 	export let height: number = 300;
 	export let colors: string[] = [
@@ -41,11 +52,12 @@
 	const labelRadius = outerRadius * 0.7;
 	
 	// Calculate pie segments
+	let pieData: PieSegment[] = [];
 	$: pieData = (() => {
 		if (!data || !Array.isArray(data) || data.length === 0) return [];
 		
 		// Filter out invalid data and ensure percentages are valid
-		const validData = data.filter(item => 
+		const validData = data.filter((item) => 
 			item && 
 			typeof item.percentage === 'number' && 
 			!isNaN(item.percentage) && 
@@ -62,7 +74,7 @@
 		// Normalize percentages to ensure they sum to 100
 		const totalPercentage = validData.reduce((sum, item) => sum + item.percentage, 0);
 		const normalizedData = totalPercentage > 0 
-			? validData.map(item => ({ ...item, percentage: (item.percentage / totalPercentage) * 100 }))
+			? validData.map((item) => ({ ...item, percentage: (item.percentage / totalPercentage) * 100 }))
 			: validData;
 		
 		let currentAngle = -Math.PI / 2; // Start at top
@@ -143,7 +155,7 @@
 		`;
 	}
 	
-	function handleMouseMove(event: MouseEvent, segment: any) {
+	function handleMouseMove(event: MouseEvent, segment: PieSegment) {
 		if (!svg) return;
 		
 		const rect = svg.getBoundingClientRect();
@@ -183,7 +195,7 @@
 <div class="relative inline-block">
 	<svg bind:this={svg} {width} {height} xmlns="http://www.w3.org/2000/svg">
 		<!-- Pie segments -->
-		{#each pieData as segment, i}
+		{#each pieData as segment, i (segment.label + i)}
 			<path
 				class="pie-segment cursor-pointer hover:opacity-80 transition-opacity duration-200"
 				d={segment.path}
@@ -195,13 +207,13 @@
 				on:mouseleave={handleMouseLeave}
 				role="button"
 				tabindex="0"
-				aria-label="{segment.label}: {(segment.percentage || 0).toFixed(1)}%"
+				aria-label={`${segment.label}: ${(segment.percentage || 0).toFixed(1)}%`}
 			/>
 		{/each}
 		
 		<!-- Labels on segments -->
 		{#if showLabels}
-			{#each pieData as segment}
+			{#each pieData as segment, i (segment.label + i)}
 				{#if segment.percentage >= 5 && !isNaN(segment.percentage) && segment.percentage != null}
 					<text
 						x={segment.labelX}
@@ -222,14 +234,14 @@
 	</svg>
 	
 	<!-- Legend -->
-	{#if showLegend}
+		{#if showLegend}
 		<div class="mt-4">
 			<div class="flex flex-wrap gap-x-4 gap-y-2 justify-center">
-				{#each pieData as segment}
+				{#each pieData as segment, i (segment.label + i)}
 					<div class="flex items-center gap-2">
 						<div 
 							class="w-3 h-3 rounded-sm flex-shrink-0"
-							style="background-color: {segment.color}"
+							style={`background-color: ${segment.color}`}
 						></div>
 						<span class="text-xs font-medium text-black">
 							{segment.label}
@@ -244,7 +256,7 @@
 	{#if tooltipData.show}
 		<div 
 			class="absolute z-50 bg-black text-white p-3 rounded text-sm pointer-events-none"
-			style="left: {tooltipData.x}px; top: {tooltipData.y - 60}px; transform: translateX(-50%);"
+			style={`left: ${tooltipData.x}px; top: ${tooltipData.y - 60}px; transform: translateX(-50%);`}
 		>
 			<div class="font-bold">{tooltipData.label}</div>
 			<div>{valuePrefix}{(tooltipData.value || 0).toLocaleString()}</div>

@@ -16,57 +16,145 @@
 		StatusBadge,
 		ActionCard,
 		FormattedNumber,
-		CollapsibleSection,
 		Modal
 	} from '$lib/components/components';
 	import { PageLayout, HeroSection, ContentSection, FullWidthSection } from '$lib/components/layout';
-	import { formatCurrency, formatPercentage, formatNumber, formatSmartNumber } from '$lib/utils/formatters';
+	import { formatCurrency, formatPercentage, formatNumber } from '$lib/utils/formatters';
 	import { sftRepository } from '$lib/data/repositories/sftRepository';
 	import { sfts, sftMetadata } from '$lib/stores';
 	import { formatEther } from 'viem';
 	import { goto } from '$app/navigation';
 	import { useTooltip } from '$lib/composables';
 	import { getImageUrl } from '$lib/utils/imagePath';
-	import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
-	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
-	
-	// Tab state
-	let activeTab: 'overview' | 'performance' | 'allocation' = 'overview';
+import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
+import type { ClaimsResult, ClaimsHoldingsGroup } from '$lib/services/ClaimsService';
+import type { ClaimHistory as ClaimsHistoryItem } from '$lib/utils/claims';
+import type { PinnedMetadata } from '$lib/types/PinnedMetadata';
+import type { DepositWithReceipt } from '$lib/types/graphql';
+
+const isDev = import.meta.env.DEV;
+const logDev = (...messages: unknown[]) => {
+	if (isDev) console.warn('[Portfolio]', ...messages);
+};
+
+type PortfolioTab = 'overview' | 'performance' | 'allocation';
+
+interface ClaimGroupSummary {
+	fieldName: string;
+	unclaimedAmount: number;
+	claimedAmount: number;
+	totalEarned: number;
+	holdings: ClaimsHoldingsGroup['holdings'];
+}
+
+type EnrichedDeposit = DepositWithReceipt & {
+	sftAddress?: string;
+	sftName?: string;
+	timestamp?: string;
+};
+
+interface MonthlyPayout {
+	month: string;
+	amount: number;
+	assetName: string;
+	tokenSymbol: string;
+	date: string;
+	txHash: string;
+	payoutPerToken: number;
+}
+
+interface TokenAllocationEntry {
+	assetId: string;
+	assetName: string;
+	tokenSymbol: string;
+	tokensOwned: number;
+	currentValue: number;
+	percentageOfPortfolio: number;
+}
+
+type HistoryPoint = { date: string; value: number };
+type CumulativeHistoryPoint = { label: string; value: number };
+type CapitalWalkPoint = {
+	date: string;
+	cumulativeMints: number;
+	cumulativePayouts: number;
+	netPosition: number;
+	monthlyMint: number;
+	monthlyPayout: number;
+};
+
+interface CapitalWalkSummary {
+	chartData: CapitalWalkPoint[];
+	totalExternalCapital: number;
+	houseMoneyCrossDate: string | null;
+	grossDeployed: number;
+	grossPayout: number;
+	currentNetPosition: number;
+}
+
+interface PortfolioHolding {
+	id: string;
+	name: string;
+	location: string;
+	totalInvested: number;
+	totalPayoutsEarned: number;
+	unclaimedAmount: number;
+	claimedAmount: number;
+	lastPayoutAmount: number;
+	lastPayoutDate: string | null;
+	status: string;
+	tokensOwned: number;
+	tokenSymbol: string;
+	capitalReturned: number;
+	unrecoveredCapital: number;
+	assetDepletion: number | null;
+	asset?: PinnedMetadata['asset'];
+	sftAddress: string;
+	claimHistory: ClaimsHistoryItem[];
+	pinnedMetadata: PinnedMetadata;
+}
+
+// Tab state
+let activeTab: PortfolioTab = 'overview';
 	
 	// Page state
 	let pageLoading = true;
 	let isLoadingData = false;
 	let totalInvested = 0;
 	let totalPayoutsEarned = 0;
-	let totalClaimed = 0;
 	let unclaimedPayout = 0;
 	let activeAssetsCount = 0;
-	let holdings: any[] = [];
-	let claimHistory: any[] = [];
-	let monthlyPayouts: any[] = [];
-	let tokenAllocations: any[] = [];
-let allDepositsData: any[] = [];
-let claimsHoldings: any[] = [];
+	let holdings: PortfolioHolding[] = [];
+	let claimHistory: ClaimsHistoryItem[] = [];
+	let monthlyPayouts: MonthlyPayout[] = [];
+	let tokenAllocations: TokenAllocationEntry[] = [];
+let allDepositsData: EnrichedDeposit[] = [];
+let claimsHoldings: ClaimGroupSummary[] = [];
 let hasPortfolioHistory = false;
 	
 	// Composables
 	const { show: showTooltipWithDelay, hide: hideTooltip, isVisible: isTooltipVisible } = useTooltip();
 
-	let historyModalPayoutData: Array<{ date: string; value: number }> = [];
-	let historyModalCumulativeData: Array<{ label: string; value: number }> = [];
+	let historyModalPayoutData: HistoryPoint[] = [];
+	let historyModalCumulativeData: CumulativeHistoryPoint[] = [];
 	let historyModalOpen = false;
-	let historyModalHolding: any | null = null;
+	let historyModalHolding: PortfolioHolding | null = null;
 
-	$: historyModalPayoutData = historyModalHolding ? getPayoutChartData(historyModalHolding) : [];
-$: historyModalCumulativeData = historyModalPayoutData.reduce((acc: Array<{ label: string; value: number }>, d, i) => {
-	const prevTotal = i > 0 ? acc[i - 1].value : 0;
-	acc.push({ label: d.date, value: prevTotal + d.value });
-	return acc;
-}, [] as Array<{ label: string; value: number }>);
+$: historyModalPayoutData = historyModalHolding
+	? getPayoutChartData(historyModalHolding)
+	: [];
+$: historyModalCumulativeData = historyModalPayoutData.reduce<CumulativeHistoryPoint[]>(
+	(acc, datapoint, index) => {
+		const prevTotal = index > 0 ? acc[index - 1].value : 0;
+		acc.push({ label: datapoint.date, value: prevTotal + datapoint.value });
+		return acc;
+	},
+	[],
+);
 
 $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.length > 0) || (Array.isArray(claimHistory) && claimHistory.length > 0);
 
-	function openHistoryModal(holding: any) {
+	function openHistoryModal(holding: PortfolioHolding) {
 		historyModalHolding = holding;
 		historyModalOpen = true;
 	}
@@ -83,51 +171,12 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 		}
 	}
 
-	async function fetchCsvData(csvLink: string) {
-		try {
-			const response = await fetch(csvLink);
-			if (!response.ok) {
-				throw new Error(`Failed to fetch CSV: ${response.status}`);
-			}
-			const csvText = await response.text();
-			return csvText;
-		} catch (error) {
-			console.error('Error fetching CSV data:', error);
-			return null;
-		}
-	}
-
-	async function parseCsvData(csvText: string) {
-		const lines = csvText.split('\n');
-		const headers = lines[0].split(',').map(h => h.trim());
-		const data = lines.slice(1).filter(line => line.trim()).map(line => {
-			const values = line.split(',').map(v => v.trim());
-			const row: any = {};
-			headers.forEach((header, index) => {
-				row[header] = values[index] || '';
-			});
-			return row;
-		});
-		return data;
-	}
-
-	async function downloadCSVDebugData(data: any, filename: string) {
-		const jsonData = JSON.stringify(data, null, 2);
-		const blob = new Blob([jsonData], { type: 'application/json' });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = filename;
-		a.click();
-		URL.revokeObjectURL(url);
-	}
-
 	function toNumeric(value: unknown): number {
 		if (typeof value === 'number' && Number.isFinite(value)) {
 			return value;
 		}
 		if (typeof value === 'string' && value.trim().length > 0) {
-			const sanitized = value.replace(/[^0-9+\-\.]+/g, '');
+			const sanitized = value.replace(/[^0-9+\-.]+/g, '');
 			const parsed = Number(sanitized);
 			return Number.isFinite(parsed) ? parsed : 0;
 		}
@@ -192,7 +241,9 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 	}
 
 	function exportPortfolioHistory() {
-		const activeHoldings = (holdings || []).filter((holding) => Number.isFinite(holding?.tokensOwned) && holding.tokensOwned > 0);
+		const activeHoldings = holdings.filter(
+			(holding) => Number.isFinite(holding.tokensOwned) && holding.tokensOwned > 0,
+		);
 		if (activeHoldings.length === 0) {
 			alert('No token holdings available to export yet.');
 			return;
@@ -221,8 +272,8 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 			return numeric.toFixed(2);
 		};
 
-		const totalInvestedAcrossHoldings = activeHoldings.reduce((sum: number, holding: any) => {
-			const value = Number(holding?.totalInvested ?? 0);
+		const totalInvestedAcrossHoldings = activeHoldings.reduce((sum, holding) => {
+			const value = Number(holding.totalInvested ?? 0);
 			return sum + (Number.isFinite(value) ? value : 0);
 		}, 0);
 
@@ -246,41 +297,43 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 			'token_contract'
 		];
 
-		const rows = activeHoldings.map((holding: any) => {
-			const sharePercentage = typeof holding?.pinnedMetadata?.sharePercentage === 'number'
+		const rows: Array<Record<string, string>> = activeHoldings.map((holding) => {
+			const sharePercentage = typeof holding.pinnedMetadata.sharePercentage === 'number'
 				? holding.pinnedMetadata.sharePercentage
-				: typeof holding?.asset?.sharePercentage === 'number'
+				: typeof holding.asset?.sharePercentage === 'number'
 				? holding.asset.sharePercentage
-				: typeof holding?.asset?.assetTerms?.sharePercentage === 'number'
+				: typeof holding.asset?.assetTerms?.sharePercentage === 'number'
 				? holding.asset.assetTerms.sharePercentage
 				: null;
 
 			const allocationPercent = totalInvestedAcrossHoldings > 0
-				? ((Number(holding?.totalInvested) || 0) / totalInvestedAcrossHoldings) * 100
+				? ((Number(holding.totalInvested) || 0) / totalInvestedAcrossHoldings) * 100
 				: 0;
 
-			const location = holding?.asset?.location
-				? [holding.asset.location.state, holding.asset.location.country].filter(Boolean).join(', ')
-				: (holding?.location || '');
+			const location = holding.asset?.location
+				? [holding.asset.location.state, holding.asset.location.country]
+						.filter(Boolean)
+						.join(', ')
+				: holding.location || '';
 
 			return {
-				asset: holding?.asset?.assetName || holding?.name || 'Unknown Asset',
-				token_symbol: holding?.tokenSymbol || '',
+				asset: holding.asset?.assetName || holding.name || 'Unknown Asset',
+				token_symbol: holding.tokenSymbol || '',
 				share_percentage: toPercent(sharePercentage, true),
-				tokens_owned: toTokens(holding?.tokensOwned),
+				tokens_owned: toTokens(holding.tokensOwned),
 				allocation_percent: toPercent(allocationPercent),
-				status: holding?.status || '',
+				status: holding.status || '',
 				location,
-				total_invested_usdc: toCurrency(holding?.totalInvested),
-				total_earned_usdc: toCurrency(holding?.totalPayoutsEarned),
-				claimed_usdc: toCurrency(holding?.claimedAmount),
-				unclaimed_usdc: toCurrency(holding?.unclaimedAmount),
-				capital_returned_percent: toPercent(holding?.capitalReturned),
-				unrecovered_capital_usdc: toCurrency(holding?.unrecoveredCapital),
-				last_payout_usdc: toCurrency(holding?.lastPayoutAmount),
-				last_payout_date: holding?.lastPayoutDate ? normalizeDate(holding.lastPayoutDate) : '',
-				asset_depletion_percent: toPercent(holding?.assetDepletion, true),
-				token_contract: holding?.sftAddress || ''
+				total_invested_usdc: toCurrency(holding.totalInvested),
+				total_earned_usdc: toCurrency(holding.totalPayoutsEarned),
+				claimed_usdc: toCurrency(holding.claimedAmount),
+				unclaimed_usdc: toCurrency(holding.unclaimedAmount),
+				capital_returned_percent: toPercent(holding.capitalReturned),
+				unrecovered_capital_usdc: toCurrency(holding.unrecoveredCapital),
+				last_payout_usdc: toCurrency(holding.lastPayoutAmount),
+				last_payout_date: holding.lastPayoutDate ? normalizeDate(holding.lastPayoutDate) : '',
+				asset_depletion_percent: toPercent(holding.assetDepletion, true),
+				token_contract: holding.sftAddress || ''
 			};
 		});
 
@@ -288,26 +341,33 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 
 		const csvLines = [headers.join(',')];
 		for (const row of rows) {
-			csvLines.push(headers.map((header) => toCsvValue((row as Record<string, string>)[header])).join(','));
+			csvLines.push(
+				headers
+					.map((header) => {
+						const value = row[header] ?? '';
+						return toCsvValue(value);
+					})
+					.join(','),
+			);
 		}
 
 		const filename = `albion-portfolio-holdings-${new Date().toISOString().split('T')[0]}.csv`;
 		downloadCsvFile(filename, csvLines.join('\n'));
 	}
 
-	async function loadAllClaimsData() {
+	async function loadAllClaimsData(): Promise<ClaimsResult | null> {
 		// Use ClaimsService for efficient parallel loading with caching
 		const claims = useClaimsService();
 		
 		// Check cache first
-		let claimsResult = claimsCache.get($signerAddress || '');
-		if (claimsResult) {
-			console.log('[Portfolio] Using cached claims data');
-		} else {
-			console.log('[Portfolio] Loading fresh claims data');
-			claimsResult = await claims.loadClaimsForWallet($signerAddress || '');
-			claimsCache.set($signerAddress || '', claimsResult);
-		}
+		let claimsResult: ClaimsResult | null = claimsCache.get($signerAddress || '');
+	if (claimsResult) {
+		logDev('Using cached claims data');
+	} else {
+		logDev('Loading fresh claims data');
+		claimsResult = await claims.loadClaimsForWallet($signerAddress || '');
+		claimsCache.set($signerAddress || '', claimsResult);
+	}
 		
 		return claimsResult;
 	}
@@ -340,32 +400,33 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 			if (claimsResult) {
 				claimHistory = claimsResult.claimHistory;
 				totalPayoutsEarned = claimsResult.totals.earned;
-				totalClaimed = claimsResult.totals.claimed;
 				unclaimedPayout = claimsResult.totals.unclaimed;
-				
-			// Map holdings to claimsHoldings format with derived totals
-			claimsHoldings = claimsResult.holdings.map((group: any) => {
-				const groupClaims = claimsResult.claimHistory.filter((claim: any) => {
-					return claim.fieldName === group.fieldName || claim.asset === group.fieldName;
+
+				// Map holdings to claimsHoldings format with derived totals
+				claimsHoldings = claimsResult.holdings.map((group: ClaimsHoldingsGroup) => {
+					const groupClaims = claimsResult.claimHistory.filter(
+						(claim) =>
+							claim.fieldName === group.fieldName ||
+							claim.asset === group.fieldName,
+					);
+					const totalEarned = groupClaims.reduce((sum, claim) => {
+						const amount = Number(claim.amount ?? 0);
+						return sum + (Number.isFinite(amount) ? amount : 0);
+					}, 0);
+					const claimedAmount = groupClaims.reduce((sum, claim) => {
+						const amount = Number(claim.amount ?? 0);
+						const isCompleted = !claim.status || claim.status === 'completed';
+						return sum + (isCompleted && Number.isFinite(amount) ? amount : 0);
+					}, 0);
+					const unclaimedAmount = Number(group.totalAmount ?? 0);
+					return {
+						fieldName: group.fieldName,
+						unclaimedAmount: Number.isFinite(unclaimedAmount) ? unclaimedAmount : 0,
+						claimedAmount,
+						totalEarned,
+						holdings: group.holdings,
+					};
 				});
-				const totalEarned = groupClaims.reduce((sum: number, claim: any) => {
-					const amount = Number(claim?.amount ?? 0);
-					return sum + (Number.isFinite(amount) ? amount : 0);
-				}, 0);
-				const claimedAmount = groupClaims.reduce((sum: number, claim: any) => {
-					const amount = Number(claim?.amount ?? 0);
-					const isCompleted = !claim?.status || claim.status === 'completed';
-					return sum + (isCompleted && Number.isFinite(amount) ? amount : 0);
-				}, 0);
-				const unclaimedAmount = Number(group?.totalAmount ?? 0);
-				return {
-					fieldName: group.fieldName,
-					unclaimedAmount: Number.isFinite(unclaimedAmount) ? unclaimedAmount : 0,
-					claimedAmount,
-					totalEarned,
-					holdings: group.holdings
-				};
-			});
 			}
 
 			// Get deposits data
@@ -378,14 +439,18 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 			}
 
 			// Decode metadata
-			const decodedMeta = $sftMetadata.map((metaV1: any) => decodeSftInformation(metaV1));
+			const decodedMeta = $sftMetadata
+				.map((metaV1) => decodeSftInformation(metaV1))
+				.filter((meta): meta is PinnedMetadata => Boolean(meta));
 
 			// Process deposit data with timestamps
-			const enrichedDeposits = [];
+			const enrichedDeposits: EnrichedDeposit[] = [];
 			if (allDepositsData && allDepositsData.length > 0) {
 				for(const sft of $sfts) {
-					const sftDeposits = allDepositsData.filter((d: any) => 
-						d.offchainAssetReceiptVault?.id?.toLowerCase() === sft.id.toLowerCase()
+					const sftDeposits = allDepositsData.filter(
+						(deposit) =>
+							deposit.offchainAssetReceiptVault?.id?.toLowerCase() ===
+							sft.id.toLowerCase(),
 					);
 					
 					for(const deposit of sftDeposits) {
@@ -404,65 +469,78 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 			}
 
 			// Deduplicate SFTs by ID
-			const uniqueSfts = Array.from(new Map($sfts.map((sft: any) => [sft.id.toLowerCase(), sft])).values());
+			const uniqueSftsMap: Record<string, typeof $sfts[number]> = {};
+			for (const sft of $sfts) {
+				if (sft?.id) {
+					uniqueSftsMap[sft.id.toLowerCase()] = sft;
+				}
+			}
+			const uniqueSfts = Object.values(uniqueSftsMap);
 
 			// Process each individual SFT token
-			for(const sft of uniqueSfts) {
+			for (const sft of uniqueSfts) {
 				// Find metadata for this SFT
-				const pinnedMetadata = decodedMeta.find(
-					(meta: any) => {
-						if (!meta?.contractAddress) return false;
-						// Try direct match first
-						const metaAddress = meta.contractAddress.toLowerCase();
-						const sftAddress = sft.id.toLowerCase();
-						if (metaAddress === sftAddress) {
-							return true;
-						}
-						// Try padded match (for compatibility)
-						const targetAddress = `0x000000000000000000000000${sft.id.slice(2).toLowerCase()}`;
-						if (metaAddress === targetAddress) {
-							return true;
-						}
-						// Try removing padding from metadata address
-						const unpaddedMetaAddress = metaAddress.replace(/^0x0+/, '0x');
-						if (unpaddedMetaAddress === sftAddress) {
-							return true;
-						}
-						return false;
+				const pinnedMetadata = decodedMeta.find((meta) => {
+					if (!meta.contractAddress) return false;
+					const metaAddress = meta.contractAddress.toLowerCase();
+					const sftAddress = sft.id.toLowerCase();
+					if (metaAddress === sftAddress) {
+						return true;
 					}
-				) as TokenMetadata | undefined;
+					const targetAddress = `0x000000000000000000000000${sft.id
+						.slice(2)
+						.toLowerCase()}`;
+					if (metaAddress === targetAddress) {
+						return true;
+					}
+					const unpaddedMetaAddress = metaAddress.replace(/^0x0+/, '0x');
+					return unpaddedMetaAddress === sftAddress;
+				});
 				
-				if(pinnedMetadata) {
-					const asset = (pinnedMetadata as any).asset;
-					
+				if (pinnedMetadata) {
+					const asset = pinnedMetadata.asset;
+					if (!asset) {
+						continue;
+					}
+					const assetFieldName = asset.assetName ?? '';
+					if (!assetFieldName) {
+						continue;
+					}
+
 					// Get ALL deposits for this specific SFT and sum them
-					const sftDeposits = allDepositsData ? allDepositsData.filter((d: any) => 
-						d.offchainAssetReceiptVault?.id?.toLowerCase() === sft.id.toLowerCase()
-					) : [];
+					const sftDeposits = allDepositsData.filter(
+						(deposit) =>
+							deposit.offchainAssetReceiptVault?.id?.toLowerCase() ===
+							sft.id.toLowerCase(),
+					);
 					
 					// Sum all deposits for this SFT
 					let totalInvestedInSft = 0;
 					let tokensOwned = 0;
 
-					if(sftDeposits.length > 0) {
-						for(const deposit of sftDeposits) {
-							const amountRaw = deposit?.amount ?? '0';
-							const amountWei = typeof amountRaw === 'bigint' ? amountRaw : BigInt(amountRaw);
+					if (sftDeposits.length > 0) {
+						for (const deposit of sftDeposits) {
+							const amountRaw = deposit.amount ?? '0';
+							const amountWei =
+								typeof amountRaw === 'bigint' ? amountRaw : BigInt(amountRaw);
 							const depositAmount = Number(formatEther(amountWei));
 							totalInvestedInSft += depositAmount;
 							tokensOwned += depositAmount;
 						}
 					}
 
-					if(tokensOwned === 0 && Array.isArray(sft.tokenHolders)) {
-						const tokenHolder = sft.tokenHolders.find((holder: any) =>
-							holder.address?.toLowerCase() === $signerAddress.toLowerCase()
+					if (tokensOwned === 0 && Array.isArray(sft.tokenHolders)) {
+						const tokenHolder = sft.tokenHolders.find(
+							(holder) =>
+								holder.address?.toLowerCase() === $signerAddress.toLowerCase(),
 						);
-						if(tokenHolder) {
+						if (tokenHolder) {
 							// Fallback to on-chain balance when the subgraph has no deposit records
-							const holderBalance = Number(formatEther(tokenHolder.balance));
+							const holderBalance = Number(
+								formatEther(BigInt(tokenHolder.balance)),
+							);
 							tokensOwned = holderBalance;
-							if(totalInvestedInSft === 0) {
+							if (totalInvestedInSft === 0) {
 								totalInvestedInSft = holderBalance;
 							}
 						}
@@ -473,8 +551,8 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 					let claimedAmountForSft = 0;
 					
 					// Find claims data for this specific SFT by matching field name
-					const sftClaimsGroup = claimsHoldings.find(group => 
-						group.fieldName === asset?.assetName
+					const sftClaimsGroup = claimsHoldings.find(
+						(group) => group.fieldName === assetFieldName,
 					);
 					
 					// Use data from claimsGroup if available (this is the source of truth)
@@ -485,14 +563,14 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 					}
 					
 					// Get claim history for this asset
-					const sftClaims = claimHistory.filter((claim: any) => {
-						return claim.asset === asset?.assetName || claim.fieldName === asset?.assetName;
-					});
-					const totalEarnedFromHistory = sftClaims.reduce((sum: number, claim: any) => {
+					const sftClaims = claimHistory.filter(
+						(claim) => claim.asset === asset.assetName || claim.fieldName === asset.assetName,
+					);
+					const totalEarnedFromHistory = sftClaims.reduce((sum, claim) => {
 						const amount = Number(claim?.amount ?? 0);
 						return sum + (Number.isFinite(amount) ? amount : 0);
 					}, 0);
-					const claimedFromHistory = sftClaims.reduce((sum: number, claim: any) => {
+					const claimedFromHistory = sftClaims.reduce((sum, claim) => {
 						const amount = Number(claim?.amount ?? 0);
 						const isCompleted = !claim?.status || claim.status === 'completed';
 						return sum + (isCompleted && Number.isFinite(amount) ? amount : 0);
@@ -507,15 +585,15 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 						const pending = totalEarnedForSft - claimedAmountForSft;
 						unclaimedAmountForSft = pending > 0 ? pending : 0;
 					}
-					const plannedProjections = Array.isArray(asset?.plannedProduction?.projections)
-						? asset.plannedProduction.projections
+					const plannedProjections = Array.isArray(asset.plannedProduction?.projections)
+						? asset.plannedProduction?.projections ?? []
 						: [];
-					const receiptsRecords = Array.isArray(asset?.receiptsData)
-						? asset.receiptsData
+					const receiptsRecords = Array.isArray(asset.receiptsData)
+						? asset.receiptsData ?? []
 						: [];
-					const payoutMonths = Array.isArray(pinnedMetadata?.payoutData)
+					const payoutMonths = Array.isArray(pinnedMetadata.payoutData)
 						? pinnedMetadata.payoutData
-							.map((p: any) => normalizeMonth(p?.month))
+							.map((p) => normalizeMonth(p?.month))
 							.filter((month: string) => month.length > 0)
 						: [];
 					let earliestObservedMonth = '';
@@ -524,17 +602,17 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 					}
 					if (!earliestObservedMonth) {
 						const receiptMonths = receiptsRecords
-							.map((entry: any) => normalizeMonth(entry?.month))
+							.map((entry) => normalizeMonth(entry?.month))
 							.filter((month: string) => month.length > 0);
 						if (receiptMonths.length > 0) {
 							earliestObservedMonth = receiptMonths.sort()[0];
 						}
 					}
-					const hasRelevantReceipts = receiptsRecords.some((entry: any) => {
+					const hasRelevantReceipts = receiptsRecords.some((entry) => {
 						const month = normalizeMonth(entry?.month);
 						return !earliestObservedMonth || (month && month >= earliestObservedMonth);
 					});
-					const receiptsProductionTotal = receiptsRecords.reduce((sum: number, entry: any) => {
+					const receiptsProductionTotal = receiptsRecords.reduce((sum, entry) => {
 						const month = normalizeMonth(entry?.month);
 						if (!earliestObservedMonth || (month && month >= earliestObservedMonth)) {
 							const value = entry?.assetData?.production ?? entry?.production;
@@ -542,16 +620,16 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 						}
 						return sum;
 					}, 0);
-					const plannedFromStart = plannedProjections.reduce((sum: number, projection: any) => {
+					const plannedFromStart = plannedProjections.reduce((sum, projection) => {
 						const month = normalizeMonth(projection?.month);
 						if (!earliestObservedMonth || (month && month >= earliestObservedMonth)) {
 							return sum + toNumeric(projection?.production ?? 0);
 						}
 						return sum;
 					}, 0);
-					console.log('[Portfolio] Depletion calc', {
+					logDev('Depletion calc', {
 						assetId: sft.id,
-						assetName: asset?.assetName,
+						assetName: assetFieldName,
 						earliestObservedMonth,
 						receiptsProductionTotal,
 						plannedFromStart,
@@ -571,7 +649,7 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 					}
 					
 					// Only add to holdings if user actually owns tokens
-					if(pinnedMetadata && tokensOwned > 0) {
+					if (tokensOwned > 0) {
 						const capitalReturned = totalInvestedInSft > 0 
 							? (totalEarnedForSft / totalInvestedInSft) * 100 
 							: 0;
@@ -579,26 +657,28 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 						const unrecoveredCapital = Math.max(0, totalInvestedInSft - totalEarnedForSft);
 
 						const lastClaim = sftClaims
-							.filter((claim: any) => !claim.status || claim.status === 'completed')
+							.filter((claim) => !claim.status || claim.status === 'completed')
 							.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
 
 						holdings.push({
 							id: sft.id.toLowerCase(),
-							name: asset?.assetName || `SFT ${sft.id.slice(0, 8)}...`,
-							location: asset ? `${asset.location?.state || 'Unknown'}, ${asset.location?.country || 'Unknown'}` : 'Unknown',
+							name: assetFieldName || `SFT ${sft.id.slice(0, 8)}...`,
+							location: asset.location
+								? `${asset.location.state || 'Unknown'}, ${asset.location.country || 'Unknown'}`
+								: 'Unknown',
 							totalInvested: totalInvestedInSft,
 							totalPayoutsEarned: totalEarnedForSft,
 							unclaimedAmount: unclaimedAmountForSft,
 							claimedAmount: claimedAmountForSft,
 							lastPayoutAmount: lastClaim ? Number(lastClaim.amount) : 0,
 							lastPayoutDate: lastClaim ? lastClaim.date : null,
-							status: asset?.production?.status || 'producing',
+							status: asset.production?.status || 'producing',
 							tokensOwned: tokensOwned,
-							tokenSymbol: (pinnedMetadata as any)?.symbol || sft.id.slice(0, 6).toUpperCase(),
+							tokenSymbol: pinnedMetadata.symbol || sft.id.slice(0, 6).toUpperCase(),
 							capitalReturned,
 							unrecoveredCapital,
 							assetDepletion: assetDepletionPercentage,
-							asset: asset,
+							asset,
 							sftAddress: sft.id,
 							claimHistory: sftClaims,
 							pinnedMetadata: pinnedMetadata
@@ -607,22 +687,21 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 				}
 			}
 
-					// Populate monthlyPayouts from claim history
+			// Populate monthlyPayouts from claim history
 			monthlyPayouts = [];
-			const monthlyPayoutsMap = new Map();
+			const monthlyPayoutTotals: Record<string, number> = {};
 
 			// Process claim history to get monthly aggregations (only completed claims)
-			for(const claim of claimHistory) {
-				if(claim.date && claim.amount && (!claim.status || claim.status === 'completed')) {
+			for (const claim of claimHistory) {
+				if (claim.date && claim.amount && (!claim.status || claim.status === 'completed')) {
 					const date = new Date(claim.date);
 					const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-					
 					const amount = Number(claim.amount);
-					monthlyPayoutsMap.set(monthKey, (monthlyPayoutsMap.get(monthKey) || 0) + amount);
+					monthlyPayoutTotals[monthKey] = (monthlyPayoutTotals[monthKey] ?? 0) + (Number.isFinite(amount) ? amount : 0);
 				}
 			}
 
-			for(const [monthKey, amount] of monthlyPayoutsMap) {
+			for (const [monthKey, amount] of Object.entries(monthlyPayoutTotals)) {
 				monthlyPayouts.push({
 					month: monthKey,
 					amount: amount,
@@ -637,17 +716,23 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 			monthlyPayouts.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
 			// Populate tokenAllocations from holdings
-			tokenAllocations = holdings.map(holding => {
-				const totalPortfolioValue = holdings.reduce((sum, h) => sum + h.totalInvested, 0);
-				const allocationPercentage = totalPortfolioValue > 0 ? (holding.totalInvested / totalPortfolioValue) * 100 : 0;
-				
+			const totalPortfolioValue = holdings.reduce(
+				(sum, holding) => sum + holding.totalInvested,
+				0,
+			);
+			tokenAllocations = holdings.map((holding) => {
+				const allocationPercentage =
+					totalPortfolioValue > 0
+						? (holding.totalInvested / totalPortfolioValue) * 100
+						: 0;
+
 				return {
 					assetId: holding.id,
 					assetName: holding.asset?.assetName || holding.name,
 					tokenSymbol: holding.tokenSymbol,
 					tokensOwned: holding.tokensOwned,
 					currentValue: holding.totalInvested,
-					percentageOfPortfolio: allocationPercentage
+					percentageOfPortfolio: allocationPercentage,
 				};
 			});
 
@@ -656,7 +741,7 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 				totalInvested = allDepositsData.reduce((sum, deposit) => {
 					const amountRaw = deposit?.amount ?? '0';
 					const amountWei = typeof amountRaw === 'bigint' ? amountRaw : BigInt(amountRaw);
-					const amount = Number(formatEther(amountWei));
+							const amount = Number(formatEther(amountWei));
 					return sum + (Number.isFinite(amount) ? amount : 0);
 				}, 0);
 			} else if (holdings.length > 0) {
@@ -668,11 +753,9 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 			if (holdings.length > 0) {
 				totalPayoutsEarned = holdings.reduce((sum, holding) => sum + holding.totalPayoutsEarned, 0);
 				unclaimedPayout = holdings.reduce((sum, holding) => sum + holding.unclaimedAmount, 0);
-				totalClaimed = holdings.reduce((sum, holding) => sum + (holding.claimedAmount || 0), 0);
 			} else {
 				totalPayoutsEarned = claimsResult?.totals.earned ?? 0;
 				unclaimedPayout = claimsResult?.totals.unclaimed ?? 0;
-				totalClaimed = claimsResult?.totals.claimed ?? 0;
 			}
 
 			activeAssetsCount = holdings.length;
@@ -685,18 +768,18 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 		}
 	}
 	
-	function getPayoutChartData(holding: any): Array<{date: string; value: number}> {
+	function getPayoutChartData(holding: PortfolioHolding): HistoryPoint[] {
 		if (!holding.claimHistory || holding.claimHistory.length === 0) {
 			return [];
 		}
 		
 		return holding.claimHistory
-			.filter((claim: any) => claim.date && claim.amount)
-			.map((claim: any) => ({
+			.filter((claim) => claim.date && claim.amount)
+			.map((claim) => ({
 				date: new Date(claim.date).toISOString().split('T')[0],
 				value: Number(claim.amount)
 			}))
-			.sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+			.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 	}
 
 	async function connectWallet() {
@@ -782,7 +865,7 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 							</CardContent>
 						</Card>
 					{:else}
-						{#each holdings as holding}
+						{#each holdings as holding (holding.id)}
 							<div class="mb-3">
 								<Card hoverable showBorder>
 									<CardContent paddingClass="p-6 lg:p-9 h-full flex flex-col justify-between">
@@ -993,8 +1076,8 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 			{:else if activeTab === 'performance'}
 				{@const capitalWalkData = (() => {
 					// Aggregate mints (deposits) and payouts by month
-					const monthlyMints = new Map();
-					const monthlyPayoutsMap = new Map();
+					const monthlyMints: Record<string, number> = {};
+					const monthlyPayoutsTotals: Record<string, number> = {};
 					let maxDeficit = 0;
 					let houseMoneyCrossDate: string | null = null;
 					
@@ -1002,16 +1085,18 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 					monthlyPayouts.forEach(payout => {
 						const date = new Date(payout.date);
 						const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-						monthlyPayoutsMap.set(monthKey, (monthlyPayoutsMap.get(monthKey) || 0) + payout.amount);
+						monthlyPayoutsTotals[monthKey] = (monthlyPayoutsTotals[monthKey] ?? 0) + payout.amount;
 					});
 					
 					// Process deposits (mints) from deposits data
 					if (allDepositsData.length > 0) {
-						for(const deposit of allDepositsData) {
-							const date = new Date(deposit.timestamp);
+						for (const deposit of allDepositsData) {
+							const timestamp = deposit.timestamp ?? new Date().toISOString();
+							const date = new Date(timestamp);
 							const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-							const amount = Number(formatEther(deposit.amount));
-							monthlyMints.set(monthKey, (monthlyMints.get(monthKey) || 0) + amount);
+						const amount = Number(formatEther(BigInt(deposit.amount)));
+							monthlyMints[monthKey] =
+								(monthlyMints[monthKey] ?? 0) + (Number.isFinite(amount) ? amount : 0);
 						}
 					} else if (holdings.length > 0) {
 						// Fallback: use holdings data if no deposits available
@@ -1020,26 +1105,32 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 							const investmentDate = new Date(firstPayout.date);
 							const monthKey = `${investmentDate.getFullYear()}-${String(investmentDate.getMonth() + 1).padStart(2, '0')}`;
 							const totalInvestedAmount = holdings.reduce((sum, holding) => sum + holding.totalInvested, 0);
-							monthlyMints.set(monthKey, totalInvestedAmount);
+							monthlyMints[monthKey] = totalInvestedAmount;
 						} else {
 							const currentDate = new Date();
 							const monthKey = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
 							const totalInvestedAmount = holdings.reduce((sum, holding) => sum + holding.totalInvested, 0);
-							monthlyMints.set(monthKey, totalInvestedAmount);
+							monthlyMints[monthKey] = totalInvestedAmount;
 						}
 					}
 					
 					// Create chart data from all months
-					const allMonths = new Set([...monthlyMints.keys(), ...monthlyPayoutsMap.keys()]);
-					const sortedMonths = Array.from(allMonths).sort();
-					const dataArray: any[] = [];
+					const allMonthsMap: Record<string, true> = {};
+					Object.keys(monthlyMints).forEach((month) => {
+						allMonthsMap[month] = true;
+					});
+					Object.keys(monthlyPayoutsTotals).forEach((month) => {
+						allMonthsMap[month] = true;
+					});
+					const sortedMonths = Object.keys(allMonthsMap).sort();
+					const dataArray: CapitalWalkPoint[] = [];
 					
 					let runningCumulativeMints = 0;
 					let runningCumulativePayouts = 0;
 					
 					sortedMonths.forEach(monthKey => {
-						const monthlyMint = monthlyMints.get(monthKey) || 0;
-						const monthlyPayout = monthlyPayoutsMap.get(monthKey) || 0;
+						const monthlyMint = monthlyMints[monthKey] ?? 0;
+						const monthlyPayout = monthlyPayoutsTotals[monthKey] ?? 0;
 						
 						runningCumulativeMints += monthlyMint;
 						runningCumulativePayouts += monthlyPayout;
@@ -1062,21 +1153,22 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 					});
 					
 					// Calculate real metrics from deposits and trades data
-					const grossDeployed = allDepositsData.reduce((sum, deposit) => 
-						sum + Number(formatEther(deposit.amount)), 0
+					const grossDeployed = allDepositsData.reduce(
+					(sum, deposit) => sum + Number(formatEther(BigInt(deposit.amount))),
+						0,
 					);
 					
 					const grossPayout = claimHistory.reduce((sum, claim) => sum + Number(claim.amount), 0);
 					const currentNetPosition = grossPayout - grossDeployed;
 					
-					return {
-						chartData: dataArray,
-						totalExternalCapital: maxDeficit,
-						houseMoneyCrossDate,
-						grossDeployed,
-						grossPayout,
-						currentNetPosition
-					};
+				return {
+					chartData: dataArray,
+					totalExternalCapital: maxDeficit,
+					houseMoneyCrossDate,
+					grossDeployed,
+					grossPayout,
+					currentNetPosition,
+				} as CapitalWalkSummary;
 				})()}
 				
 				<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1265,7 +1357,7 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 									</CardContent>
 								</Card>
 							{:else}
-								{#each tokenAllocations as allocation}
+								{#each tokenAllocations as allocation (allocation.assetId)}
 									<div class="flex justify-between items-center pb-4 border-b border-light-gray last:border-b-0 last:pb-0">
 										<div class="flex items-center gap-3">
 											<div class="w-8 h-8 bg-light-gray rounded overflow-hidden flex items-center justify-center">

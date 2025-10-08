@@ -2,19 +2,27 @@
 	import { createEventDispatcher } from 'svelte';
 	import { fly, fade } from 'svelte/transition';
 	import type { Asset, Token } from '$lib/types/uiTypes';
-	import { readContract, writeContract, waitForTransactionReceipt, simulateContract } from '@wagmi/core';
+	import {
+		readContract,
+		writeContract,
+		waitForTransactionReceipt,
+		simulateContract,
+	} from '@wagmi/core';
 	import { signerAddress, wagmiConfig } from 'svelte-wagmi';
 	import { formatEther, parseUnits, type Hex } from 'viem';
-	import {erc20Abi} from 'viem';
+	import { erc20Abi } from 'viem';
 	import { PrimaryButton, SecondaryButton, FormattedNumber } from '$lib/components/components';
-    import { sftMetadata, sfts } from '$lib/stores';
-    import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
-    import type { OffchainAssetReceiptVault } from '$lib/types/graphql';
-    import { generateAssetInstanceFromSftMeta, generateTokenInstanceFromSft } from '$lib/decodeMetadata/addSchemaToReceipts';
+	import { sftMetadata, sfts } from '$lib/stores';
+	import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
+	import type { OffchainAssetReceiptVault } from '$lib/types/graphql';
+	import {
+		generateAssetInstanceFromSftMeta,
+		generateTokenInstanceFromSft,
+	} from '$lib/decodeMetadata/addSchemaToReceipts';
 	import authorizerAbi from '$lib/abi/authorizer.json';
 	import OffchainAssetReceiptVaultAbi from '$lib/abi/OffchainAssetReceiptVault.json';
-    import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
-    import { getTokenTermsPath } from '$lib/utils/tokenTerms';
+	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
+	import { getTokenTermsPath } from '$lib/utils/tokenTerms';
 
 	export let isOpen = false;
 	export let tokenAddress: string | null = null;
@@ -28,13 +36,18 @@
 	let purchasing = false;
 	let purchaseSuccess = false;
 	let purchaseError: string | null = null;
+	let canProceed = false;
 
 	// Data
 	let assetData: Asset | null = null;
 	let tokenData: Token | null = null;
-let supply: any = null;
-let currentSft: OffchainAssetReceiptVault;
-let tokenTermsUrl: string | null = null;
+	let supply: {
+		maxSupply: bigint;
+		mintedSupply: bigint;
+		availableSupply: bigint;
+	} | null = null;
+	let currentSft: OffchainAssetReceiptVault | null = null;
+	let tokenTermsUrl: string | null = null;
 
 	// Reactive calculations
 	$: if (isOpen && (tokenAddress || assetId)) {
@@ -54,45 +67,66 @@ let tokenTermsUrl: string | null = null;
 		tokens: normalizedInvestmentAmount // 1:1 ratio for simplicity
 	};
 
-	$: canProceed = () => {
-		const withinSupplyLimit = Number.isFinite(maxInvestmentAmount) ? normalizedInvestmentAmount <= maxInvestmentAmount : true;
-		return agreedToTerms && 
-			   normalizedInvestmentAmount > 0 &&
-			   withinSupplyLimit &&
-			   !purchasing &&
-			   !isSoldOut();
-	};
+	$: {
+		const withinSupplyLimit = Number.isFinite(maxInvestmentAmount)
+			? normalizedInvestmentAmount <= maxInvestmentAmount
+			: true;
+		canProceed =
+			agreedToTerms &&
+			normalizedInvestmentAmount > 0 &&
+			withinSupplyLimit &&
+			!purchasing &&
+			!isSoldOut();
+	}
 
 	async function loadTokenData() {
 		try {
 			if (tokenAddress && $sftMetadata && $sfts) {
-				const sft = $sfts.find(sft => sft.id.toLocaleLowerCase() === tokenAddress.toLocaleLowerCase());
-				const deocdedMeta = $sftMetadata.map((metaV1) => decodeSftInformation(metaV1));
+				const sft = $sfts.find((item) =>
+					item.id.toLowerCase() === tokenAddress.toLowerCase(),
+				);
+				if (!sft) {
+					purchaseError = 'Token not found';
+					return;
+				}
 
-				const pinnedMetadata: any = deocdedMeta.find(
-					(meta) => meta?.contractAddress?.toLowerCase() === `0x000000000000000000000000${sft?.id.slice(2).toLowerCase()}`
+				currentSft = sft;
+
+				const decodedMeta = $sftMetadata
+					.map((metaV1) => decodeSftInformation(metaV1))
+					.filter(Boolean);
+
+				const pinnedMetadata = decodedMeta.find(
+					(meta) =>
+						meta?.contractAddress?.toLowerCase() ===
+						`0x000000000000000000000000${sft.id.slice(2).toLowerCase()}`,
 				);
 
-				if(sft && pinnedMetadata){
-					currentSft = sft;
-
-					const sftMaxSharesSupply = await readContract($wagmiConfig, {
-						abi: authorizerAbi,
-						address: sft.activeAuthorizer?.address as Hex,
-						functionName: 'maxSharesSupply',
-						args: []
-					}) as bigint;
-
-					tokenData = generateTokenInstanceFromSft(sft, pinnedMetadata, sftMaxSharesSupply.toString());
-					assetData = generateAssetInstanceFromSftMeta(sft, pinnedMetadata);
-
-
-					supply = {
-						maxSupply: sftMaxSharesSupply,
-						mintedSupply: BigInt(sft.totalShares),
-						availableSupply: sftMaxSharesSupply - BigInt(sft.totalShares)
-					};
+				if (!pinnedMetadata) {
+					purchaseError = 'Token metadata unavailable';
+					return;
 				}
+
+				const sftMaxSharesSupply = (await readContract($wagmiConfig, {
+					abi: authorizerAbi,
+					address: sft.activeAuthorizer?.address as Hex,
+					functionName: 'maxSharesSupply',
+					args: [],
+				})) as bigint;
+
+				tokenData = generateTokenInstanceFromSft(
+					sft,
+					pinnedMetadata,
+					sftMaxSharesSupply.toString(),
+				);
+				assetData = generateAssetInstanceFromSftMeta(sft, pinnedMetadata);
+
+				supply = {
+					maxSupply: sftMaxSharesSupply,
+					mintedSupply: BigInt(sft.totalShares),
+					availableSupply:
+						sftMaxSharesSupply - BigInt(sft.totalShares ?? '0'),
+				};
 			}
 		} catch (error) {
 			console.error('Error loading token data:', error);
@@ -101,28 +135,39 @@ let tokenTermsUrl: string | null = null;
 	}
 
 	function isSoldOut(): boolean {
-		return supply ? supply.availableSupply <= 0 : false;
+		return supply ? supply.availableSupply <= 0n : false;
 	}
 
 
 	async function handlePurchase() {
-		if (!canProceed()) return;
+		if (!canProceed) return;
+		if (!currentSft || !tokenAddress) {
+			purchaseError = 'Token data unavailable';
+			return;
+		}
 
 		purchasing = true;
 		purchaseError = null;
 
 		try {
+			const authorizerAddress = currentSft.activeAuthorizer?.address;
+			if (!authorizerAddress) {
+				purchaseError = 'Authorizer unavailable';
+				purchasing = false;
+				return;
+			}
+
 			// Get payment token and decimals
 			const paymentToken = await readContract($wagmiConfig, {
 				abi: authorizerAbi,
-				address: currentSft.activeAuthorizer?.address as Hex,
+				address: authorizerAddress as Hex,
 				functionName: 'paymentToken',
 				args: []
 			});
 
 			const paymentTokenDecimals = await readContract($wagmiConfig, {
 				abi: authorizerAbi,
-				address: currentSft.activeAuthorizer?.address as Hex,
+				address: authorizerAddress as Hex,
 				functionName: 'paymentTokenDecimals',
 				args: []
 			}) as number;
@@ -132,7 +177,7 @@ let tokenTermsUrl: string | null = null;
 				abi: erc20Abi,
 				address: paymentToken as Hex,
 				functionName: 'allowance',
-				args: [$signerAddress as Hex, currentSft.activeAuthorizer?.address as Hex]
+				args: [$signerAddress as Hex, authorizerAddress as Hex]
 			});
 
 			const requiredAmount = BigInt(parseUnits(normalizedInvestmentAmount.toString(), paymentTokenDecimals));
@@ -143,7 +188,7 @@ let tokenTermsUrl: string | null = null;
 					abi: erc20Abi,
 					address: paymentToken as Hex,
 					functionName: 'approve',
-					args: [currentSft.activeAuthorizer?.address as Hex, requiredAmount]
+					args: [authorizerAddress as Hex, requiredAmount]
 				});
 
 				const approvalHash = await writeContract($wagmiConfig, approvalRequest);
@@ -215,48 +260,43 @@ let tokenTermsUrl: string | null = null;
 	}
 	
 	// Tailwind class mappings
-	$: overlayClasses = 'fixed inset-0 bg-black/50 flex items-center justify-end z-[1000] p-8';
-	$: containerClasses = 'bg-white w-full max-w-md max-h-[90vh] flex flex-col shadow-2xl';
-	$: headerClasses = 'flex justify-between items-center p-8 border-b border-light-gray';
-	$: titleClasses = 'flex-1';
-	$: titleRowClasses = 'flex justify-between items-center gap-4';
-	$: mainTitleClasses = 'text-2xl font-bold text-black m-0';
-	$: assetNameClasses = 'text-secondary text-sm mt-2 m-0';
-	$: viewDetailsClasses = 'text-black px-3 py-2 text-sm font-medium no-underline whitespace-nowrap transition-colors duration-200 hover:text-primary';
-	$: closeClasses = 'bg-transparent border-none text-2xl cursor-pointer text-black p-0 w-8 h-8 flex items-center justify-center rounded transition-colors duration-200 hover:bg-light-gray';
-	$: contentClasses = 'flex-1 p-8 overflow-y-auto min-h-0';
-	$: formClasses = 'flex flex-col gap-8';
-	$: tokenDetailsClasses = 'bg-white border border-light-gray p-6';
-	$: detailsGridClasses = 'grid grid-cols-1 md:grid-cols-3 gap-4';
-	$: detailItemClasses = 'flex flex-col gap-1';
-	$: detailLabelClasses = 'text-xs text-gray-500 uppercase tracking-wider';
-	$: detailValueClasses = 'text-lg font-bold text-secondary';
-	$: formSectionClasses = 'flex flex-col gap-2';
-	$: formLabelClasses = 'text-black text-lg font-semibold';
-	$: usdcBadgeClasses = 'flex items-center gap-2 text-lg font-medium text-black opacity-80';
-	$: usdcIconClasses = 'h-5 w-5';
-	$: amountInputClasses = 'p-4 border-2 border-light-gray text-lg text-left transition-colors duration-200 focus:outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed';
-	$: availableTokensClasses = 'mt-2 text-sm text-secondary font-medium';
-	$: soldOutClasses = 'text-red-600';
-	$: warningNoteClasses = 'text-sm text-orange-600 bg-orange-50 p-2 mt-2';
-	$: orderSummaryClasses = 'border border-light-gray p-6';
-	$: summaryDetailsClasses = 'flex flex-col gap-3';
-	$: summaryRowClasses = 'flex justify-between items-center';
-	$: summaryTotalClasses = 'flex justify-between items-center pt-3 border-t border-light-gray font-medium';
-	$: strikethroughClasses = 'line-through text-gray-500';
-	$: freeTextClasses = 'text-primary font-medium';
-	$: termsCheckboxClasses = 'flex items-start gap-3 text-sm leading-relaxed cursor-pointer';
-	$: checkboxInputClasses = 'mt-1';
-	$: formActionsClasses = 'flex gap-4 mt-4';
-	$: successStateClasses = 'text-center p-8';
-	$: successIconClasses = 'w-16 h-16 bg-green-500 text-white rounded-full flex items-center justify-center text-2xl mx-auto mb-4';
-	$: errorStateClasses = 'text-center p-8';
-	$: successTitleClasses = 'text-xl font-bold text-black mb-4 m-0';
-	$: successTextClasses = 'text-gray-600 m-0';
-	$: errorTitleClasses = 'text-xl font-bold text-black mb-4 m-0';
-	$: errorTextClasses = 'text-gray-600 mb-4 m-0';
-	$: tokenDetailsTitleClasses = 'text-base font-medium text-black mb-4 m-0';
-	$: orderSummaryTitleClasses = 'font-medium text-black mb-4 m-0';
+	const overlayClasses = 'fixed inset-0 bg-black/50 flex items-center justify-end z-[1000] p-8';
+	const containerClasses = 'bg-white w-full max-w-md max-h-[90vh] flex flex-col shadow-2xl';
+	const headerClasses = 'flex justify-between items-center p-8 border-b border-light-gray';
+	const titleClasses = 'flex-1';
+	const titleRowClasses = 'flex justify-between items-center gap-4';
+	const mainTitleClasses = 'text-2xl font-bold text-black m-0';
+	const assetNameClasses = 'text-secondary text-sm mt-2 m-0';
+	const viewDetailsClasses = 'text-black px-3 py-2 text-sm font-medium no-underline whitespace-nowrap transition-colors duration-200 hover:text-primary';
+	const closeClasses = 'bg-transparent border-none text-2xl cursor-pointer text-black p-0 w-8 h-8 flex items-center justify-center rounded transition-colors duration-200 hover:bg-light-gray';
+	const contentClasses = 'flex-1 p-8 overflow-y-auto min-h-0';
+	const formClasses = 'flex flex-col gap-8';
+	const tokenDetailsClasses = 'bg-white border border-light-gray p-6';
+	const detailsGridClasses = 'grid grid-cols-1 md:grid-cols-3 gap-4';
+	const detailItemClasses = 'flex flex-col gap-1';
+	const detailLabelClasses = 'text-xs text-gray-500 uppercase tracking-wider';
+	const detailValueClasses = 'text-lg font-bold text-secondary';
+	const formSectionClasses = 'flex flex-col gap-2';
+	const formLabelClasses = 'text-black text-lg font-semibold';
+	const usdcBadgeClasses = 'flex items-center gap-2 text-lg font-medium text-black opacity-80';
+	const usdcIconClasses = 'h-5 w-5';
+	const amountInputClasses = 'p-4 border-2 border-light-gray text-lg text-left transition-colors duration-200 focus:outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed';
+	const availableTokensClasses = 'mt-2 text-sm text-secondary font-medium';
+	const soldOutClasses = 'text-red-600';
+	const warningNoteClasses = 'text-sm text-orange-600 bg-orange-50 p-2 mt-2';
+	const orderSummaryClasses = 'border border-light-gray p-6';
+	const termsCheckboxClasses = 'flex items-start gap-3 text-sm leading-relaxed cursor-pointer';
+	const checkboxInputClasses = 'mt-1';
+	const formActionsClasses = 'flex gap-4 mt-4';
+	const successStateClasses = 'text-center p-8';
+	const successIconClasses = 'w-16 h-16 bg-green-500 text-white rounded-full flex items-center justify-center text-2xl mx-auto mb-4';
+	const errorStateClasses = 'text-center p-8';
+	const successTitleClasses = 'text-xl font-bold text-black mb-4 m-0';
+	const successTextClasses = 'text-gray-600 m-0';
+	const errorTitleClasses = 'text-xl font-bold text-black mb-4 m-0';
+	const errorTextClasses = 'text-gray-600 mb-4 m-0';
+	const tokenDetailsTitleClasses = 'text-base font-medium text-black mb-4 m-0';
+	const orderSummaryTitleClasses = 'font-medium text-black mb-4 m-0';
 </script>
 
 <!-- Widget Overlay -->
@@ -321,7 +361,7 @@ let tokenTermsUrl: string | null = null;
 										<span class={detailLabelClasses}>Maximum Supply</span>
 										<span class={detailValueClasses}>
 											<FormattedNumber 
-												value={formatEther((supply?.maxSupply || 0))} 
+												value={formatEther(supply?.maxSupply ?? 0n)} 
 												type="token"
 											/>
 										</span>
@@ -330,7 +370,7 @@ let tokenTermsUrl: string | null = null;
 										<span class={detailLabelClasses}>Current Supply</span>
 										<span class={detailValueClasses}>
 											<FormattedNumber 
-												value={formatEther((supply?.mintedSupply || 0))} 
+												value={formatEther(supply?.mintedSupply ?? 0n)} 
 												type="token"
 											/>
 										</span>
@@ -404,9 +444,9 @@ let tokenTermsUrl: string | null = null;
 							<SecondaryButton on:click={closeWidget}>
 								Cancel
 							</SecondaryButton>
-						<PrimaryButton 
-							on:click={handlePurchase}
-							disabled={!canProceed()}
+			<PrimaryButton 
+				on:click={handlePurchase}
+				disabled={!canProceed}
 						>
 								{#if isSoldOut()}
 									Sold Out

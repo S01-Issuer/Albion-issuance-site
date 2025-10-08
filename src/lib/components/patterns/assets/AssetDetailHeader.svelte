@@ -1,20 +1,13 @@
 <script lang="ts">
 	import type { Asset } from '$lib/types/uiTypes';
 	import { getImageUrl } from '$lib/utils/imagePath';
-	import { formatCurrency, formatEndDate } from '$lib/utils/formatters';
+	import { formatCurrency } from '$lib/utils/formatters';
 	import { StatsCard } from '$lib/components/components';
 	import { getShareText, getShareUrls, shareViaWebAPI, copyToClipboard, type ShareData } from '$lib/utils/sharing';
-	import { onMount } from 'svelte';
 
 	export let asset: Asset;
 	export let tokenCount: number = 0;
 	export let onTokenSectionClick: (() => void) | undefined = undefined;
-
-	let canUseWebShare = false;
-
-	onMount(() => {
-		canUseWebShare = !!navigator.share;
-	});
 
 	function getAssetImage(assetData: Asset | null): string {
 		return assetData?.coverImage || '/images/placeholder-asset.jpg';

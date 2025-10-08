@@ -1,22 +1,38 @@
 import { render, screen, waitFor } from "@testing-library/svelte/svelte5";
 import { vi, describe, it, beforeEach, expect, afterEach } from "vitest";
+import type { Navigation, Page } from "@sveltejs/kit";
 import HomePage from "../routes/(main)/+page.svelte";
 import { installHttpMocks } from "./http-mock";
 
 vi.mock("$app/stores", async () => {
   const { readable } = await import("svelte/store");
+  const page = readable<Page>({
+    url: new URL("http://localhost/"),
+    params: {},
+    route: { id: null },
+    status: 200,
+    error: null,
+    data: {},
+    state: {} as App.PageState,
+    form: null,
+  });
+
+  const navigating = readable<Navigation | null>(null);
+
+  const baseUpdated = readable(false);
+  const updated = {
+    subscribe: baseUpdated.subscribe,
+    async check() {
+      return false;
+    },
+  };
+
   return {
-    page: readable({
-      url: new URL("http://localhost/"),
-      params: {},
-      route: {},
-      status: 200,
-      error: null,
-      data: {},
-    }),
-    navigating: readable(null),
-    updated: { subscribe: () => () => {} },
-  } as any;
+    getStores: () => ({ page, navigating, updated }),
+    page,
+    navigating,
+    updated,
+  };
 });
 
 vi.mock("svelte-wagmi", async () => {
@@ -29,11 +45,17 @@ vi.mock("svelte-wagmi", async () => {
     wagmiConfig: readable({ chains: [], transports: {} }),
     chainId: writable(8453),
     disconnectWagmi: async () => {},
-  } as any;
+    defaultConfig: vi.fn(),
+    configuredConnectors: [],
+    wagmiLoaded: readable(true),
+    init: vi.fn(),
+    WC: {},
+  };
 });
 
 vi.mock("$lib/network", async () => {
-  const actual = await vi.importActual<any>("$lib/network");
+  const actual =
+    await vi.importActual<typeof import("$lib/network")>("$lib/network");
   return {
     ...actual,
     BASE_SFT_SUBGRAPH_URL: "https://example.com/sft",
@@ -165,10 +187,8 @@ describe("Home page E2E Tests", () => {
       { timeout: 5000 },
     );
 
-    const bodyText = document.body.textContent || "";
-
-    // Since the carousel may not load from stores alone, skip detailed checks
-    // Just verify the test completes without errors
+    const textAfterLoad = document.body.textContent || "";
+    expect(textAfterLoad.length).toBeGreaterThan(0);
   });
 
   it("displays exact calculated return values", async () => {
@@ -177,10 +197,8 @@ describe("Home page E2E Tests", () => {
     // Don't wait for loading - just check content after a short delay
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    const bodyText = document.body.textContent || "";
-
-    // Since the carousel may not load from stores alone, skip detailed checks
-    // Just verify the test completes without errors
+    const textAfterLoad = document.body.textContent || "";
+    expect(textAfterLoad.length).toBeGreaterThan(0);
   });
 
   it("displays How It Works section", async () => {

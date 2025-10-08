@@ -4,6 +4,7 @@
  * to eliminate duplication across the codebase
  */
 
+import type { OffchainAssetReceiptVault } from "$lib/types/graphql";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
 import type { Token } from "$lib/types/uiTypes";
 
@@ -75,8 +76,8 @@ export function formatTokenBalance(balance: number, decimals: number): string {
  * @param maxSupply Max supply from authorizer data
  */
 export function getTokenSupplyFromSft(
-  token: TokenMetadata,
-  sft: any,
+  _token: TokenMetadata,
+  sft: Pick<OffchainAssetReceiptVault, "totalShares">,
   maxSupply: string,
 ) {
   const maxSupplyBig = BigInt(maxSupply);
@@ -96,7 +97,7 @@ export function getTokenSupplyFromSft(
  * Get available supply as BigInt (legacy function - now returns 0)
  * Use getTokenSupplyFromSft instead for accurate supply data
  */
-export function getAvailableSupplyBigInt(token: TokenMetadata): bigint {
+export function getAvailableSupplyBigInt(_token: TokenMetadata): bigint {
   // This function is deprecated - components should use SFT data directly
   // or call getTokenSupplyFromSft with the appropriate SFT data
   return 0n;

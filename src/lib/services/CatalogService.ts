@@ -7,7 +7,7 @@ import {
 } from "$lib/data/transformers/sftTransformers";
 import { sftRepository } from "$lib/data/repositories/sftRepository";
 import authorizerAbi from "$lib/abi/authorizer.json";
-import type { Hex } from "viem";
+import type { Hex, Abi } from "viem";
 import type { Asset } from "$lib/types/uiTypes";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
 import type { OffchainAssetReceiptVault, MetaV1S } from "$lib/types/graphql";
@@ -127,7 +127,7 @@ export class CatalogService {
     // Read max supply from authorizers using multicall
     const maxSupplyByAuthorizer = await getMaxSharesSupplyMap(
       authorizers,
-      authorizerAbi,
+      authorizerAbi as Abi,
     );
 
     const assets: Record<string, Asset> = {};

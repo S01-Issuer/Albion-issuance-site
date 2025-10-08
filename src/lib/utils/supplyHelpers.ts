@@ -11,7 +11,7 @@ import { catalogService } from "$lib/services";
 import { getMaxSharesSupplyMap } from "$lib/data/clients/onchain";
 import authorizerAbi from "$lib/abi/authorizer.json";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
-import type { Hex } from "viem";
+import type { Hex, Abi } from "viem";
 
 export interface TokenSupplyInfo {
   maxSupply: bigint;
@@ -52,7 +52,7 @@ export async function getTokenSupplyInfo(
       try {
         const maxSupplyData = await getMaxSharesSupplyMap(
           [sftData.activeAuthorizer.address as Hex],
-          authorizerAbi,
+          authorizerAbi as Abi,
         );
         maxSupply =
           maxSupplyData[sftData.activeAuthorizer.address.toLowerCase()] ||

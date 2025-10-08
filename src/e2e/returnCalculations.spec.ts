@@ -6,11 +6,11 @@ import {
 } from "$lib/utils/returnCalculations";
 import type { Asset } from "$lib/types/uiTypes";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
-import { TokenType } from "$lib/types/MetaboardTypes";
+import { ProductionStatus, TokenType } from "$lib/types/MetaboardTypes";
 import type { ISODateTimeString } from "$lib/types/sharedTypes";
 
 function makeAsset(overrides: Partial<Asset> = {}): Asset {
-  return {
+  const baseAsset: Asset = {
     id: "0xasset",
     name: "Permian Basin-3",
     description: "",
@@ -28,7 +28,7 @@ function makeAsset(overrides: Partial<Asset> = {}): Asset {
     operator: { name: "Operator", website: "", experience: "" },
     technical: {
       fieldType: "Oil",
-      depth: 0,
+      depth: "0",
       license: "",
       estimatedLife: "",
       firstOil: "",
@@ -36,34 +36,46 @@ function makeAsset(overrides: Partial<Asset> = {}): Asset {
       environmental: "",
       expectedEndDate: "",
       crudeBenchmark: "",
-      pricing: { benchmarkPremium: "0", transportCosts: "0" } as any,
-    } as any,
-    terms: { interestType: "royalty", amount: 0, paymentFrequency: 30 } as any,
+      pricing: { benchmarkPremium: "0", transportCosts: "0" },
+    },
     assetTerms: {
       interestType: "royalty",
-      amount: 0,
-      paymentFrequency: 30,
-    } as any,
+      amount: "0%",
+      paymentFrequency: "Monthly",
+    },
+    terms: {
+      interestType: "royalty",
+      amount: "0%",
+      paymentFrequency: "Monthly",
+    },
     plannedProduction: {
       oilPriceAssumption: 80,
       oilPriceAssumptionCurrency: "USD",
       projections: [
-        { month: "2025-01", production: 1000, revenue: 0 as any } as any,
-        { month: "2025-02", production: 800, revenue: 0 as any } as any,
+        { month: "2025-01", production: 1000, revenue: 0 },
+        { month: "2025-02", production: 800, revenue: 0 },
       ],
-    } as any,
-    plannedProductionData: [] as any,
-    historicalProduction: [],
+    },
     metadata: {
       createdAt: new Date().toISOString() as ISODateTimeString,
       updatedAt: new Date().toISOString() as ISODateTimeString,
     },
-    ...overrides,
-  } as any;
+    monthlyReports: [],
+    productionHistory: [],
+    operationalMetrics: {
+      uptime: { percentage: 0, period: "30 days" },
+      hseMetrics: {
+        incidentFreeDays: 0,
+        lastIncidentDate: new Date().toISOString() as ISODateTimeString,
+      },
+    },
+  };
+
+  return { ...baseAsset, ...overrides };
 }
 
 function makeToken(overrides: Partial<TokenMetadata> = {}): TokenMetadata {
-  return {
+  const baseToken: TokenMetadata = {
     contractAddress: "0xtoken",
     symbol: "PBR1",
     releaseName: "Permian Basin-3 Release 1",
@@ -74,7 +86,13 @@ function makeToken(overrides: Partial<TokenMetadata> = {}): TokenMetadata {
     asset: {
       assetName: "Permian Basin-3",
       description: "",
-      location: { state: "TX", county: "Reeves", country: "USA" } as any,
+      location: {
+        state: "TX",
+        county: "Reeves",
+        country: "USA",
+        coordinates: { lat: 0, lng: 0 },
+        waterDepth: null,
+      },
       operator: { name: "Operator", website: "", experienceYears: 0 },
       technical: {
         fieldType: "Oil",
@@ -85,17 +103,22 @@ function makeToken(overrides: Partial<TokenMetadata> = {}): TokenMetadata {
         expectedEndDate: "2030-01",
         crudeBenchmark: "",
         pricing: { benchmarkPremium: 0, transportCosts: 0 },
-      } as any,
+      },
       assetTerms: {
         interestType: "royalty",
         amount: 0,
         paymentFrequencyDays: 30,
       },
-      status: "producing" as any,
+      status: ProductionStatus.Producing,
       plannedProduction: { oilPriceAssumption: 80, projections: [] },
       historicalProduction: [],
       receiptsData: [],
-      operationalMetrics: {} as any,
+      operationalMetrics: {
+        uptime: { percentage: 0, period: "30 days" },
+        hseMetrics: {
+          lastIncidentDate: new Date().toISOString() as ISODateTimeString,
+        },
+      },
       documents: [],
       coverImage: "",
       galleryImages: [],
@@ -104,8 +127,9 @@ function makeToken(overrides: Partial<TokenMetadata> = {}): TokenMetadata {
       createdAt: new Date().toISOString() as ISODateTimeString,
       updatedAt: new Date().toISOString() as ISODateTimeString,
     },
-    ...overrides,
   };
+
+  return { ...baseToken, ...overrides };
 }
 
 describe("returnCalculations", () => {
@@ -113,7 +137,7 @@ describe("returnCalculations", () => {
     const asset = makeAsset();
     const token = makeToken();
     const onChainMinted = (500n * 10n ** 18n).toString();
-    const res = calculateTokenReturns(asset as any, token, onChainMinted);
+    const res = calculateTokenReturns(asset, token, onChainMinted);
     expect(res.baseReturn).toBeGreaterThanOrEqual(0);
     expect(Number.isFinite(res.baseReturn)).toBe(true);
     expect(res.bonusReturn).toBeGreaterThanOrEqual(0);
@@ -124,16 +148,16 @@ describe("returnCalculations", () => {
   it("handles zero minted supply: bonus -> very large, implied barrels -> Infinity, break-even 0", () => {
     const asset = makeAsset();
     const token = makeToken();
-    const res = calculateTokenReturns(asset as any, token, "0");
+    const res = calculateTokenReturns(asset, token, "0");
     expect(res.bonusReturn).toBeGreaterThan(1e6);
     expect(res.impliedBarrelsPerToken).toBe(Infinity);
     expect(res.breakEvenOilPrice).toBe(0);
   });
 
   it("handles missing planned production or sharePercentage: returns zeros", () => {
-    const asset = makeAsset({ plannedProduction: undefined as any });
+    const asset = makeAsset({ plannedProduction: undefined });
     const token = makeToken({ sharePercentage: 0 });
-    const res = calculateTokenReturns(asset as any, token, undefined);
+    const res = calculateTokenReturns(asset, token, undefined);
     expect(res.baseReturn).toBe(0);
     expect(res.bonusReturn).toBe(0);
     expect(res.impliedBarrelsPerToken).toBe(0);
@@ -141,14 +165,16 @@ describe("returnCalculations", () => {
   });
 
   it("applies benchmark premium and transport costs when present on asset", () => {
+    const base = makeAsset();
     const asset = makeAsset({
       technical: {
+        ...base.technical,
         pricing: { benchmarkPremium: "+5", transportCosts: "3" },
-      } as any,
+      },
     });
     const token = makeToken();
     const res = calculateTokenReturns(
-      asset as any,
+      asset,
       token,
       (500n * 10n ** 18n).toString(),
     );
@@ -157,7 +183,9 @@ describe("returnCalculations", () => {
 
   it("getTokenSupply computes utilization and available supply", () => {
     const token = makeToken();
-    const supply = getTokenSupply(token as any)!;
+    const supply = getTokenSupply(token);
+    expect(supply).not.toBeNull();
+    if (!supply) return;
     expect(supply.maxSupply).toBe(0);
     expect(supply.mintedSupply).toBe(0);
     expect(supply.availableSupply).toBe(0);
@@ -173,14 +201,17 @@ describe("returnCalculations", () => {
             totalPayout: 100,
             payoutPerToken: 0.1,
             txHash: "0x",
+            orderHash: "0xorder",
           },
-        } as any,
+        },
       ],
     });
-    const history = getTokenPayoutHistory(token as any)!;
+    const history = getTokenPayoutHistory(token);
+    expect(history).not.toBeNull();
+    if (!history) return;
     expect(history.recentPayouts.length).toBe(1);
     const noHistory = getTokenPayoutHistory(
-      makeToken({ payoutData: undefined as any }) as any,
+      makeToken({ payoutData: undefined }),
     );
     expect(noHistory).toBeNull();
   });

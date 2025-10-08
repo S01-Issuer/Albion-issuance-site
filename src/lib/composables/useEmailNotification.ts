@@ -126,7 +126,7 @@ export function useEmailNotification() {
   /**
    * Simulate API call (replace with actual implementation)
    */
-  async function simulateApiCall(data: EmailSubscriptionData): Promise<void> {
+  async function simulateApiCall(_data: EmailSubscriptionData): Promise<void> {
     // Simulate network delay
     await new Promise((resolve) => setTimeout(resolve, 1000));
 

@@ -191,7 +191,7 @@ export function renderMarkdown(markdown: string): string {
       continue;
     }
 
-    const orderedMatch = trimmedLine.match(/^(\d+)[\.)]\s+(.*)$/);
+    const orderedMatch = trimmedLine.match(/^(\d+)[.)]\s+(.*)$/);
     if (orderedMatch) {
       closeParagraph();
       closeBlockquote();

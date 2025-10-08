@@ -2,17 +2,20 @@
 	export let columns: number = 3;
 	export let title: string = '';
 	export let showTitle = false;
-	export let background: 'white' | 'gray' | 'secondary' = 'white';
-	export let padding: 'compact' | 'standard' | 'large' = 'standard';
+	type BackgroundVariant = 'white' | 'gray' | 'secondary';
+	type PaddingVariant = 'compact' | 'standard' | 'large';
+
+	export let background: BackgroundVariant = 'white';
+	export let padding: PaddingVariant = 'standard';
 	export let className = '';
 
-	$: backgroundClasses = {
+	const backgroundClasses: Record<BackgroundVariant, string> = {
 		white: 'bg-white',
-		gray: 'bg-light-gray', 
+		gray: 'bg-light-gray',
 		secondary: 'bg-secondary'
 	};
 
-	$: paddingClasses = {
+	const paddingClasses: Record<PaddingVariant, string> = {
 		compact: 'py-8 md:py-12',
 		standard: 'py-16',
 		large: 'py-24'
@@ -33,7 +36,7 @@
 		{#if showTitle && title}
 			<h2 class="typography-h2 text-black mb-6 text-center">{title}</h2>
 		{/if}
-		<div class="grid {gridCols} gap-8 text-center">
+		<div class={`grid ${gridCols} gap-8 text-center`}>
 			<slot />
 		</div>
 	</div>

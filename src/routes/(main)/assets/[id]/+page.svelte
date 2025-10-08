@@ -1,30 +1,38 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { sftMetadata, sfts, dataLoaded } from '$lib/stores';
-	import type { Asset } from '$lib/types/uiTypes';
-	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
+	import type {
+		Asset,
+		MonthlyReport,
+		ProductionHistoryRecord
+	} from '$lib/types/uiTypes';
+	import type { Document as TokenDocument, TokenMetadata } from '$lib/types/MetaboardTypes';
 	import { Card, CardContent, PrimaryButton, SecondaryButton, Chart, CollapsibleSection, Modal } from '$lib/components/components';
-	import SectionTitle from '$lib/components/components/SectionTitle.svelte';
-
 	import TabButton from '$lib/components/components/TabButton.svelte';
 	import { PageLayout, ContentSection } from '$lib/components/layout';
 	import { getImageUrl } from '$lib/utils/imagePath';
-	import { formatCurrency, formatEndDate, formatSmartReturn, formatHash } from '$lib/utils/formatters';
+	import { formatCurrency, formatSmartReturn, formatHash } from '$lib/utils/formatters';
 	import { hasIncompleteReleases } from '$lib/utils/futureReleases';
-	import { 
-		useAssetDetailData,
-		useDataExport, 
-		useTooltip, 
-		useEmailNotification
-	} from '$lib/composables';
+	import { useAssetDetailData, useDataExport } from '$lib/composables';
 	import AssetDetailHeader from '$lib/components/patterns/assets/AssetDetailHeader.svelte';
 	import AssetOverviewTab from '$lib/components/patterns/assets/AssetOverviewTab.svelte';
-    import { calculateTokenReturns, getTokenPayoutHistory, getTokenSupply } from '$lib/utils/returnCalculations';
-    import { formatSupplyDisplay } from '$lib/utils/supplyHelpers';
-    import { formatEther } from 'viem';
+import { calculateTokenReturns, getTokenPayoutHistory, getTokenSupply } from '$lib/utils/returnCalculations';
 import { PINATA_GATEWAY } from '$lib/network';
 import { catalogService } from '$lib/services';
 import { getTokenTermsPath } from '$lib/utils/tokenTerms';
+
+const isDev = import.meta.env.DEV;
+const logDev = (...messages: unknown[]) => {
+	if (isDev) console.warn('[AssetDetailPage]', ...messages);
+};
+
+const SvelteDate: DateConstructor = Date;
+
+function resetRecaptcha(): void {
+	if (typeof window === 'undefined') return;
+	const grecaptcha = (window as typeof window & { grecaptcha?: { reset: () => void } }).grecaptcha;
+	grecaptcha?.reset();
+}
 
 type RevenueReport = {
 	month: string;
@@ -48,9 +56,23 @@ function safeNumber(value: unknown): number {
 	return 0;
 }
 
+type ReceiptRecord = {
+	month?: string;
+	revenue?: number | string;
+	expenses?: number | string;
+	production?: number | string;
+	netIncome?: number | string;
+	assetData?: {
+		revenue?: number | string;
+		expenses?: number | string;
+		production?: number | string;
+		netIncome?: number | string;
+	};
+};
+
 function buildRevenueReports(
-	receipts: any[] | null | undefined,
-	fallback: any[] | null | undefined,
+	receipts: ReceiptRecord[] | null | undefined,
+	fallback: ReceiptRecord[] | null | undefined,
 ): RevenueReport[] {
 	const reports: RevenueReport[] = [];
 
@@ -105,7 +127,11 @@ function parseYearMonth(value: string | null | undefined): Date | null {
 	if (!Number.isFinite(year) || !Number.isFinite(month)) {
 		return null;
 	}
-	return new Date(year, Math.max(0, month - 1), Number.isFinite(day) && day > 0 ? day : 1);
+	return new SvelteDate(
+		year,
+		Math.max(0, month - 1),
+		Number.isFinite(day) && day > 0 ? day : 1,
+	);
 }
 
 function chartLabelFromMonth(value: string): string {
@@ -137,20 +163,11 @@ function formatDueDate(date: Date): string {
 	return `${monthLabel} ${day}${suffix}`;
 }
 
-function addDays(date: Date, days: number): Date {
-	const result = new Date(date);
-	result.setDate(result.getDate() + days);
-	return result;
-}
-//
-
 const metricCardClasses = 'text-center p-4 bg-white border border-light-gray rounded-lg';
 const metricValueClasses = 'text-2xl font-extrabold text-black mb-1';
 const metricLabelClasses = 'text-xs font-medium text-black opacity-70';
 
 	let activeTab = 'overview';
-	let unclaimedPayout = 0; // Will be calculated from actual token holdings
-	
 	// Purchase widget state
 	let showPurchaseWidget = false;
 	let selectedTokenAddress: string | null = null;
@@ -162,7 +179,7 @@ let assetTokens: TokenMetadata[] = [];
 let loading = false;
 let error: string | null = null;
 let primaryToken: TokenMetadata | null = null;
-let receiptsData: any[] = [];
+let receiptsData: ReceiptRecord[] = [];
 let revenueReports: RevenueReport[] = [];
 let revenueReportsWithIncome: RevenueReport[] = [];
 let revenueChartData: Array<{ label: string; value: number }> = [];
@@ -170,7 +187,8 @@ let latestRevenueReport: RevenueReport | null = null;
 let revenueAverage = 0;
 let revenueTotal = 0;
 let revenueHasData = false;
-let nextReportDue: Date | null = null;
+let productionReports: Array<MonthlyReport | ProductionHistoryRecord> = [];
+let nextReportDueLabel = '';
 let revenueSignature = '';
 let payoutSignature = '';
 let receiptsSignature = '';
@@ -190,22 +208,21 @@ let receiptsSignature = '';
 	// The composable now handles duplicate load prevention internally
 	// IMPORTANT: Wait for dataLoaded to ensure both stores have actual data
 	$: if (assetId && $dataLoaded && !hasInitiatedLoad) {
-		console.log(`[AssetDetailPage] Loading data for asset: ${assetId}`);
-		console.log(`[AssetDetailPage] Store state - SFTs: ${$sfts?.length}, Metadata: ${$sftMetadata?.length}`);
+		logDev('Loading asset data', { assetId, sfts: $sfts?.length ?? 0, metadata: $sftMetadata?.length ?? 0 });
 		hasInitiatedLoad = true;
 		loadAssetData(assetId);
 	}
 	
 	// Reset when asset ID changes
-	$: if (assetId) {
-		const previousAssetId = loadedAssetId;
-		if (previousAssetId && previousAssetId !== assetId) {
-			hasInitiatedLoad = false;
-		}
+$: if (assetId) {
+	const previousAssetId = loadedAssetId;
+	if (previousAssetId && previousAssetId !== assetId) {
+		hasInitiatedLoad = false;
 	}
-	let loadedAssetId = assetId;
+	loadedAssetId = assetId;
+}
+let loadedAssetId: string | null = null;
 	const { exportProductionData: exportDataFunc, exportPaymentHistory } = useDataExport();
-	const { state: emailState, setEmail, submitEmail } = useEmailNotification();
 
 	// Reactive data from composable
 	$: ({ asset: assetData, tokens: assetTokens, loading, error } = $assetDetailState);
@@ -221,22 +238,31 @@ $: revenueTotal = revenueReportsWithIncome.reduce((sum, report) => sum + report.
 $: latestRevenueReport = revenueReports.length
 	? revenueReports[revenueReports.length - 1]
 	: null;
-$: nextReportDue = (() => {
+$: nextReportDueLabel = (() => {
+	const labelFromMonth = (month: string, offset: number) => {
+		const base = parseYearMonth(month);
+		if (!base) return '';
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const endOfTargetMonth = new SvelteDate(
+			base.getFullYear(),
+			base.getMonth() + offset,
+			0,
+		);
+		endOfTargetMonth.setDate(endOfTargetMonth.getDate() + 30);
+		return formatDueDate(endOfTargetMonth);
+	};
+
 	if (latestRevenueReport?.month) {
-		const base = parseYearMonth(latestRevenueReport.month);
-		if (base) {
-			const endOfNextMonth = new Date(base.getFullYear(), base.getMonth() + 2, 0);
-			return addDays(endOfNextMonth, 30);
-		}
+		const label = labelFromMonth(latestRevenueReport.month, 2);
+		if (label) return label;
 	}
+
 	if (primaryToken?.firstPaymentDate) {
-		const base = parseYearMonth(primaryToken.firstPaymentDate);
-		if (base) {
-			const endOfNextMonth = new Date(base.getFullYear(), base.getMonth() + 1, 0);
-			return addDays(endOfNextMonth, 30);
-		}
+		const label = labelFromMonth(primaryToken.firstPaymentDate, 1);
+		if (label) return label;
 	}
-	return null;
+
+	return '';
 })();
 $: revenueChartData = revenueReports.map((report) => ({
 	label: chartLabelFromMonth(report.month),
@@ -248,7 +274,7 @@ $: {
 		const newReceiptsSignature = JSON.stringify(primaryToken.asset?.receiptsData ?? []);
 		if (newReceiptsSignature !== receiptsSignature) {
 			receiptsSignature = newReceiptsSignature;
-			console.log('[AssetDetailPage] Receipts data', {
+			logDev('Receipts data updated', {
 				assetId,
 				contract: primaryToken.contractAddress,
 				records: primaryToken.asset?.receiptsData,
@@ -263,12 +289,12 @@ $: {
 	);
 	if (newRevenueSignature !== revenueSignature) {
 		revenueSignature = newRevenueSignature;
-		console.log('[AssetDetailPage] Revenue reports', {
+		logDev('Revenue reports updated', {
 			assetId,
 			reports: revenueReports,
 			chart: revenueChartData,
 			revenueAverage,
-			nextReportDue,
+			nextReportDueLabel,
 		});
 	}
 }
@@ -284,9 +310,9 @@ $: {
 		);
 		if (newPayoutSignature !== payoutSignature) {
 			payoutSignature = newPayoutSignature;
-			console.log('[AssetDetailPage] Token payout data', {
+			logDev('Token payout data updated', {
 				assetId,
-				entries: assetTokens.map((token) => ({
+				tokens: assetTokens.map((token) => ({
 					contract: token.contractAddress,
 					symbol: token.symbol,
 					payoutData: token.payoutData,
@@ -295,20 +321,31 @@ $: {
 		}
 	}
 }
-	
-	// Check for future releases when asset data is available
-	$: if (assetId && assetData) {
-		console.log(`[AssetDetailPage] Checking for future releases for assetId: ${assetId}`);
-		hasIncompleteReleases(assetId).then(hasIncomplete => {
-			console.log(`[AssetDetailPage] hasFutureReleases result: ${hasIncomplete}`);
+
+
+// Check for future releases when asset data is available
+$: if (assetId && assetData && assetId !== lastFutureReleaseCheck) {
+	checkFutureReleases(assetId);
+}
+
+async function checkFutureReleases(currentAssetId: string) {
+	lastFutureReleaseCheck = currentAssetId;
+	logDev('Checking for future releases', { assetId: currentAssetId });
+	try {
+		const hasIncomplete = await hasIncompleteReleases(currentAssetId);
+		logDev('Future releases result', { assetId: currentAssetId, hasIncomplete });
+		if (currentAssetId === assetId) {
 			hasFutureReleases = hasIncomplete;
-		}).catch(error => {
-			console.error(`[AssetDetailPage] Error checking future releases:`, error);
+		}
+	} catch (error) {
+		console.error('[AssetDetailPage] Error checking future releases:', error);
+		if (currentAssetId === assetId) {
 			hasFutureReleases = false;
-		});
+		}
 	}
+}
 	
-	async function downloadDocument(doc: any) {
+	async function downloadDocument(doc: TokenDocument) {
 		try {
 			const response = await fetch(`${PINATA_GATEWAY}/${doc.ipfs}`);
 			const blob = await response.blob();
@@ -328,23 +365,31 @@ $: {
 	
 	
 	function showTooltipWithDelay(tooltipId: string) {
-		clearTimeout(tooltipTimer);
+		if (tooltipTimer) {
+			clearTimeout(tooltipTimer);
+		}
 		tooltipTimer = setTimeout(() => {
 			showTooltip = tooltipId;
 		}, 500);
 	}
 	
 	function hideTooltip() {
+	if (tooltipTimer) {
 		clearTimeout(tooltipTimer);
-		showTooltip = '';
 	}
+	showTooltip = '';
+}
+
+$: productionReports =
+	(assetData?.productionHistory ?? assetData?.monthlyReports ?? []) as Array<
+		MonthlyReport | ProductionHistoryRecord
+	>;
 	
-// Email popup state
-let showEmailPopup = false; // legacy modal (to be removed)
 // Future releases flip state
 let futureCardFlipped = false;
 let futureSignupSubmitting = false;
 let futureSignupStatus: 'idle' | 'success' | 'error' = 'idle';
+let lastFutureReleaseCheck = '';
 
 async function handleFutureSignupSubmit(event: SubmitEvent) {
     event.preventDefault();
@@ -363,11 +408,13 @@ async function handleFutureSignupSubmit(event: SubmitEvent) {
             headers: { Accept: 'application/json' }
         });
 
-        if (response.ok) {
-            futureSignupStatus = 'success';
-            try {
-                form.reset();
-            } catch {}
+		if (response.ok) {
+			futureSignupStatus = 'success';
+			try {
+				form.reset();
+			} catch (resetError) {
+				logDev('Unable to reset future releases form', resetError);
+			}
         } else {
             futureSignupStatus = 'error';
         }
@@ -376,11 +423,11 @@ async function handleFutureSignupSubmit(event: SubmitEvent) {
         futureSignupStatus = 'error';
     } finally {
         futureSignupSubmitting = false;
-        if (typeof window !== 'undefined' && (window as any).grecaptcha) {
-            try {
-                (window as any).grecaptcha.reset();
-            } catch {}
-        }
+		try {
+			resetRecaptcha();
+		} catch (recaptchaError) {
+			logDev('Unable to reset recaptcha', recaptchaError);
+		}
     }
 }
 
@@ -416,14 +463,15 @@ $: if (!historyModalOpen && historyModalToken) {
 
 // Tooltip state
 let showTooltip = '';
-let tooltipTimer: any = null;
+let tooltipTimer: ReturnType<typeof setTimeout> | null = null;
 
-let failedImages = new Set<string>();
+let failedImages: string[] = [];
 
 	function handleImageError(imageUrl: string) {
-		failedImages.add(imageUrl);
-	failedImages = new Set(failedImages); // Trigger reactivity
-}
+		if (!failedImages.includes(imageUrl)) {
+			failedImages = [...failedImages, imageUrl];
+		}
+	}
 
 
 function handleCardClick(tokenAddress: string) {
@@ -447,11 +495,6 @@ function openHistoryModal(tokenAddress: string) {
 	historyModalOpen = true;
 }
 
-function handleHistoryButtonClick(event: Event, tokenAddress: string) {
-	event.stopPropagation();
-	openHistoryModal(tokenAddress);
-}
-
 function closeHistoryModal() {
 	historyModalOpen = false;
 }
@@ -471,10 +514,16 @@ function closeHistoryModal() {
 	}
 
 
-	function handleBuyTokens(tokenAddress: string) {
-		selectedTokenAddress = tokenAddress;
-		showPurchaseWidget = true;
-	}
+function handleBuyTokens(tokenAddress: string, event?: Event) {
+	event?.stopPropagation();
+	selectedTokenAddress = tokenAddress;
+	showPurchaseWidget = true;
+}
+
+function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
+	event?.stopPropagation();
+	openHistoryModal(tokenAddress);
+}
 	
 	function handlePurchaseSuccess() {
 		showPurchaseWidget = false;
@@ -486,13 +535,6 @@ function closeHistoryModal() {
 		showPurchaseWidget = false;
 		selectedTokenAddress = null;
 	}
-	
-// Removed JS popup toggle; using HTML embed directly
-	
-	function handleCloseEmailPopup() {
-		showEmailPopup = false;
-	}
-	
 
 
 </script>
@@ -534,23 +576,21 @@ function closeHistoryModal() {
         		</CollapsibleSection>
         		
         		<!-- Other sections in collapsible format -->
-        		<CollapsibleSection title="Production Data" isOpenByDefault={false} alwaysOpenOnDesktop={false}>
-        			{@const productionReports = assetData?.productionHistory || assetData?.monthlyReports || []}
-					{@const maxProduction = productionReports.length > 0 ? Math.max(...productionReports.map((r: any) => r.production)) : 100}
-					<div class="flex-1 flex flex-col">
-						<div class="grid md:grid-cols-4 grid-cols-1 gap-6">
-							<div class="bg-white border border-light-gray p-6 md:col-span-3">
-								<div class="flex justify-between items-center mb-6">
-									<h4 class="text-lg font-extrabold text-black mb-0">Production History</h4>
-									<SecondaryButton on:click={exportProductionData}>
+			<CollapsibleSection title="Production Data" isOpenByDefault={false} alwaysOpenOnDesktop={false}>
+				<div class="flex-1 flex flex-col">
+					<div class="grid md:grid-cols-4 grid-cols-1 gap-6">
+						<div class="bg-white border border-light-gray p-6 md:col-span-3">
+							<div class="flex justify-between items-center mb-6">
+								<h4 class="text-lg font-extrabold text-black mb-0">Production History</h4>
+								<SecondaryButton on:click={exportProductionData}>
 										📊 Export Data
 									</SecondaryButton>
 								</div>
 								{#if productionReports.length > 0}
 									<Chart
-										data={productionReports.map((report: any) => ({
+										data={productionReports.map((report) => ({
 											label: report.month,
-											value: report.production
+											value: report.production ?? 0
 										}))}
 										width={800}
 										height={300}
@@ -587,8 +627,12 @@ function closeHistoryModal() {
 									<!-- Current Daily Production -->
 									<div class="text-center p-3 bg-light-gray">
 										<div class="text-2xl font-extrabold text-black mb-1">
-											{#if (() => { const list = productionReports || []; return list.length > 0 && list[list.length-1]?.production !== undefined; })()}
-												{(() => { const list = productionReports || []; const last = list[list.length-1]; const val = (last.production || 0) * 12 / 365; return val.toFixed(1); })()}
+											{#if productionReports.length > 0 && productionReports[productionReports.length - 1]?.production !== undefined}
+												{(() => {
+													const last = productionReports[productionReports.length - 1];
+													const annualized = ((last?.production ?? 0) * 12) / 365;
+													return annualized.toFixed(1);
+												})()}
 											{:else}
 												<span class="text-gray-400">N/A</span>
 											{/if}
@@ -625,7 +669,7 @@ function closeHistoryModal() {
 					<div class="bg-white border border-light-gray p-4">
 						<h4 class="text-base font-bold text-black mb-4">Received Revenue</h4>
 						<div class="space-y-2">
-							{#each revenueReportsWithIncome.slice(-6) as report}
+							{#each revenueReportsWithIncome.slice(-6) as report (report.month)}
 								<div class="flex justify-between items-center py-2 border-b border-gray-200 last:border-b-0">
 									<div class="text-sm text-black">{formatReportMonth(report.month)}</div>
 										<div class="text-sm font-semibold text-primary">{formatCurrency(report.revenue)}</div>
@@ -648,7 +692,7 @@ function closeHistoryModal() {
         		<CollapsibleSection title="Gallery" isOpenByDefault={false} alwaysOpenOnDesktop={false}>
         			<div class="grid grid-cols-2 gap-4">
 						{#if assetData?.galleryImages && assetData.galleryImages.length > 0}
-							{#each assetData.galleryImages.slice(0, 4) as image}
+							{#each assetData.galleryImages.slice(0, 4) as image (image.url)}
 								<div
 								   class="bg-white border border-light-gray overflow-hidden group cursor-pointer"
 								   on:click={() => window.open(getImageUrl(image.url), '_blank')}
@@ -656,7 +700,7 @@ function closeHistoryModal() {
 								   role="button"
 								   tabindex="0"
 								>
-									{#if !failedImages.has(image.url)}
+									{#if !failedImages.includes(image.url)}
 										<img 
 											src={getImageUrl(image.url)} 
 											alt={image.caption || 'Asset gallery image'} 
@@ -686,7 +730,7 @@ function closeHistoryModal() {
         			<div class="space-y-3">
 						{#if assetTokens[0]?.asset?.documents && assetTokens[0].asset.documents.length > 0}
 							<!-- Legal Documents -->
-							{#each assetTokens[0].asset.documents as document}
+							{#each assetTokens[0].asset.documents as document (document.ipfs ?? document.name ?? document.type)}
 								<div class="flex items-center justify-between p-4 border-b border-light-gray last:border-b-0">
 									<div class="flex items-center space-x-3">
 										<div class="w-8 h-8 bg-secondary rounded flex items-center justify-center">
@@ -754,8 +798,6 @@ function closeHistoryModal() {
 						<AssetOverviewTab asset={assetData} />
 					{/if}
 				{:else if activeTab === 'production'}
-					{@const productionReports = assetData?.productionHistory || assetData?.monthlyReports || []}
-					{@const maxProduction = productionReports.length > 0 ? Math.max(...productionReports.map((r: any) => r.production)) : 100}
 					<div class="flex-1 flex flex-col">
 						<div class="grid md:grid-cols-4 grid-cols-1 gap-6">
 							<div class="bg-white border border-light-gray p-6 md:col-span-3">
@@ -767,15 +809,14 @@ function closeHistoryModal() {
 								</div>
 								<div class="w-full">
 									<Chart
-										data={productionReports.map((report: any) => {
-											// Handle different date formats
+										data={productionReports.map((report) => {
 											let dateStr = report.month || '';
 											if (dateStr && !dateStr.includes('-01')) {
-												dateStr = dateStr + '-01';
+												dateStr = `${dateStr}-01`;
 											}
 											return {
 												label: dateStr,
-												value: report.production
+												value: report.production ?? 0
 											};
 										})}
 										width={700}
@@ -807,8 +848,12 @@ function closeHistoryModal() {
 							<div class="grid grid-cols-1 gap-4 mb-6">
 								<div class={metricCardClasses}>
 									<div class={metricValueClasses}>
-										{#if (() => { const list = productionReports || []; return list.length > 0 && list[list.length-1]?.production !== undefined; })()}
-											{(() => { const list = productionReports || []; const last = list[list.length - 1]; const val = (last.production || 0) * 12 / 365; return val.toFixed(1); })()}
+										{#if productionReports.length > 0 && productionReports[productionReports.length - 1]?.production !== undefined}
+											{(() => {
+												const last = productionReports[productionReports.length - 1];
+												const annualized = ((last?.production ?? 0) * 12) / 365;
+												return annualized.toFixed(1);
+											})()}
 										{:else}
 											<span class="text-gray-400">N/A</span>
 										{/if}
@@ -864,7 +909,7 @@ function closeHistoryModal() {
 								<h4 class="text-lg font-extrabold text-black mb-6">Revenue Metrics</h4>
 								<div class="mb-6">
 									<div class={metricCardClasses}>
-										<div class={metricValueClasses}>{nextReportDue ? formatDueDate(nextReportDue) : 'TBD'}</div>
+										<div class={metricValueClasses}>{nextReportDueLabel || 'TBD'}</div>
 										<div class={metricLabelClasses}>Next Revenue Report Due</div>
 									</div>
 								</div>
@@ -897,7 +942,7 @@ function closeHistoryModal() {
 					<div class="flex-1 flex flex-col">
 						<div class="grid md:grid-cols-3 grid-cols-1 gap-6">
 							{#if assetData?.galleryImages && assetData.galleryImages.length > 0}
-								{#each assetData.galleryImages as image}
+								{#each assetData.galleryImages as image (image.url)}
 									<div 
 										class="bg-white border border-light-gray overflow-hidden group cursor-pointer" 
 										on:click={() => window.open(getImageUrl(image.url), '_blank')}
@@ -906,7 +951,7 @@ function closeHistoryModal() {
 										tabindex="0"
 										aria-label={`View ${image.caption || image.title || 'Asset image'} in new tab`}
 									>
-										{#if !failedImages.has(image.url)}
+											{#if !failedImages.includes(image.url)}
 											<img 
 												src={getImageUrl(image.url)} 
 												alt={image.caption || image.title || 'Asset image'}
@@ -939,7 +984,7 @@ function closeHistoryModal() {
 					</div>
 				{:else if activeTab === 'documents'}
 					{#if assetTokens[0]?.asset?.documents && assetTokens[0].asset.documents.length > 0}
-						{#each assetTokens[0].asset.documents as document}
+						{#each assetTokens[0].asset.documents as document (document.ipfs ?? document.name ?? document.type)}
 							<div class="grid md:grid-cols-2 grid-cols-1 gap-8">
 								<div class="space-y-4">
 									<div class="flex items-center justify-between p-4 bg-white border border-light-gray hover:bg-white transition-colors duration-200">
@@ -976,14 +1021,12 @@ function closeHistoryModal() {
 					<h3 class="text-3xl md:text-2xl font-extrabold text-black uppercase tracking-wider mb-8">Token Information</h3>
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
 	
-				{#each assetTokens as token}
-					{@const sft = $sfts?.find(s => s.id.toLowerCase() === token.contractAddress.toLowerCase())}
+				{#each assetTokens as token (token.contractAddress)}
+				{@const sft = $sfts?.find((s) => s.id.toLowerCase() === token.contractAddress.toLowerCase())}
 				{@const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress) ?? undefined}
 				{@const supply = getTokenSupply(token, sft, maxSupply)}
-				{@const hasAvailableSupply = supply && supply.availableSupply > 0}
-				{@const tokenPayoutData = getTokenPayoutHistory(token)}
-				{@const latestPayout = tokenPayoutData?.recentPayouts?.[0]}
-				{@const calculatedReturns = calculateTokenReturns(assetData!, token, sft?.totalShares, maxSupply)}
+				{@const hasAvailableSupply = (supply?.availableSupply ?? 0) > 0}
+				{@const calculatedReturns = assetData ? calculateTokenReturns(assetData, token, sft?.totalShares, maxSupply) : null}
 				{@const tokenTermsUrl = getTokenTermsPath(token.contractAddress)}
 				<div id="token-{token.contractAddress}">
 					<Card hoverable clickable paddingClass="p-0" on:click={() => handleCardClick(token.contractAddress)}>
@@ -1024,7 +1067,13 @@ function closeHistoryModal() {
 											Implied Barrels/Token
 											<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100" on:mouseenter={() => showTooltipWithDelay('barrels')} on:mouseleave={hideTooltip} role="button" tabindex="0">ⓘ</span>
 										</span>
-										<span class="text-base font-extrabold text-black text-right">{calculatedReturns?.impliedBarrelsPerToken === Infinity ? '∞' : calculatedReturns?.impliedBarrelsPerToken?.toFixed(6) || '0.000000'}</span>
+										<span class="text-base font-extrabold text-black text-right">{
+											calculatedReturns?.impliedBarrelsPerToken === Infinity
+												? '∞'
+												: calculatedReturns?.impliedBarrelsPerToken !== undefined
+													? calculatedReturns.impliedBarrelsPerToken.toFixed(6)
+													: '0.000000'
+										}</span>
 										{#if showTooltip === 'barrels'}
 											<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">Estimated barrels of oil equivalent per token based on reserves and token supply</div>
 										{/if}
@@ -1034,7 +1083,11 @@ function closeHistoryModal() {
 											Breakeven Oil Price
 											<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100" on:mouseenter={() => showTooltipWithDelay('breakeven')} on:mouseleave={hideTooltip} role="button" tabindex="0">ⓘ</span>
 										</span>
-										<span class="text-base font-extrabold text-black text-right">US${calculatedReturns?.breakEvenOilPrice?.toFixed(2) || '0.00'}</span>
+										<span class="text-base font-extrabold text-black text-right">{
+											calculatedReturns?.breakEvenOilPrice !== undefined
+												? `US$${calculatedReturns.breakEvenOilPrice.toFixed(2)}`
+												: 'US$0.00'
+										}</span>
 										{#if showTooltip === 'breakeven'}
 											<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">Oil price required to cover operational costs and maintain profitability</div>
 										{/if}
@@ -1062,17 +1115,32 @@ function closeHistoryModal() {
 									<div class="grid grid-cols-3 gap-3">
 										<div class="text-center p-3 bg-white">
 											<span class="text-xs font-medium text-black opacity-70 block mb-1 relative">Base IRR <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100" on:mouseenter={() => showTooltipWithDelay('base')} on:mouseleave={hideTooltip} role="button" tabindex="0">ⓘ</span></span>
-											<span class="text-xl font-extrabold text-primary">{formatSmartReturn(calculatedReturns?.baseReturn)}</span>
+											<span class="text-xl font-extrabold text-primary">{
+												calculatedReturns?.baseReturn !== undefined
+													? formatSmartReturn(calculatedReturns.baseReturn)
+													: 'TBD'
+											}</span>
 											{#if showTooltip === 'base'}<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">IRR assuming max supply</div>{/if}
 										</div>
 										<div class="text-center p-3 bg-white">
 											<span class="text-xs font-medium text-black opacity-70 block mb-1 relative">Bonus IRR <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100" on:mouseenter={() => showTooltipWithDelay('bonus')} on:mouseleave={hideTooltip} role="button" tabindex="0">ⓘ</span></span>
-											<span class="text-xl font-extrabold text-primary">{calculatedReturns?.bonusReturn !== undefined ? (formatSmartReturn(calculatedReturns.bonusReturn).startsWith('>') ? formatSmartReturn(calculatedReturns.bonusReturn) : '+' + formatSmartReturn(calculatedReturns.bonusReturn)) : 'TBD'}</span>
+											<span class="text-xl font-extrabold text-primary">{
+												calculatedReturns?.bonusReturn !== undefined
+													? (() => {
+														const formatted = formatSmartReturn(calculatedReturns.bonusReturn);
+														return formatted.startsWith('>') ? formatted : `+${formatted}`;
+													})()
+													: 'TBD'
+											}</span>
 											{#if showTooltip === 'bonus'}<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">Additional IRR where supply is lower than max supply</div>{/if}
 										</div>
 										<div class="text-center p-3 bg-white hidden sm:block">
 											<span class="text-xs font-medium text-black opacity-70 block mb-1 relative">Total Expected</span>
-											<span class="text-xl font-extrabold text-primary">{calculatedReturns ? formatSmartReturn(calculatedReturns.baseReturn + calculatedReturns.bonusReturn) : 'TBD'}</span>
+										<span class="text-xl font-extrabold text-primary">{
+											calculatedReturns?.baseReturn !== undefined && calculatedReturns?.bonusReturn !== undefined
+												? formatSmartReturn(calculatedReturns.baseReturn + calculatedReturns.bonusReturn)
+												: 'TBD'
+										}</span>
 										</div>
 									</div>
 								</div>
@@ -1080,7 +1148,11 @@ function closeHistoryModal() {
 								<div class="px-4 sm:px-8 pb-6 sm:pb-8">
 									<div class="grid grid-cols-2 gap-2 sm:gap-3">
 										{#if hasAvailableSupply}
-											<PrimaryButton fullWidth size="small" on:click={(event) => { event.stopPropagation(); handleBuyTokens(token.contractAddress); }}>
+											<PrimaryButton
+												fullWidth
+												size="small"
+												on:click={(event) => handleBuyTokens(token.contractAddress, event)}
+											>
 												<span class="hidden sm:inline">Buy Tokens</span>
 												<span class="sm:hidden">Buy</span>
 											</PrimaryButton>
@@ -1092,7 +1164,7 @@ function closeHistoryModal() {
 										<SecondaryButton
 											fullWidth
 											size="small"
-											on:click={(event) => handleHistoryButtonClick(event, token.contractAddress)}
+											on:click={(event) => handleHistoryButtonClick(token.contractAddress, event)}
 										>
 											<span class="hidden sm:inline">Distributions History</span>
 											<span class="sm:hidden">History</span>
@@ -1108,7 +1180,7 @@ function closeHistoryModal() {
 			{#if historyModalOpen}
 				<Modal
 					bind:isOpen={historyModalOpen}
-					title={`Distributions History`}
+					title="Distributions History"
 					size="large"
 					on:close={closeHistoryModal}
 				>
@@ -1128,7 +1200,7 @@ function closeHistoryModal() {
 										<div class="text-left">Payout Transaction</div>
 									</div>
 										<div class="space-y-2 max-h-[400px] overflow-y-auto pr-1">
-											{#each historyPayouts as payout}
+											{#each historyPayouts as payout (payout.orderHash ?? payout.txHash ?? payout.month)}
 												<div class="grid grid-cols-[1.2fr,1fr,1fr,1.6fr,1.6fr] gap-6 text-sm items-center">
 												<div class="text-left font-medium text-black">{formatReportMonth(payout.month)}</div>
 												<div class="text-center font-semibold text-black">{formatCurrency(payout.totalPayout)}</div>
@@ -1324,9 +1396,6 @@ function closeHistoryModal() {
 				/>
 			{/await}
 		{/if}
-
-		<!-- Email Notification Popup -->
-        {#if showEmailPopup}{/if}
 	{/if}
 </PageLayout>
 
