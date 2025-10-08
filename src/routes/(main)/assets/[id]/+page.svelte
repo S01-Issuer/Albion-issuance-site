@@ -473,6 +473,81 @@ let failedImages: string[] = [];
 		}
 	}
 
+type GalleryImageItem = NonNullable<Asset['galleryImages']>[number];
+let galleryModalOpen = false;
+let selectedGalleryImage: GalleryImageItem | null = null;
+
+function openGalleryModal(image: GalleryImageItem) {
+	if (failedImages.includes(image.url)) {
+		return;
+	}
+
+	selectedGalleryImage = image;
+	galleryModalOpen = true;
+}
+
+function closeGalleryModal() {
+	galleryModalOpen = false;
+}
+
+function handleGalleryCardKeydown(event: KeyboardEvent, image: GalleryImageItem) {
+	if (event.key === 'Enter' || event.key === ' ') {
+		event.preventDefault();
+		openGalleryModal(image);
+	}
+}
+
+$: if (!galleryModalOpen && selectedGalleryImage) {
+	selectedGalleryImage = null;
+}
+
+type AssetLocation = Asset['location'];
+type AssetCoordinates = AssetLocation['coordinates'];
+let locationModalOpen = false;
+let locationModalLocation: AssetLocation | null = null;
+let locationModalAssetName = '';
+let locationModalCoordinates: AssetCoordinates | null = null;
+let locationModalMapUrl = '';
+let locationModalSubtitle = '';
+
+function openLocationModal(location: AssetLocation | null | undefined, assetName?: string | null) {
+	const coords = location?.coordinates;
+	if (!coords || typeof coords.lat !== 'number' || typeof coords.lng !== 'number') {
+		return;
+	}
+
+	locationModalLocation = location ?? null;
+	locationModalAssetName = assetName ? assetName : '';
+	locationModalOpen = true;
+}
+
+function closeLocationModal() {
+	locationModalOpen = false;
+}
+
+$: if (!locationModalOpen && locationModalLocation) {
+	locationModalLocation = null;
+	locationModalAssetName = '';
+}
+
+$: locationModalCoordinates = locationModalLocation?.coordinates ?? null;
+$: locationModalMapUrl = locationModalCoordinates
+	? `https://maps.google.com/maps?q=${encodeURIComponent(`${locationModalCoordinates.lat},${locationModalCoordinates.lng}`)}&z=10&output=embed`
+	: '';
+$: locationModalSubtitle = locationModalLocation
+	? [locationModalLocation.county, locationModalLocation.state, locationModalLocation.country]
+		.filter((part): part is string => Boolean(part && String(part).trim().length))
+		.join(', ')
+	: '';
+
+function handleLocationClick() {
+	if (!assetData?.location) {
+		return;
+	}
+
+	openLocationModal(assetData.location, assetData.name ?? null);
+}
+
 
 function openHistoryModal(tokenAddress: string) {
 	if (!assetTokens?.length) {
@@ -552,13 +627,14 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 			<a href="/assets" class="px-8 py-4 no-underline font-semibold text-sm uppercase tracking-wider transition-colors duration-200 inline-block bg-black text-white hover:bg-secondary inline-block">Back to Assets</a>
 		</div>
 	{:else}
-		{#if assetData}
-			<AssetDetailHeader 
-				asset={assetData} 
-				tokenCount={assetTokens.length} 
-				onTokenSectionClick={() => document.getElementById('token-section')?.scrollIntoView({ behavior: 'smooth' })}
-			/>
-		{/if}
+			{#if assetData}
+				<AssetDetailHeader 
+					asset={assetData} 
+					tokenCount={assetTokens.length} 
+					onTokenSectionClick={() => document.getElementById('token-section')?.scrollIntoView({ behavior: 'smooth' })}
+					onLocationClick={handleLocationClick}
+				/>
+			{/if}
 
 		<!-- Asset Details Content -->
         <ContentSection background="white" padding="standard">
@@ -566,9 +642,9 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
         	<div class="lg:hidden space-y-4">
         		<!-- Overview in collapsible section -->
         		<CollapsibleSection title="Overview" isOpenByDefault={false} alwaysOpenOnDesktop={false}>
-        			{#if assetData}
-        				<AssetOverviewTab asset={assetData} />
-        			{/if}
+	        			{#if assetData}
+	        				<AssetOverviewTab asset={assetData} onLocationClick={handleLocationClick} />
+	        			{/if}
         		</CollapsibleSection>
         		
         		<!-- Other sections in collapsible format -->
@@ -691,10 +767,11 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 							{#each assetData.galleryImages.slice(0, 4) as image (image.url)}
 								<div
 								   class="bg-white border border-light-gray overflow-hidden group cursor-pointer"
-								   on:click={() => window.open(getImageUrl(image.url), '_blank')}
-								   on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.open(getImageUrl(image.url), '_blank'); } }}
+								   on:click={() => openGalleryModal(image)}
+								   on:keydown={(event) => handleGalleryCardKeydown(event, image)}
 								   role="button"
 								   tabindex="0"
+								   aria-label={`View ${image.caption || image.title || 'asset image'} inline`}
 								>
 									{#if !failedImages.includes(image.url)}
 										<img 
@@ -790,9 +867,9 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 			<!-- Tab Content -->
 			<div class="p-8 min-h-[500px] flex flex-col">
 				{#if activeTab === 'overview'}
-					{#if assetData}
-						<AssetOverviewTab asset={assetData} />
-					{/if}
+				{#if assetData}
+					<AssetOverviewTab asset={assetData} onLocationClick={handleLocationClick} />
+				{/if}
 				{:else if activeTab === 'production'}
 					<div class="flex-1 flex flex-col">
 						<div class="grid md:grid-cols-4 grid-cols-1 gap-6">
@@ -941,11 +1018,11 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 								{#each assetData.galleryImages as image (image.url)}
 									<div 
 										class="bg-white border border-light-gray overflow-hidden group cursor-pointer" 
-										on:click={() => window.open(getImageUrl(image.url), '_blank')}
-										on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.open(getImageUrl(image.url), '_blank'); } }}
+										on:click={() => openGalleryModal(image)}
+										on:keydown={(event) => handleGalleryCardKeydown(event, image)}
 										role="button"
 										tabindex="0"
-										aria-label={`View ${image.caption || image.title || 'Asset image'} in new tab`}
+										aria-label={`View ${image.caption || image.title || 'asset image'} inline`}
 									>
 											{#if !failedImages.includes(image.url)}
 											<img 
@@ -1380,6 +1457,64 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 		</ContentSection>
 
         
+
+		{#if locationModalOpen && locationModalCoordinates}
+			<Modal
+				bind:isOpen={locationModalOpen}
+				title={`${locationModalAssetName || 'Asset'} Location`}
+				size="large"
+				maxHeight="90vh"
+				on:close={closeLocationModal}
+			>
+				<div class="space-y-4">
+					<div class="relative w-full pb-[56.25%] overflow-hidden rounded-lg border border-light-gray bg-black/5">
+						{#if locationModalMapUrl}
+							<iframe
+								src={locationModalMapUrl}
+								loading="lazy"
+								title={`${locationModalAssetName || 'Asset'} map view`}
+								referrerpolicy="no-referrer-when-downgrade"
+								allowfullscreen
+								class="absolute inset-0 w-full h-full border-0"
+							></iframe>
+						{/if}
+					</div>
+					<div class="text-sm text-black opacity-80 text-center space-y-1">
+						<p>{locationModalSubtitle || 'No additional location details available.'}</p>
+						<p class="font-semibold">Coordinates: {locationModalCoordinates.lat}°, {locationModalCoordinates.lng}°</p>
+						<a
+							href={`https://maps.google.com/?q=${encodeURIComponent(`${locationModalCoordinates.lat},${locationModalCoordinates.lng}`)}`}
+							target="_blank"
+							rel="noopener noreferrer"
+							class="inline-flex items-center gap-1 text-secondary underline hover:text-primary"
+						>
+							Open in Google Maps
+						</a>
+					</div>
+				</div>
+			</Modal>
+		{/if}
+
+		{#if galleryModalOpen && selectedGalleryImage}
+			<Modal
+				bind:isOpen={galleryModalOpen}
+				title={selectedGalleryImage.caption || selectedGalleryImage.title || 'Asset image'}
+				size="large"
+				maxHeight="90vh"
+				on:close={closeGalleryModal}
+			>
+				<div class="flex flex-col gap-4 items-center">
+					<img
+						src={getImageUrl(selectedGalleryImage.url)}
+						alt={selectedGalleryImage.caption || selectedGalleryImage.title || 'Asset image'}
+						class="w-full max-h-[70vh] object-contain rounded border border-light-gray bg-black/5"
+					/>
+					{#if selectedGalleryImage.caption || selectedGalleryImage.title}
+						<p class="text-sm text-black opacity-80 text-center">{selectedGalleryImage.caption || selectedGalleryImage.title}</p>
+					{/if}
+				</div>
+			</Modal>
+		{/if}
 
 		<!-- Token Purchase Widget -->
 		{#if showPurchaseWidget}
