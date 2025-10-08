@@ -474,10 +474,6 @@ let failedImages: string[] = [];
 	}
 
 
-function handleCardClick(tokenAddress: string) {
-	handleBuyTokens(tokenAddress);
-}
-
 function openHistoryModal(tokenAddress: string) {
 	if (!assetTokens?.length) {
 		return;
@@ -1028,8 +1024,8 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 				{@const hasAvailableSupply = (supply?.availableSupply ?? 0) > 0}
 				{@const calculatedReturns = assetData ? calculateTokenReturns(assetData, token, sft?.totalShares, maxSupply) : null}
 				{@const tokenTermsUrl = getTokenTermsPath(token.contractAddress)}
-				<div id="token-{token.contractAddress}">
-					<Card hoverable clickable paddingClass="p-0" on:click={() => handleCardClick(token.contractAddress)}>
+					<div id="token-{token.contractAddress}">
+							<Card hoverable={false} paddingClass="p-0">
 						<CardContent paddingClass="p-0">
 							<div class="min-h-[700px] sm:min-h-[600px] flex flex-col">
 								<div class="{!hasAvailableSupply ? 'text-base font-extrabold text-white bg-black text-center py-3 uppercase tracking-wider' : 'text-base font-extrabold text-black bg-primary text-center py-3 uppercase tracking-wider'} w-full">
@@ -1266,8 +1262,8 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 				</Modal>
 			{/if}
 					<!-- Future Releases Card -->
-					{#if hasFutureReleases}
-						<Card hoverable>
+						{#if hasFutureReleases}
+							<Card hoverable={false}>
 							<CardContent paddingClass="p-0">
 								<div class="future-release-card">
 									<div class="relative preserve-3d transform-gpu transition-transform duration-500 {futureCardFlipped ? 'rotate-y-180' : ''} min-h-[650px]">

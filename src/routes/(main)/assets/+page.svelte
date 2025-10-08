@@ -117,8 +117,8 @@
 			<!-- Assets Grid -->
 			<div class="mt-12 sm:mt-16 lg:mt-24">
 				{#if groupedEnergyFields.length === 0}
-					<!-- No Available Assets -->
-					<Card>
+						<!-- No Available Assets -->
+						<Card hoverable={false}>
 						<CardContent>
 							<div class="text-center py-8">
 								<SectionTitle level="h3" size="card">No Available Assets</SectionTitle>

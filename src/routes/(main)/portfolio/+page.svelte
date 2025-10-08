@@ -851,7 +851,7 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 					{#if pageLoading}
 						<div class="text-center py-12 text-black opacity-70">Loading portfolio holdings...</div>
 					{:else if holdings.length === 0}
-						<Card>
+							<Card hoverable={false}>
 							<CardContent>
 								<div class="text-center py-8">
 									<p class="text-lg text-black opacity-70 mb-4">No holdings yet</p>
@@ -866,8 +866,8 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 						</Card>
 					{:else}
 						{#each holdings as holding (holding.id)}
-							<div class="mb-3">
-								<Card hoverable showBorder>
+								<div class="mb-3">
+									<Card hoverable={false} showBorder>
 									<CardContent paddingClass="p-6 lg:p-9 h-full flex flex-col justify-between">
 												<div class="flex justify-between items-start mb-4 lg:mb-7">
 													<div class="flex items-start gap-3 lg:gap-4">
@@ -1320,8 +1320,8 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 			{:else if activeTab === 'allocation'}
 				<div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
 					<div>
-						<SectionTitle level="h3" size="subsection" className="mb-6">Asset Allocation</SectionTitle>
-						<Card>
+							<SectionTitle level="h3" size="subsection" className="mb-6">Asset Allocation</SectionTitle>
+							<Card hoverable={false}>
 							<CardContent>
 								<div class="flex items-center justify-center" style="min-height: 320px;">
 									{#if tokenAllocations.length > 0}
@@ -1348,8 +1348,8 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 					<div>
 						<SectionTitle level="h3" size="subsection" className="mb-6">Allocation Breakdown</SectionTitle>
 						<div class="space-y-4">
-							{#if tokenAllocations.length === 0}
-								<Card>
+								{#if tokenAllocations.length === 0}
+									<Card hoverable={false}>
 									<CardContent>
 										<p class="text-center text-black opacity-60 py-8">
 											No allocations to display

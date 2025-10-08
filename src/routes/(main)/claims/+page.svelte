@@ -298,30 +298,34 @@
 			subtitle="Claim your energy asset payouts and track your claims history"
 			showBorder={false}
 		>
-			<!-- Main Stats -->
-			<div class="grid grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-8 mt-8 max-w-4xl mx-auto">
-				<StatsCard
-					title="Available to Claim"
-					value={formatCurrency(unclaimedPayout, { compact: true })}
-					subtitle="Ready now"
-					size="large"
-					valueColor="primary"
-				/>
-				<StatsCard
-					title="Total Earned"
-					value={formatCurrency(totalEarned, { compact: true })}
-					subtitle="All time"
-					size="large"
-				/>
-				<div class="hidden lg:block">
+				<!-- Main Stats -->
+				<div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 lg:gap-8 text-center mt-8 max-w-6xl mx-auto">
+					<StatsCard
+						title="Available to Claim"
+						value={formatCurrency(unclaimedPayout, { compact: true })}
+						subtitle="Ready now"
+						size="small"
+						valueColor="primary"
+					/>
+					<StatsCard
+						title="Total Earned"
+						value={formatCurrency(totalEarned, { compact: true })}
+						subtitle="All time"
+						size="small"
+					/>
 					<StatsCard
 						title="Total Claimed"
 						value={formatCurrency(totalClaimed, { compact: true })}
 						subtitle="Withdrawn"
-						size="large"
+						size="small"
+					/>
+					<StatsCard
+						title="Claims Processed"
+						value={claimHistory.length.toString()}
+						subtitle="All time"
+						size="small"
 					/>
 				</div>
-			</div>
 
 			<!-- Claim All Action -->
 			{#if unclaimedPayout > 0}
@@ -349,8 +353,8 @@
 				<SectionTitle level="h2" size="section" className="mb-6">Claims by Asset</SectionTitle>
 				
 				<div class="grid grid-cols-1 gap-4 lg:gap-6">
-					{#each holdings as group (group.fieldName)}
-						<Card>
+						{#each holdings as group (group.fieldName)}
+							<Card hoverable={false}>
 							<CardContent paddingClass="p-4 lg:p-6">
 								<div class="grid grid-cols-1 sm:grid-cols-4 lg:grid-cols-5 gap-4 items-center">
 									<div class="sm:col-span-2">
