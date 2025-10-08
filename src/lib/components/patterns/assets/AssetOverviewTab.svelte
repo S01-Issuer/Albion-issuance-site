@@ -116,7 +116,7 @@ export let onLocationClick: (() => void) | undefined = undefined;
 				</div>
 				<div class="flex justify-between pb-3 border-b border-light-gray text-base last:border-b-0 last:pb-0">
 					<span class="font-semibold text-black">Payment Frequency</span>
-					<span class="text-black">{asset?.terms?.paymentFrequency} days</span>
+					<span class="text-black">Monthly</span>
 				</div>
 				<div class="flex justify-between pb-3 border-b border-light-gray text-base last:border-b-0 last:pb-0">
 					<span class="font-semibold text-black">Water Depth</span>

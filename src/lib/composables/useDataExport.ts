@@ -119,7 +119,7 @@ export function useDataExport() {
       ["Type", asset.geology?.type || "N/A"],
       ["Interest Type", asset.terms?.interestType || "N/A"],
       ["Revenue Share", asset.terms?.amount || "N/A"],
-      ["Payment Frequency", asset.terms?.paymentFrequency || "N/A"],
+      ["Payment Frequency", "Monthly"],
       ["Estimated Life", asset.geology?.estimatedLife || "N/A"],
       ["Water Depth", asset.location.waterDepth || "Onshore"],
     ];
