@@ -4,17 +4,29 @@
  */
 
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
-import type {
-  Asset,
-  Token,
-  PlannedProductionProjection,
-} from "$lib/types/uiTypes";
+import type { Asset } from "$lib/types/uiTypes";
+import type { OffchainAssetReceiptVault } from "$lib/types/graphql";
 
 export interface TokenReturns {
   baseReturn: number; // Annual percentage
   bonusReturn: number; // Annual percentage
   impliedBarrelsPerToken: number; // Barrels per $1 token
   breakEvenOilPrice: number; // USD per barrel
+}
+
+interface TokenSupplyBreakdown {
+  maxSupply: number;
+  mintedSupply: number;
+  supplyUtilization: number;
+  availableSupply: number;
+}
+
+interface TokenPayoutSummary {
+  month: string;
+  totalPayout: number;
+  payoutPerToken: number;
+  orderHash: string;
+  txHash: string;
 }
 
 /**
@@ -87,7 +99,7 @@ export function calculateTokenReturns(
   maxSupply?: string,
 ): TokenReturns {
   if (!asset.plannedProduction || !token.sharePercentage) {
-    console.log(
+    console.warn(
       `[Returns] Missing data for ${token.symbol}: plannedProduction=${!!asset.plannedProduction}, sharePercentage=${token.sharePercentage}`,
     );
     return {
@@ -102,11 +114,11 @@ export function calculateTokenReturns(
   const { projections, oilPriceAssumption } = plannedProduction;
   const sharePercentage = token.sharePercentage / 100; // Convert to decimal
 
-  console.log(
+  console.warn(
     `[Returns] Token ${token.symbol}: projections length = ${projections?.length}, oilPriceAssumption = ${oilPriceAssumption}`,
   );
   if (!projections || projections.length === 0) {
-    console.log(`[Returns] No projections for ${token.symbol}`);
+    console.warn(`[Returns] No projections for ${token.symbol}`);
     return {
       baseReturn: 0,
       bonusReturn: 0,
@@ -130,9 +142,9 @@ export function calculateTokenReturns(
     oilPriceAssumption + benchmarkPremium - transportCosts;
 
   // Convert supply to numbers using provided maxSupply parameter
-  const maxSupplyNum = maxSupply ?
-    Number(BigInt(maxSupply) / BigInt(10 ** 18)) :
-    0;
+  const maxSupplyNum = maxSupply
+    ? Number(BigInt(maxSupply) / BigInt(10 ** 18))
+    : 0;
 
   // ALWAYS use on-chain minted supply for accurate bonus calculation
   // Never trust IPFS metadata for minted supply as it's not updated in real-time
@@ -142,9 +154,7 @@ export function calculateTokenReturns(
     // If it's "0" or any falsy value, this will correctly evaluate to 0
     try {
       // TokenMetadata no longer has decimals field - using default of 18
-      mintedSupply = Number(
-        BigInt(onChainMintedSupply) / BigInt(10 ** 18),
-      );
+      mintedSupply = Number(BigInt(onChainMintedSupply) / BigInt(10 ** 18));
     } catch {
       // If BigInt conversion fails, default to 0
       mintedSupply = 0;
@@ -250,11 +260,17 @@ export function getTokenReturns(
 ): TokenReturns {
   const cacheKey = `${asset.id}-${token.contractAddress}-${onChainMintedSupply || "ipfs"}-${maxSupply || "unknown"}`;
 
-  if (returnCache.has(cacheKey)) {
-    return returnCache.get(cacheKey)!;
+  const cached = returnCache.get(cacheKey);
+  if (cached) {
+    return cached;
   }
 
-  const returns = calculateTokenReturns(asset, token, onChainMintedSupply, maxSupply);
+  const returns = calculateTokenReturns(
+    asset,
+    token,
+    onChainMintedSupply,
+    maxSupply,
+  );
   returnCache.set(cacheKey, returns);
 
   return returns;
@@ -269,17 +285,20 @@ export function clearReturnsCache(): void {
 
 export function getTokenSupply(
   token: TokenMetadata,
-  sft?: any,
-  maxSupplyString?: string
-) {
+  sft?: Pick<OffchainAssetReceiptVault, "totalShares">,
+  maxSupplyString?: string,
+): TokenSupplyBreakdown | null {
   if (!token) return null;
 
   // If SFT and maxSupply data provided, use them
   if (sft && maxSupplyString) {
     const decimals = 18; // Standard decimals
-    const maxSupply = parseFloat(maxSupplyString) / Math.pow(10, decimals);
-    const mintedSupply = parseFloat(sft.totalShares) / Math.pow(10, decimals);
-    const supplyUtilization = maxSupply > 0 ? (mintedSupply / maxSupply) * 100 : 0;
+    const maxSupply =
+      Number.parseFloat(maxSupplyString) / Math.pow(10, decimals);
+    const mintedSupply =
+      Number.parseFloat(sft.totalShares) / Math.pow(10, decimals);
+    const supplyUtilization =
+      maxSupply > 0 ? (mintedSupply / maxSupply) * 100 : 0;
 
     return {
       maxSupply,
@@ -300,7 +319,7 @@ export function getTokenSupply(
 
 export function getTokenPayoutHistory(
   token: TokenMetadata,
-): { recentPayouts: any[] } | null {
+): { recentPayouts: TokenPayoutSummary[] } | null {
   if (!token || !Array.isArray(token.payoutData)) {
     return null;
   }
@@ -316,7 +335,7 @@ export function getTokenPayoutHistory(
     }))
     .sort((a, b) => (a.month > b.month ? 1 : a.month < b.month ? -1 : 0));
 
-  console.log('[getTokenPayoutHistory] Payout data', {
+  console.warn("[getTokenPayoutHistory] Payout data", {
     contractAddress: token.contractAddress,
     count: recentPayouts.length,
     months: recentPayouts.map((entry) => entry.month),

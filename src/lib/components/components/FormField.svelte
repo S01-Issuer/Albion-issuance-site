@@ -17,10 +17,10 @@
 	export let variant: 'default' | 'minimal' | 'bordered' = 'default';
 
 	// Generate unique ID if not provided
-	import { createEventDispatcher } from 'svelte';
-	
-	const dispatch = createEventDispatcher();
-	const fieldId = id || `field-${Math.random().toString(36).substr(2, 9)}`;
+import { createEventDispatcher } from 'svelte';
+
+const dispatch = createEventDispatcher();
+const fieldId = id || `field-${Math.random().toString(36).slice(2, 11)}`;
 
 	function handleInput(event: Event) {
 		const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
@@ -43,28 +43,44 @@
 	}
 	
 	// Tailwind class mappings
-	const sizeClasses = {
-		small: 'px-3 py-2 text-sm',
-		medium: 'px-4 py-3 text-base',
-		large: 'px-5 py-4 text-lg'
-	};
-	
-	const variantClasses = {
-		default: 'border border-light-gray bg-white focus:border-primary focus:ring-1 focus:ring-primary',
-		minimal: 'border-0 border-b border-light-gray bg-transparent focus:border-primary rounded-none',
-		bordered: 'border-2 border-black bg-white focus:border-primary'
-	};
-	
-	$: containerClasses = `flex flex-col mb-4 ${fullWidth ? 'w-full' : ''} ${disabled ? 'opacity-60 pointer-events-none' : ''}`;
-	$: labelClasses = 'block font-semibold text-black text-sm mb-2 uppercase tracking-wide';
-	$: inputClasses = `w-full font-figtree font-medium transition-all duration-200 outline-none ${sizeClasses[size]} ${variantClasses[variant]} ${error ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''} ${disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`;
-	$: helpTextClasses = 'text-xs text-black opacity-60 mt-1';
-	$: errorTextClasses = 'text-xs text-red-600 mt-1';
-	$: requiredAsteriskClasses = 'text-red-500 ml-1';
-	$: fieldWrapperClasses = 'relative';
+const sizeClasses = {
+	small: 'px-3 py-2 text-sm',
+	medium: 'px-4 py-3 text-base',
+	large: 'px-5 py-4 text-lg'
+};
+
+const variantClasses = {
+	default: 'border border-light-gray bg-white focus:border-primary focus:ring-1 focus:ring-primary',
+	minimal: 'border-0 border-b border-light-gray bg-transparent focus:border-primary rounded-none',
+	bordered: 'border-2 border-black bg-white focus:border-primary'
+};
+
+const labelClasses = 'block font-semibold text-black text-sm mb-2 uppercase tracking-wide';
+const helpTextClasses = 'text-xs text-black opacity-60 mt-1';
+const errorTextClasses = 'text-xs text-red-600 mt-1';
+const requiredAsteriskClasses = 'text-red-500 ml-1';
+const fieldWrapperClasses = 'relative';
+
+function classNames(...classes: Array<string | false | null | undefined>) {
+	return classes.filter(Boolean).join(' ');
+}
+
+function containerClass() {
+	return classNames('flex flex-col mb-4', fullWidth && 'w-full', disabled && 'opacity-60 pointer-events-none');
+}
+
+function inputClass() {
+	return classNames(
+		'w-full font-figtree font-medium transition-all duration-200 outline-none',
+		sizeClasses[size],
+		variantClasses[variant],
+		error && 'border-red-500 focus:border-red-500 focus:ring-red-500',
+		disabled && 'bg-gray-100 cursor-not-allowed'
+	);
+}
 </script>
 
-<div class={containerClasses}>
+<div class={containerClass()}>
 	{#if label}
 		<label for={fieldId} class={labelClasses}>
 			{label}
@@ -85,8 +101,8 @@
 				{disabled}
 				{readonly}
 				{rows}
-				{value}
-				class="{inputClasses} resize-vertical"
+				bind:value
+				class={`${inputClass()} resize-vertical`}
 				on:input={handleInput}
 				on:change={handleChange}
 				on:blur={handleBlur}
@@ -99,17 +115,17 @@
 				{name}
 				{required}
 				{disabled}
-				{value}
-				class={inputClasses}
+				bind:value
+				class={inputClass()}
 				on:change={handleChange}
 				on:blur={handleBlur}
 				on:focus={handleFocus}
 			>
 				{#if placeholder}
-					<option value="" disabled selected={!value}>{placeholder}</option>
+					<option value="" disabled>{placeholder}</option>
 				{/if}
-				{#each options as option}
-					<option value={option.value} selected={value === option.value}>
+				{#each options as option (option.value)}
+					<option value={option.value}>
 						{option.label}
 					</option>
 				{/each}
@@ -124,8 +140,8 @@
 				{required}
 				{disabled}
 				{readonly}
-				{value}
-				class={inputClasses}
+				bind:value
+				class={inputClass()}
 				on:input={handleInput}
 				on:change={handleChange}
 				on:blur={handleBlur}
@@ -142,4 +158,3 @@
 		<div class={errorTextClasses} role="alert">{error}</div>
 	{/if}
 </div>
-

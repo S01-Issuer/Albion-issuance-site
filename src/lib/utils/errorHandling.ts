@@ -43,7 +43,7 @@ export class AppError extends Error {
     message: string,
     public code: ErrorCode,
     public severity: ErrorSeverity = ErrorSeverity.MEDIUM,
-    public context?: Record<string, any>,
+    public context?: Record<string, unknown>,
     public cause?: Error,
   ) {
     super(message);
@@ -116,7 +116,7 @@ export const errorReporter: ErrorReporter = new ErrorReporterImpl();
 // Utility functions for common error patterns
 export const createDataError = (
   message: string,
-  context?: Record<string, any>,
+  context?: Record<string, unknown>,
   cause?: Error,
 ) =>
   new AppError(
@@ -139,7 +139,7 @@ export const createNotFoundError = (resource: string, id: string) =>
 
 export const createValidationError = (
   message: string,
-  context?: Record<string, any>,
+  context?: Record<string, unknown>,
 ) =>
   new AppError(message, ErrorCode.INVALID_INPUT, ErrorSeverity.MEDIUM, context);
 

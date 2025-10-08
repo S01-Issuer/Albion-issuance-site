@@ -1,6 +1,13 @@
 // Reusable HTTP-level fetch mock for subgraph and IPFS endpoints
 
-import axios from "axios";
+import axios, {
+  type AxiosRequestConfig,
+  type AxiosResponse,
+  type InternalAxiosRequestConfig,
+} from "axios";
+import { vi } from "vitest";
+
+const isTestMode = (import.meta.env?.MODE ?? "") === "test";
 
 const REAL_WRESSLE_CBOR =
   "ff0a89c674ee7874a500590847789ca558db6ee4b811fd154249dedc32458992da79ea197b13239e1dc37632982c060bb6c46ed12d891a8aea8b077e4f7e73bf64aba4b6dd1615ec430003332d1ed6ed541559fce1fdb9cd0a5909efc22bac6d2ececf1f5b5dcf868fbe36ebf3dc88959dd1e47cf8f627efcccb746d8dc8ec22cf8d6c5bd84bf7ab348c05a7741ed088878b709ed0345a5cca2808592025a3822f16b90c60bb685b69af73d8f6e5eeeafefee66a16ccee3e7f5ddc3c7c9d453e07447ba896ba04c0e2e6c3eccb1d2ce33e234b295af9b3a8242c7dd455d5d5ca1ec8ad915b25770431566f64fd70681061f44194f6005f57cab4f6561c2a59db4b61719151c667b4575608236fa5c96051ac618df9fccccb65a62a518273410a98ae69ca8377f1c3abc4fefef8c30b18a5142454aab6327ffd4cbde733af1107dda13208ed2fdf8e4ea380fe3f471fbe60f84a390b08f8fd177237184ceead91a2f2d0883633aab14ad780fe5cb785369240f8b7602b7c1425d1aa242b25cb9cd45218729f75b5055423cfc8cfdad882dca83ad3256c5506be3546e75da6ea3529d5bab0e4830149b352d51b9993cc74b9242ba32b620b4916a06e2b0df99b519680a5d26cb5323ed855ea4c0c46fdf05a3b04f44ab4967c527929eabced93042cc1709c1af0f2dde0c23f813dd0fa0fb026d755bfa44dae6a90d7a2e45240c078e87320a0acd7dec58cfa3c8a20b83b80984bd9d8c2bba0f05b37d208ab0deeaa87d05e81cc9adcc95677c02c1ab493cb56f5a662a6b790eabbddce97889b99179c9ff596c83d4854b2cee457882a58c35250636556d42a1325eae9837eccb48fa78c7c56654f5d6f5d90520ad62b48ae1691b7579737f0ed7cf897bde426eee9733298514c6355af0cc4d37499ed0ceefbfbe5ed15d204f11a28446504fd39230843fa3015c070609d0007a4012610bf16edcbe746351285a087f556195d6345a03fde4f5d5902c9ebaec4401e20c9aaa6540222f05702a5aeb692bc55dc8d120ada046486ee9a63b832e0f2aacedfca2b9905e85f9f541f20944525cc0696fa948385c6284c448ce5f265194ab9525d0554077e080137a26ed1f28fbab5edc0b56c2d142628bb512bf9093a51010b217b3e96d88334559f3d589340ab3d5274f7da0c448519e85d4458e6c38f07ad4bab1a6c381085baab96d2b404d27f57934280eba2848acc0f6429654d44fed8b598b92b6dfa4239361ad2bc36919e00231bac9adaf6a05a022dbdb696407310cb5212ab49dfb048a1cb1c547a7ddf404e7e32f27b0751395c8a03fa879ebf118ffe659de90379e1fdf6dfff041159ea26c76e06e5d8614b7ead74f888acf541391511604785b4ed203cc133ca1f12e6f69d1a48aa5b204a2edab6ab8e9d2886c0b9df3ff606657d65df5ff604eb47d90b02ddbf40eb44b2deb5de5373c228f193f8f96c8c8bc7b890fa69ca5d60e200639f452e2e9d1018071302e7636010f9b12b30a00e6eee27cc15180463208dc0c209207380cc775c8e8756718a63738821737163798c333f4e26048663604a7d9abab868840b30d663f2e20992c1c0c0094d3cc532c47002e790cc529fce27800ecb94fb810b7338a6d078dc084e709cf874c291098e133f8e27800ec70168e6636032417212faf371ac930992590047a78b733866733f18a775e272cc20ad438793c42599317079ca9331c90c833861e19864c4255302c724331aba7592b82c0769e44713021d9a8324996836894b73c0e77eea06d16139e001e4cdf33768b7856ae1a4c5ebc469c77ddf27991b8c80f289bec6dc60cc214f2660e358cc93d84fc7e9c4dc50cc93d44fc664313712d11cbae404ce89040581e3c8866eba0701b482287181ae400e253eaef1d04d780086ae2be14457a33c9a048e333ea031f79d220fdd8cef81740238663985d3908dfb5038d1d6a078f944709cbee6bbc21c8aa90b19b311436d3337c60ebb31f451e7648b5c76d310923474718ebc084efd09dc98db780ecd6ccc58e452cbe120a2e3ea885c6639836c1e872e72898d52685113f2c6bc72f077ca8f31af9c856e538e5c5e391c2fdcb5cfa136023fe8b8caa389ea85fee4d45034715ac1b91b4fdcd69ce32f01bd7317379607dd78f2f637e6370ab95b91dce537a2d05cc67e4cdc3a23f0032e2edff02e9c4918b5dbe3c83eb5b11f3086f51f13524eeed3219dcfd93017c1dc8793cb990703c0354cc2d5cbf233e245a95abc72c34dfaf4b6ed5d24b01d26b7e32f4886e7e9abf1ffb429846322e52736314e237a6a135cc4d83bb35898a4e91f98451db3bebdccdffdf8fb495a58eb878d0ec682aadfdf9cbcaeccfbb90b27121c5286052405e66d8d6f4225ccbdbf86f4d71c071f302617aa3cbc9f495e471fb832cd614a14668d6f2b01c55f47c94b2d7177d1ca138b549da97c98aee43058e1700e0aaf8f0bef1e87e092c61f28bde8fffe8db39558497bb8034f716cf5aef6992c4b3404a7a75c671d4e6eedf0de93e1d3c975d5bbec2dc5eab0946abdc99a2a6c373adeaf9e84129d5a9b7db22cf27abfe39b7ca3785eb65d971d3abb8db69b9d966b7c8c580bd0620ebdb06192b2ca9628f71ee67ff21914e1fb17cedae2e5ade85ff820a657fde4f9f6cab412992a553f0577a6fc3f0dc37c7c31e40b04a28009f954f0c64825f6d2aaa764fbf4b45c6e57fb7299adf7b1e48d5cb50c26e6ef4bf3b8514963d47af99deb5c8a0d8fdef9f166fbab8a53bd7d00aeebb619e6cc775b61f0c7cb15d969b38164226298c3fb37a09199cb5ced64b22e9eb8e562a7235ec692252a29d671cd9fa25aa9aa588bc3ae5e6da2e6bb88973aab1c3b66ec9dfa45ad419d21db1326a674af368d880ab92d5bd3681985a660a6ddcb43bdca74a31f9b47c66d138a7c5d558d786c934dbe02dd7881aca415f9b1f233a8592bf3857d1b73e1ef818643f6fa74c8e0aec9ff18f6fcfc3b7b1ff5cd011bffc47a6299e8a91102706170706c69636174696f6e2f6a736f6e03676465666c6174651bffa8e8a9b9cf4a31783b6261666b7265696365636e783267766e746d3666626372766e63333336717a6536737435753771713734353769676567616d6433627a6b78377269a200783b6261666b7265696365636e783267766e746d3666626372766e63333336717a6536737435753771713734353769676567616d6433627a6b78377269011bff9fae3cc645f463";
@@ -10,7 +17,7 @@ export type SftMockData = {
   name: string;
   symbol: string;
   totalShares: string;
-  metadata?: any;
+  metadata?: unknown;
 };
 
 export type HttpMockConfig = {
@@ -29,14 +36,16 @@ export type HttpMockConfig = {
 export function installHttpMocks(cfg: HttpMockConfig) {
   const originalFetch = globalThis.fetch;
   const originalAxiosPost = axios.post;
+  const boundOriginalAxiosPost = originalAxiosPost.bind(axios);
+  let axiosPostSpy: ReturnType<typeof vi.spyOn> | null = null;
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const method = init?.method || "GET";
 
     // Debug logging for test mode
-    if ((import.meta as any).env?.MODE === "test") {
-      console.log("Mock fetch intercepted:", method, url);
+    if (isTestMode) {
+      console.warn("Mock fetch intercepted:", method, url);
     }
 
     // Mock AlphaVantage API for commodity prices
@@ -45,7 +54,7 @@ export function installHttpMocks(cfg: HttpMockConfig) {
       const func = urlObj.searchParams.get("function");
 
       // Create mock response based on function type
-      const mockData: any = {
+      const mockData: Record<string, unknown> = {
         WTI: {
           name: "WTI Crude Oil Prices",
           interval: "daily",
@@ -78,11 +87,13 @@ export function installHttpMocks(cfg: HttpMockConfig) {
         },
       };
 
-      const response = mockData[func as string] || {
-        "Error Message":
-          "Invalid API call. Please retry or visit the documentation for WTI, BRENT, NATURAL_GAS.",
-        Note: "Thank you for using Alpha Vantage!",
-      };
+      const response =
+        (func && mockData[func]) ||
+        ({
+          "Error Message":
+            "Invalid API call. Please retry or visit the documentation for WTI, BRENT, NATURAL_GAS.",
+          Note: "Thank you for using Alpha Vantage!",
+        } as const);
 
       return new Response(JSON.stringify(response), {
         status: 200,
@@ -221,7 +232,8 @@ export function installHttpMocks(cfg: HttpMockConfig) {
     // Subgraph POST endpoints
     if (method.toUpperCase() === "POST") {
       try {
-        const body = typeof init?.body === "string" ? init!.body : "";
+        const rawBody = init?.body;
+        const body = typeof rawBody === "string" ? rawBody : "";
         const query = body;
 
         // SFT subgraph
@@ -357,11 +369,11 @@ export function installHttpMocks(cfg: HttpMockConfig) {
               : null;
 
             // Debug logging
-            if ((import.meta as any).env?.MODE === "test") {
-              console.log("Metadata query sender:", requestedSender);
-              console.log("Config sfts:", cfg.sfts);
+            if (isTestMode) {
+              console.warn("Metadata query sender:", requestedSender);
+              console.warn("Config sfts:", cfg.sfts);
               if (cfg.sfts && cfg.sfts.length > 0) {
-                console.log(
+                console.warn(
                   "First SFT address:",
                   cfg.sfts[0].address.toLowerCase(),
                 );
@@ -383,8 +395,8 @@ export function installHttpMocks(cfg: HttpMockConfig) {
               cfg.sfts[0].address.toLowerCase() ===
                 "0xf836a500910453a397084ade41321ee20a5aade1";
 
-            if ((import.meta as any).env?.MODE === "test") {
-              console.log("Should return metadata:", shouldReturnMetadata);
+            if (isTestMode) {
+              console.warn("Should return metadata:", shouldReturnMetadata);
             }
 
             let metadataEntries =
@@ -421,13 +433,16 @@ export function installHttpMocks(cfg: HttpMockConfig) {
               metadataEntries = [];
             }
 
-            if ((import.meta as any).env?.MODE === "test") {
-              console.log(
+            if (isTestMode) {
+              console.warn(
                 "Returning metadata entries count:",
                 metadataEntries.length,
               );
               if (metadataEntries.length > 0) {
-                console.log("First entry subject:", metadataEntries[0].subject);
+                console.warn(
+                  "First entry subject:",
+                  metadataEntries[0].subject,
+                );
               }
             }
 
@@ -495,7 +510,7 @@ export function installHttpMocks(cfg: HttpMockConfig) {
         }
       } catch (err) {
         // Log error in test mode
-        if ((import.meta as any).env?.MODE === "test") {
+        if (isTestMode) {
           console.error("Mock handler error:", err);
         }
         // fallthrough to original
@@ -503,40 +518,63 @@ export function installHttpMocks(cfg: HttpMockConfig) {
     }
 
     // Debug log for unhandled URLs
-    if ((import.meta as any).env?.MODE === "test") {
-      console.log("Mock falling through to original fetch for:", method, url);
+    if (isTestMode) {
+      console.warn("Mock falling through to original fetch for:", method, url);
     }
     return originalFetch(input, init);
-  }) as any;
+  }) as typeof globalThis.fetch;
 
   if (cfg.hypersyncUrl) {
-    axios.post = (async (url: string, payload?: any) => {
-      if (url === cfg.hypersyncUrl) {
-        // Return empty logs array to simulate no claimed payouts
-        // This matches what would happen if there are no Context events on-chain
-        return {
-          data: {
+    const spy = vi.spyOn(axios, "post");
+    spy.mockImplementation(
+      async (
+        url: string,
+        data?: unknown,
+        config?: AxiosRequestConfig<unknown>,
+      ): Promise<AxiosResponse<unknown>> => {
+        if (url === cfg.hypersyncUrl) {
+          const payload = {
             data: [
               {
                 blocks: [{ number: 100, timestamp: "0x65f5e100" }],
-                logs: [], // Empty array - no claimed payouts yet
+                logs: [],
               },
             ],
             next_block: 101,
-          },
-        } as any;
-      }
-      return originalAxiosPost(url as any, payload);
-    }) as any;
+          } as const;
+
+          const response: AxiosResponse<unknown> = {
+            data: payload,
+            status: 200,
+            statusText: "OK",
+            headers: {},
+            config: {} as InternalAxiosRequestConfig<unknown>,
+            request: undefined,
+          };
+
+          return response;
+        }
+
+        return boundOriginalAxiosPost(url, data, config) as Promise<
+          AxiosResponse<unknown>
+        >;
+      },
+    );
+    axiosPostSpy = spy as unknown as ReturnType<typeof vi.spyOn>;
   }
 
   return () => {
     globalThis.fetch = originalFetch;
-    axios.post = originalAxiosPost;
+    if (axiosPostSpy) {
+      axiosPostSpy.mockRestore();
+      axiosPostSpy = null;
+    } else {
+      axios.post = originalAxiosPost;
+    }
   };
 }
 
-function jsonRes(obj: any) {
+function jsonRes(obj: unknown) {
   return new Response(JSON.stringify(obj), {
     status: 200,
     headers: { "Content-Type": "application/json" },

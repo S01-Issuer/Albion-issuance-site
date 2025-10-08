@@ -11,6 +11,8 @@
 	
 	// Events
 	import { createEventDispatcher } from 'svelte';
+	import PrimaryButton from './PrimaryButton.svelte';
+	import SecondaryButton from './SecondaryButton.svelte';
 	const dispatch = createEventDispatcher();
 
 	function handleAction() {
@@ -44,18 +46,19 @@
 		}
 	};
 	
-	const buttonVariants = {
-		primary: 'bg-black text-white hover:bg-secondary',
-		secondary: 'bg-white text-black border border-black hover:bg-black hover:text-white',
-		claim: 'bg-primary text-white hover:bg-secondary',
-		manage: 'bg-black text-white w-full hover:bg-secondary'
-	};
-	
-	$: cardClasses = `bg-white border border-light-gray rounded-lg transition-all duration-200 hover:-translate-y-0.5 hover:shadow-action-hover ${sizeClasses[size].card} ${centered ? 'text-center' : ''}`;
+	const buttonSizeMap = {
+		small: 'small',
+		medium: 'medium',
+		large: 'large'
+	} as const;
+
+	$: cardClasses = `bg-white border border-light-gray rounded-lg transition-all duration-200 ${sizeClasses[size].card} ${centered ? 'text-center' : ''}`;
 	$: iconClasses = `block mx-auto ${sizeClasses[size].icon}`;
 	$: titleClasses = `font-extrabold text-black uppercase tracking-wide leading-tight ${sizeClasses[size].title}`;
 	$: descriptionClasses = `text-black opacity-70 leading-relaxed ${sizeClasses[size].description}`;
-	$: buttonClasses = `inline-block font-extrabold uppercase tracking-wide cursor-pointer transition-all duration-200 text-center rounded font-figtree focus:outline-primary focus:outline-2 focus:outline-offset-2 ${sizeClasses[size].button} ${buttonVariants[actionVariant]} ${disabled ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`;
+	$: ButtonComponent = actionVariant === 'secondary' || actionVariant === 'manage' ? SecondaryButton : PrimaryButton;
+	$: buttonSize = buttonSizeMap[size];
+	$: buttonFullWidth = size !== 'small';
 </script>
 
 <div class={cardClasses}>
@@ -67,21 +70,24 @@
 	
 	<p class={descriptionClasses}>{description}</p>
 	
-	{#if href}
-		<a 
-			{href} 
-			class={buttonClasses}
+	{#if href && !disabled}
+		<svelte:component
+			this={ButtonComponent}
+			href={href}
+			size={buttonSize}
+			fullWidth={buttonFullWidth}
 		>
 			{actionText}
-		</a>
+		</svelte:component>
 	{:else}
-		<button 
-			class={buttonClasses}
+		<svelte:component
+			this={ButtonComponent}
+			size={buttonSize}
+			fullWidth={buttonFullWidth}
 			{disabled}
 			on:click={handleAction}
 		>
 			{actionText}
-		</button>
+		</svelte:component>
 	{/if}
 </div>
-

@@ -1,9 +1,8 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import ChartTooltip from './ChartTooltip.svelte';
 	
-	export let data: Array<{label: string; value: number}> = [];
-	export let data2: Array<{label: string; value: number}> = [];
+	export let data: Array<{ label: string; value: number }> = [];
+	export let data2: Array<{ label: string; value: number }> = [];
 	export let width: number = 950;
 	export let height: number = 400;
 	export let barColor: string = '#08bccc';
@@ -17,22 +16,24 @@
 	export let series2Name: string = '';
 	
 	// Helper to determine which labels to show based on data density
-	function getLabelsToShow(data: Array<{label: string; value: number}>): {indices: number[], showYear: boolean} {
-		const count = data.length;
+	function getLabelsToShow(
+		points: Array<{ label: string; value: number }>,
+	): { indices: number[]; showYear: boolean } {
+		const count = points.length;
 		let indices: number[] = [];
 		let showYear = true;
 		
 		if (count <= 12) {
 			// Show all months
-			indices = data.map((_, i) => i);
+			indices = points.map((_, i) => i);
 		} else if (count <= 24) {
 			// Show every other month
-			indices = data.map((_, i) => i).filter(i => i % 2 === 0);
+			indices = points.map((_, i) => i).filter((i) => i % 2 === 0);
 		} else if (count <= 48) {
 			// Show quarterly (Jan, Apr, Jul, Oct)
-			indices = data.map((_, i) => {
+			indices = points.map((_, i) => {
 				try {
-					const dateStr = data[i].label.includes('T') ? data[i].label : data[i].label + 'T00:00:00';
+					const dateStr = points[i].label.includes('T') ? points[i].label : points[i].label + 'T00:00:00';
 					const date = new Date(dateStr);
 					if (isNaN(date.getTime())) return -1;
 					const month = date.getMonth();
@@ -40,16 +41,16 @@
 				} catch {
 					return -1;
 				}
-			}).filter(i => i >= 0);
+			}).filter((i) => i >= 0);
 		} else {
 			// Show only years
-			indices = data.map((_, i) => {
-				const dateStr = data[i].label.includes('T') ? data[i].label : data[i].label + 'T00:00:00';
+			indices = points.map((_, i) => {
+				const dateStr = points[i].label.includes('T') ? points[i].label : points[i].label + 'T00:00:00';
 				const date = new Date(dateStr);
-				const prevDateStr = i > 0 ? (data[i-1].label.includes('T') ? data[i-1].label : data[i-1].label + 'T00:00:00') : null;
+				const prevDateStr = i > 0 ? (points[i - 1].label.includes('T') ? points[i - 1].label : points[i - 1].label + 'T00:00:00') : null;
 				const prevDate = prevDateStr ? new Date(prevDateStr) : null;
 				return !prevDate || date.getFullYear() !== prevDate.getFullYear() ? i : -1;
-			}).filter(i => i >= 0);
+			}).filter((i) => i >= 0);
 			showYear = false; // Don't show year separately as it's in the label
 		}
 		
@@ -65,9 +66,11 @@
 		label: ''
 	};
 	
-	const padding = { top: 40, right: 20, bottom: 80, left: 60 }; // Increased bottom padding for legend and x-axis labels
+	const padding = { top: 40, right: 20, bottom: 80, left: 60 } as const; // Increased bottom padding for legend and x-axis labels
 	const chartWidth = width - padding.left - padding.right;
 	const chartHeight = height - padding.top - padding.bottom;
+	const TICK_COUNT = 6;
+	const yTickIndices = Array.from({ length: TICK_COUNT }, (_, i) => i);
 	
 	// Function to round to nice numbers (1-2 significant figures)
 	function getNiceNumber(value: number): number {
@@ -97,7 +100,7 @@
 	$: barSpacing = chartWidth / Math.max(validData.length, 1);
 	$: zeroY = padding.top + chartHeight - ((0 - niceMin) / valueRange) * chartHeight;
 	
-	function handleMouseMove(event: MouseEvent, index: number, series: 1 | 2 = 1) {
+	function handleMouseMove(_event: MouseEvent, index: number, series: 1 | 2 = 1) {
 		if (!svg) return;
 		
 		const dataPoint = series === 1 ? validData[index] : validData2[index];
@@ -116,7 +119,7 @@
 			if (!isNaN(date.getTime())) {
 				formattedLabel = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 			}
-		} catch (e) {
+		} catch {
 			// Keep original label if date parsing fails
 		}
 		
@@ -141,7 +144,7 @@
 		
 		<!-- Grid lines -->
 		{#if showGrid}
-			{#each Array(6) as _, i}
+			{#each yTickIndices as _, i (i)}
 				<line 
 					x1={padding.left} 
 					y1={padding.top + i * (chartHeight / 5)} 
@@ -154,7 +157,7 @@
 		{/if}
 		
 		<!-- Y-axis labels -->
-		{#each Array(6) as _, i}
+		{#each yTickIndices as _, i (i)}
 			{@const value = niceMax - (i / 5) * valueRange}
 			{@const absValue = Math.abs(value)}
 			{@const formattedValue = absValue >= 1000 ? `${value < 0 ? '-' : ''}${Math.round(absValue / 1000)}k` : Math.round(value).toString()}
@@ -174,7 +177,7 @@
 		<!-- X-axis labels -->
 		{#if validData.length > 0}
 			{@const labelInfo = getLabelsToShow(validData)}
-			{#each validData as item, i}
+			{#each validData as item, i (item.label + i)}
 				{#if labelInfo.indices.includes(i)}
 					{@const dateStr = item.label.includes('T') ? item.label : item.label + 'T00:00:00'}
 					{@const date = new Date(dateStr)}
@@ -214,7 +217,7 @@
 		
 		<!-- Bars for first series -->
 		{#if validData.length > 0}
-			{#each validData as item, i}
+			{#each validData as item, i (item.label + i)}
 				{@const x = validData2.length > 0 
 					? padding.left + i * barSpacing + (barSpacing - barWidth * 2) / 2
 					: padding.left + i * barSpacing + (barSpacing - barWidth) / 2}
@@ -241,7 +244,7 @@
 		
 		<!-- Bars for second series -->
 		{#if validData2.length > 0}
-			{#each validData2 as item, i}
+			{#each validData2 as item, i (item.label + i)}
 				{@const x = padding.left + i * barSpacing + (barSpacing - barWidth * 2) / 2 + barWidth}
 				{@const barHeight = Math.abs((item.value - 0) / valueRange) * chartHeight}
 				{@const y = item.value >= 0 
@@ -279,7 +282,7 @@
 		
 		<!-- Values on bars (if not using tooltip) -->
 		{#if showValues && !tooltipData.show}
-			{#each validData as item, i}
+			{#each validData as item, i (item.label + i)}
 				{@const x = padding.left + i * barSpacing + barSpacing / 2}
 				{@const y = padding.top + chartHeight - ((item.value - niceMin) / valueRange) * chartHeight - 10}
 				

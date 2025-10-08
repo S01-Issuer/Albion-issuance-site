@@ -6,9 +6,337 @@
 import type { OffchainAssetReceiptVault } from "$lib/types/graphql";
 import type { Asset, Token, PlannedProduction } from "$lib/types/uiTypes";
 import { mergeProductionHistory } from "$lib/utils/productionMerge";
-import type { TokenMetadata } from "$lib/types/MetaboardTypes";
+import {
+  TokenType,
+  ProductionStatus,
+  DocumentType,
+  type TokenMetadata,
+  type PayoutData,
+  type AssetData,
+  type PlannedProduction as MetadataPlannedProduction,
+  type ReceiptsData,
+  type HistoricalProductionRecord as MetadataHistoricalRecord,
+  type Document as MetadataDocument,
+} from "$lib/types/MetaboardTypes";
 import type { ISODateTimeString } from "$lib/types/sharedTypes";
 import { PINATA_GATEWAY } from "$lib/network";
+import type {
+  PinnedMetadata,
+  PinnedMetadataAsset,
+  PinnedMetadataGalleryImage,
+  PinnedMetadataPayoutEntry,
+  PinnedMetadataReceiptsRecord,
+} from "$lib/types/PinnedMetadata";
+import type { Metadata } from "$lib/types/sharedTypes";
+import type {
+  HistoricalRecord as MergeHistoricalRecord,
+  ReceiptsRecord as MergeReceiptsRecord,
+  PayoutRecord as MergePayoutRecord,
+} from "$lib/utils/productionMerge";
+
+const TOKEN_TYPE_VALUES = new Set(Object.values(TokenType));
+const PRODUCTION_STATUS_VALUES = new Set(Object.values(ProductionStatus));
+const ASSET_STATUS_VALUES: Asset["status"][] = [
+  "funding",
+  "producing",
+  "completed",
+];
+
+function ensureYearMonth(
+  value: unknown,
+  fallback: `${number}-${number}` = "1970-01",
+): `${number}-${number}` {
+  if (typeof value === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(value)) {
+    return value as `${number}-${number}`;
+  }
+  return fallback;
+}
+
+function ensureTokenType(value: unknown): TokenType {
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase() as TokenType;
+    if (TOKEN_TYPE_VALUES.has(normalized)) {
+      return normalized;
+    }
+  }
+  throw new Error(`Invalid tokenType value: ${String(value)}`);
+}
+
+function ensureProductionStatus(value: unknown): ProductionStatus {
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase() as ProductionStatus;
+    if (PRODUCTION_STATUS_VALUES.has(normalized)) {
+      return normalized;
+    }
+  }
+  return ProductionStatus.Producing;
+}
+
+function ensureAssetStatus(value: unknown): Asset["status"] {
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase() as Asset["status"];
+    if (ASSET_STATUS_VALUES.includes(normalized)) {
+      return normalized;
+    }
+  }
+  return "producing";
+}
+
+function ensureMetadata(value: unknown, fallback: Metadata): Metadata {
+  if (
+    value &&
+    typeof value === "object" &&
+    "createdAt" in value &&
+    "updatedAt" in value
+  ) {
+    const metadata = value as Partial<Metadata>;
+    if (
+      typeof metadata.createdAt === "string" &&
+      typeof metadata.updatedAt === "string"
+    ) {
+      return {
+        createdAt: metadata.createdAt as Metadata["createdAt"],
+        updatedAt: metadata.updatedAt as Metadata["updatedAt"],
+      };
+    }
+  }
+  return fallback;
+}
+
+function toNumber(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+  return fallback;
+}
+
+function toString(value: unknown, fallback = ""): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  return String(value);
+}
+
+function toIsoDate(value: unknown): ISODateTimeString {
+  const str = toString(value);
+  if (str) {
+    const parsed = new Date(str);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString() as ISODateTimeString;
+    }
+  }
+  return new Date().toISOString() as ISODateTimeString;
+}
+
+function normalizePayoutData(
+  entries?: PinnedMetadataPayoutEntry[],
+): PayoutData[] {
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+  const result: PayoutData[] = [];
+  for (const entry of entries) {
+    const month = ensureYearMonth(entry?.month);
+    const payout = entry?.tokenPayout ?? {};
+    result.push({
+      month,
+      tokenPayout: {
+        totalPayout: toNumber(payout.totalPayout),
+        payoutPerToken: toNumber(payout.payoutPerToken),
+        txHash: toString(payout.txHash),
+        orderHash: toString(payout.orderHash),
+      },
+    });
+  }
+  return result;
+}
+
+function toMergePayoutRecords(
+  entries?: PinnedMetadataPayoutEntry[],
+): MergePayoutRecord[] {
+  return normalizePayoutData(entries).map((entry) => ({
+    month: entry.month,
+    tokenPayout: { payoutPerToken: entry.tokenPayout.payoutPerToken },
+  }));
+}
+
+function normalizeReceiptsData(
+  receipts: PinnedMetadataReceiptsRecord[] | undefined,
+): ReceiptsData[] {
+  if (!Array.isArray(receipts)) {
+    return [];
+  }
+  return receipts.map((record) => ({
+    month: ensureYearMonth(record?.month),
+    assetData: {
+      production: toNumber(record?.assetData?.production ?? record?.production),
+      revenue: toNumber(record?.assetData?.revenue ?? record?.revenue),
+      expenses: toNumber(record?.assetData?.expenses ?? record?.expenses),
+      netIncome: toNumber(record?.assetData?.netIncome ?? record?.netIncome),
+    },
+    realisedPrice: {
+      oilPrice: toNumber(record?.realisedPrice?.oilPrice),
+      gasPrice: toNumber(record?.realisedPrice?.gasPrice),
+    },
+  }));
+}
+
+function normalizeHistoricalProduction(
+  history: PinnedMetadataAsset["historicalProduction"],
+): MetadataHistoricalRecord[] {
+  if (!Array.isArray(history)) {
+    return [];
+  }
+  return history.map((entry) => ({
+    month: ensureYearMonth(entry?.month),
+    production: toNumber(entry?.production),
+  }));
+}
+
+function ensureDocumentType(value: unknown): DocumentType {
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase() as DocumentType;
+    if (Object.values(DocumentType).includes(normalized)) {
+      return normalized;
+    }
+  }
+  return DocumentType.PDF;
+}
+
+function normalizeDocuments(documents: unknown): MetadataDocument[] {
+  if (!Array.isArray(documents)) {
+    return [];
+  }
+  return documents.map((doc) => ({
+    name: toString(doc.name),
+    type: ensureDocumentType((doc as { type?: unknown }).type),
+    ipfs: toString(doc.ipfs),
+  }));
+}
+
+function normalizeOperationalMetricsToken(
+  metrics: PinnedMetadataAsset["operationalMetrics"],
+): AssetData["operationalMetrics"] {
+  const fallback: AssetData["operationalMetrics"] = {
+    uptime: { percentage: 0, period: "unknown" },
+    hseMetrics: {
+      incidentFreeDays: 0,
+      lastIncidentDate: new Date().toISOString() as ISODateTimeString,
+    },
+  };
+
+  if (!metrics || typeof metrics !== "object") {
+    return fallback;
+  }
+
+  const metricsRecord = metrics as Record<string, unknown>;
+  const uptimeRecord =
+    typeof metricsRecord.uptime === "object" && metricsRecord.uptime
+      ? (metricsRecord.uptime as Record<string, unknown>)
+      : {};
+  const hseRecord =
+    typeof metricsRecord.hseMetrics === "object" && metricsRecord.hseMetrics
+      ? (metricsRecord.hseMetrics as Record<string, unknown>)
+      : {};
+
+  return {
+    uptime: {
+      percentage: toNumber(uptimeRecord.percentage),
+      period: toString(uptimeRecord.period, "unknown"),
+    },
+    hseMetrics: {
+      incidentFreeDays: toNumber(hseRecord.incidentFreeDays),
+      lastIncidentDate: toIsoDate(hseRecord.lastIncidentDate),
+    },
+  };
+}
+
+function buildTokenAssetData(asset: PinnedMetadataAsset): AssetData {
+  const locationWaterDepth = asset.location?.waterDepth;
+  return {
+    assetName: toString(asset.assetName),
+    description: toString(asset.description),
+    location: {
+      state: toString(asset.location?.state),
+      county: toString(asset.location?.county),
+      country: toString(asset.location?.country),
+      coordinates: {
+        lat: toNumber(asset.location?.coordinates?.lat),
+        lng: toNumber(asset.location?.coordinates?.lng),
+      },
+      waterDepth:
+        locationWaterDepth === undefined || locationWaterDepth === null
+          ? null
+          : toString(locationWaterDepth),
+    },
+    operator: {
+      name: toString(asset.operator?.name),
+      website: toString(asset.operator?.website),
+      experienceYears: toNumber(asset.operator?.experience, 0),
+    },
+    technical: {
+      fieldType: toString(asset.technical?.fieldType),
+      license: toString(asset.technical?.license),
+      firstOil: ensureYearMonth(asset.technical?.firstOil),
+      infrastructure: toString(asset.technical?.infrastructure),
+      environmental: toString(asset.technical?.environmental),
+      expectedEndDate: ensureYearMonth(asset.technical?.expectedEndDate),
+      crudeBenchmark: toString(asset.technical?.crudeBenchmark),
+      pricing: {
+        benchmarkPremium: toNumber(asset.technical?.pricing?.benchmarkPremium),
+        transportCosts: toNumber(asset.technical?.pricing?.transportCosts),
+      },
+    },
+    assetTerms: {
+      interestType: toString(asset.assetTerms?.interestType),
+      amount: toNumber(asset.assetTerms?.amount),
+      paymentFrequencyDays: toNumber(asset.assetTerms?.paymentFrequencyDays),
+    },
+    status: ensureProductionStatus(asset.production?.status),
+    plannedProduction: {
+      oilPriceAssumption: toNumber(asset.plannedProduction?.oilPriceAssumption),
+      oilPriceAssumptionCurrency:
+        toString(asset.plannedProduction?.oilPriceAssumptionCurrency) || "USD",
+      projections:
+        asset.plannedProduction?.projections?.map((projection) => ({
+          month: ensureYearMonth(projection?.month),
+          production: toNumber(projection?.production),
+          revenue: projection?.revenue
+            ? toNumber(projection.revenue)
+            : undefined,
+        })) ?? [],
+    } as MetadataPlannedProduction,
+    historicalProduction: normalizeHistoricalProduction(
+      asset.historicalProduction,
+    ),
+    receiptsData: normalizeReceiptsData(asset.receiptsData),
+    operationalMetrics: normalizeOperationalMetricsToken(
+      asset.operationalMetrics,
+    ),
+    documents: normalizeDocuments(
+      (asset as { documents?: MetadataDocument[] }).documents,
+    ),
+    coverImage: asset.coverImage ? `${PINATA_GATEWAY}/${asset.coverImage}` : "",
+    galleryImages:
+      asset.galleryImages?.map((image) => ({
+        url: image?.url ? `${PINATA_GATEWAY}/${image.url}` : "",
+        title: toString(image?.title),
+        caption: toString(image?.caption),
+      })) ?? [],
+  };
+}
 
 /**
  * Base transformer for common SFT data
@@ -39,7 +367,10 @@ class BaseSftTransformer {
   /**
    * Validate required metadata fields
    */
-  protected validateMetadata(metadata: any, requiredFields: string[]): void {
+  protected validateMetadata(
+    metadata: Record<string, unknown>,
+    requiredFields: string[],
+  ): void {
     if (!metadata) {
       throw new Error("Missing metadata");
     }
@@ -55,8 +386,18 @@ class BaseSftTransformer {
   /**
    * Get nested object value using dot notation
    */
-  private getNestedValue(obj: any, path: string): any {
-    return path.split(".").reduce((current, key) => current?.[key], obj);
+  private getNestedValue(obj: Record<string, unknown>, path: string): unknown {
+    return path.split(".").reduce<unknown>((current, key) => {
+      if (
+        current !== null &&
+        typeof current === "object" &&
+        !Array.isArray(current) &&
+        key in current
+      ) {
+        return (current as Record<string, unknown>)[key];
+      }
+      return undefined;
+    }, obj);
   }
 }
 
@@ -66,7 +407,7 @@ class BaseSftTransformer {
 export class TokenTransformer extends BaseSftTransformer {
   transform(
     sft: OffchainAssetReceiptVault,
-    pinnedMetadata: any,
+    pinnedMetadata: PinnedMetadata,
     maxSupply: string,
   ): Token {
     const token: Token = {
@@ -85,7 +426,10 @@ export class TokenTransformer extends BaseSftTransformer {
         balance: holder.balance,
       })),
       payoutHistory: [],
-      sharePercentage: pinnedMetadata?.sharePercentage || 0,
+      sharePercentage:
+        typeof pinnedMetadata.sharePercentage === "number"
+          ? pinnedMetadata.sharePercentage
+          : 0,
       firstPaymentDate: undefined,
       metadata: this.createMetadataTimestamps(sft),
     };
@@ -108,8 +452,8 @@ export class TokenMetadataTransformer extends BaseSftTransformer {
 
   transform(
     sft: OffchainAssetReceiptVault,
-    pinnedMetadata: any,
-    maxSupply: string,
+    pinnedMetadata: PinnedMetadata,
+    _maxSupply: string,
   ): TokenMetadata {
     // Validate required fields
     this.validateMetadata(pinnedMetadata, this.REQUIRED_FIELDS);
@@ -130,19 +474,26 @@ export class TokenMetadataTransformer extends BaseSftTransformer {
       throw new Error("Invalid payoutData - must be an array");
     }
 
+    const baseMetadata = this.createMetadataTimestamps(sft);
+    if (!pinnedMetadata.asset) {
+      throw new Error("Token metadata missing asset details");
+    }
+    const assetMetadata = pinnedMetadata.asset;
+    const releaseName = toString(pinnedMetadata.releaseName);
+    if (!releaseName) {
+      throw new Error("Invalid releaseName in metadata");
+    }
+
     const tokenMetadata: TokenMetadata = {
       contractAddress: sft.id,
       symbol: sft.symbol,
-      releaseName: pinnedMetadata.releaseName,
-      tokenType: pinnedMetadata.tokenType,
-      firstPaymentDate: pinnedMetadata.firstPaymentDate,
+      releaseName,
+      tokenType: ensureTokenType(pinnedMetadata.tokenType),
+      firstPaymentDate: ensureYearMonth(pinnedMetadata.firstPaymentDate),
       sharePercentage: pinnedMetadata.sharePercentage,
-      payoutData: pinnedMetadata.payoutData || [],
-      asset: {
-        ...(pinnedMetadata.asset || {}),
-        status: pinnedMetadata.asset?.production?.status || "producing",
-      },
-      metadata: pinnedMetadata.metadata || this.createMetadataTimestamps(sft),
+      payoutData: normalizePayoutData(pinnedMetadata.payoutData),
+      asset: buildTokenAssetData(assetMetadata),
+      metadata: ensureMetadata(pinnedMetadata.metadata, baseMetadata),
     };
 
     return tokenMetadata;
@@ -161,30 +512,40 @@ export class AssetTransformer extends BaseSftTransformer {
     "asset.assetTerms",
   ];
 
-  transform(sft: OffchainAssetReceiptVault, pinnedMetadata: any): Asset {
+  transform(
+    sft: OffchainAssetReceiptVault,
+    pinnedMetadata: PinnedMetadata,
+  ): Asset {
     // Validate required fields
     this.validateMetadata(pinnedMetadata, this.REQUIRED_FIELDS);
 
     const assetData = pinnedMetadata.asset;
+    if (!assetData) {
+      throw new Error("Missing asset metadata");
+    }
     // Build merged monthly reports first so we can derive current production
     const monthlyReports = this.transformMonthlyReports(
       assetData,
       pinnedMetadata,
     );
 
+    const assetStatus = ensureAssetStatus(assetData.production?.status);
+    const assetTerms = this.transformTerms(assetData.assetTerms);
+    const metadataTimestamps = this.createMetadataTimestamps(sft);
+
     const asset: Asset = {
       id: sft.id,
-      name: assetData.assetName,
-      description: assetData.description || "",
+      name: toString(assetData.assetName) || sft.name,
+      description: toString(assetData.description),
       coverImage: this.formatImageUrl(assetData.coverImage),
       images: this.formatGalleryImages(assetData.galleryImages),
       galleryImages: this.formatGalleryImages(assetData.galleryImages),
       location: this.transformLocation(assetData.location),
       operator: this.transformOperator(assetData.operator),
       technical: this.transformTechnical(assetData.technical),
-      status: assetData.production?.status || "producing",
-      terms: this.transformTerms(assetData.assetTerms),
-      assetTerms: this.transformTerms(assetData.assetTerms),
+      status: assetStatus,
+      terms: assetTerms,
+      assetTerms: assetTerms,
       tokenContracts: [sft.id],
       monthlyReports,
       plannedProduction: this.transformPlannedProduction(
@@ -193,7 +554,7 @@ export class AssetTransformer extends BaseSftTransformer {
       operationalMetrics: this.transformOperationalMetrics(
         assetData.operationalMetrics,
       ),
-      metadata: this.createMetadataTimestamps(sft),
+      metadata: metadataTimestamps,
     };
 
     return asset;
@@ -204,57 +565,82 @@ export class AssetTransformer extends BaseSftTransformer {
   }
 
   private formatGalleryImages(
-    images?: any[],
+    images?: PinnedMetadataGalleryImage[],
   ): Array<{ title: string; url: string; caption: string }> {
     if (!Array.isArray(images)) return [];
 
-    return images.map((image: any) => ({
+    return images.map((image) => ({
       title: image?.title || "",
       url: image?.url ? `${PINATA_GATEWAY}/${image.url}` : "",
       caption: image?.caption || "",
     }));
   }
 
-  private transformLocation(location: any) {
+  private transformLocation(
+    location?: PinnedMetadataAsset["location"],
+  ): Asset["location"] {
+    if (!location) {
+      return {
+        state: "",
+        county: "",
+        country: "",
+        coordinates: { lat: 0, lng: 0 },
+        waterDepth: null,
+      };
+    }
+
     return {
-      state: location.state,
-      county: location.county,
-      country: location.country,
+      state: toString(location.state),
+      county: toString(location.county),
+      country: toString(location.country),
       coordinates: {
-        lat: location.coordinates?.lat || 0,
-        lng: location.coordinates?.lng || 0,
+        lat: toNumber(location.coordinates?.lat),
+        lng: toNumber(location.coordinates?.lng),
       },
-      waterDepth: null,
+      waterDepth:
+        location.waterDepth === null || location.waterDepth === undefined
+          ? null
+          : toString(location.waterDepth),
     };
   }
 
-  private transformOperator(operator: any) {
+  private transformOperator(
+    operator?: PinnedMetadataAsset["operator"],
+  ): Asset["operator"] {
     return {
-      name: operator.name,
-      website: operator.website || "",
-      experience: operator.experience || "",
+      name: toString(operator?.name),
+      website: toString(operator?.website),
+      experience:
+        operator?.experience !== undefined && operator?.experience !== null
+          ? String(operator.experience)
+          : "",
     };
   }
 
-  private transformTechnical(technical: any) {
+  private transformTechnical(
+    technical?: PinnedMetadataAsset["technical"],
+  ): Asset["technical"] {
     return {
-      fieldType: technical.fieldType,
-      depth: technical.depth,
-      license: technical.license,
-      estimatedLife: technical.estimatedLife,
-      firstOil: technical.firstOil,
-      infrastructure: technical.infrastructure,
-      environmental: technical.environmental,
-      expectedEndDate: technical.expectedEndDate,
-      crudeBenchmark: technical.crudeBenchmark,
+      fieldType: toString(technical?.fieldType),
+      depth: toString(technical?.depth),
+      license: toString(technical?.license),
+      estimatedLife: toString(technical?.estimatedLife),
+      firstOil: toString(technical?.firstOil),
+      infrastructure: toString(technical?.infrastructure),
+      environmental: toString(technical?.environmental),
+      expectedEndDate: toString(technical?.expectedEndDate),
+      crudeBenchmark: toString(technical?.crudeBenchmark),
       pricing: {
-        benchmarkPremium: (technical.pricing?.benchmarkPremium || 0).toString(),
-        transportCosts: (technical.pricing?.transportCosts || 0).toString(),
+        benchmarkPremium: toString(technical?.pricing?.benchmarkPremium ?? "0"),
+        transportCosts: toString(technical?.pricing?.transportCosts ?? "0"),
       },
     };
   }
 
-  private transformProduction(assetData: any, mergedMonthlyReports: any[]) {
+  private transformProduction(
+    assetData: PinnedMetadataAsset,
+    mergedMonthlyReports: Array<{ production?: number }>,
+  ) {
     // Derive current production from latest merged monthly report when available
     const latest = mergedMonthlyReports?.length
       ? mergedMonthlyReports[mergedMonthlyReports.length - 1]
@@ -271,44 +657,110 @@ export class AssetTransformer extends BaseSftTransformer {
     };
   }
 
-  private transformTerms(assetTerms: any) {
+  private transformTerms(
+    assetTerms?: PinnedMetadataAsset["assetTerms"],
+  ): Asset["terms"] {
     return {
-      interestType: assetTerms.interestType,
-      amount: assetTerms.amount,
-      paymentFrequency: assetTerms.paymentFrequencyDays,
+      interestType: toString(assetTerms?.interestType),
+      amount: toString(assetTerms?.amount ?? ""),
+      paymentFrequency: toString(assetTerms?.paymentFrequencyDays ?? ""),
     };
   }
 
-  private transformMonthlyReports(assetData: any, pinnedMetadata: any) {
-    return mergeProductionHistory(
+  private transformMonthlyReports(
+    assetData: PinnedMetadataAsset,
+    pinnedMetadata: PinnedMetadata,
+  ) {
+    const historical: MergeHistoricalRecord[] = Array.isArray(
       assetData.historicalProduction,
+    )
+      ? assetData.historicalProduction.map((record) => ({
+          month: ensureYearMonth(record?.month),
+          production: toNumber(record?.production),
+        }))
+      : [];
+
+    const receipts: MergeReceiptsRecord[] = Array.isArray(
       assetData.receiptsData,
-      pinnedMetadata?.payoutData,
-    );
+    )
+      ? assetData.receiptsData.map((record) => ({
+          month: ensureYearMonth(record?.month),
+          assetData: {
+            production: toNumber(
+              record?.assetData?.production ?? record?.production,
+            ),
+            revenue: toNumber(record?.assetData?.revenue ?? record?.revenue),
+            expenses: toNumber(record?.assetData?.expenses ?? record?.expenses),
+            netIncome: toNumber(
+              record?.assetData?.netIncome ?? record?.netIncome,
+            ),
+          },
+          production: toNumber(record?.production),
+          revenue: toNumber(record?.revenue),
+          expenses: toNumber(record?.expenses),
+          netIncome: toNumber(record?.netIncome),
+        }))
+      : [];
+
+    const payoutRecords = toMergePayoutRecords(pinnedMetadata?.payoutData);
+
+    return mergeProductionHistory(historical, receipts, payoutRecords);
   }
 
   private transformPlannedProduction(
-    plannedProduction: any,
+    plannedProduction: PinnedMetadataAsset["plannedProduction"],
   ): PlannedProduction {
     return {
-      oilPriceAssumption: plannedProduction?.oilPriceAssumption || 0,
+      oilPriceAssumption: toNumber(plannedProduction?.oilPriceAssumption),
       oilPriceAssumptionCurrency:
-        plannedProduction?.oilPriceAssumptionCurrency || "USD",
-      projections: plannedProduction?.projections || [],
+        toString(plannedProduction?.oilPriceAssumptionCurrency) || "USD",
+      projections:
+        plannedProduction?.projections?.map((projection) => ({
+          month: toString(projection?.month),
+          production: toNumber(projection?.production),
+        })) ?? [],
     };
   }
 
-  private transformOperationalMetrics(metrics: any) {
-    return (
-      metrics || {
-        uptime: { percentage: 0, unit: "%", period: "unknown" },
-        hseMetrics: {
-          incidentFreeDays: 0,
-          lastIncidentDate: new Date().toISOString(),
-          safetyRating: "Unknown",
-        },
-      }
-    );
+  private transformOperationalMetrics(
+    metrics: PinnedMetadataAsset["operationalMetrics"],
+  ) {
+    const fallback: Asset["operationalMetrics"] = {
+      uptime: { percentage: 0, period: "unknown" },
+      hseMetrics: {
+        incidentFreeDays: 0,
+        lastIncidentDate: new Date().toISOString() as ISODateTimeString,
+        safetyRating: "Unknown",
+      },
+    };
+
+    if (!metrics || typeof metrics !== "object") {
+      return fallback;
+    }
+
+    const metricsRecord = metrics as Record<string, unknown>;
+    const uptimeRecord =
+      typeof metricsRecord.uptime === "object" && metricsRecord.uptime
+        ? (metricsRecord.uptime as Record<string, unknown>)
+        : {};
+    const hseRecord =
+      typeof metricsRecord.hseMetrics === "object" && metricsRecord.hseMetrics
+        ? (metricsRecord.hseMetrics as Record<string, unknown>)
+        : {};
+
+    return {
+      uptime: {
+        percentage: toNumber(uptimeRecord.percentage),
+        period: toString(uptimeRecord.period, "unknown"),
+      },
+      hseMetrics: {
+        incidentFreeDays: toNumber(hseRecord.incidentFreeDays),
+        lastIncidentDate: toIsoDate(hseRecord.lastIncidentDate),
+        safetyRating: hseRecord.safetyRating
+          ? toString(hseRecord.safetyRating)
+          : "Unknown",
+      },
+    };
   }
 }
 

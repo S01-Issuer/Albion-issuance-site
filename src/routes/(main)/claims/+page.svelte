@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { writeContract, simulateContract } from '@wagmi/core';
+	import { derived, get } from 'svelte/store';
+	import { onMount, onDestroy } from 'svelte';
 	import { web3Modal, signerAddress, connected, wagmiConfig } from 'svelte-wagmi';
 	import { Card, CardContent, PrimaryButton, SecondaryButton, StatusBadge, StatsCard, SectionTitle, CollapsibleSection, FormattedNumber } from '$lib/components/components';
 	import { PageLayout, HeroSection, ContentSection } from '$lib/components/layout';
@@ -10,6 +12,14 @@
 	import orderbookAbi from '$lib/abi/orderbook.json';
 	import type { Hex } from 'viem';
 	import { claimsCache } from '$lib/stores/claimsCache';
+	import type { ClaimsHoldingsGroup } from '$lib/services/ClaimsService';
+	import type { ClaimHistory } from '$lib/utils/claims';
+
+	const claimsService = useClaimsService();
+	const isDev = import.meta.env.DEV;
+	const logDev = (...messages: unknown[]) => {
+		if (isDev) console.warn('[Claims]', ...messages);
+	};
 
 	let totalEarned = 0;
 	let totalClaimed = 0;
@@ -18,23 +28,47 @@
 	let claiming = false;
 	let claimSuccess = false;
 
-	let holdings: { fieldName: string; totalAmount: number; holdings: any[] }[] = [];
-	let claimHistory: Array<{ date: string; asset: string; amount: string; txHash: string } > = [];
+	let holdings: ClaimsHoldingsGroup[] = [];
+	let claimHistory: ClaimHistory[] = [];
 	let currentPage = 1;
 	const itemsPerPage = 20;
 
-	$: if ($connected && $signerAddress && pageLoading) {
-		loadClaimsData();
+	const walletState = derived([connected, signerAddress], ([$connected, $signerAddress]) => ({
+		connected: $connected,
+		address: $signerAddress ?? ''
+	}));
+
+	let unsubscribeWallet: (() => void) | null = null;
+
+	onMount(() => {
+		subscribeToWallet();
+	});
+
+	onDestroy(() => {
+		unsubscribeWallet?.();
+	});
+
+	function subscribeToWallet() {
+		unsubscribeWallet = walletState.subscribe(({ connected, address }) => {
+			if (connected && address) {
+				loadClaimsData(address);
+			}
+		});
 	}
 
-	async function loadClaimsData(){
+	async function loadClaimsData(addressOverride?: string) {
+		pageLoading = true;
 		try {
-			// Check cache first
-			const cached = claimsCache.get($signerAddress || '');
+			const cacheKey = addressOverride ?? $signerAddress ?? '';
+			if (!cacheKey) {
+				pageLoading = false;
+				return;
+			}
+			const cached = claimsCache.get(cacheKey);
 			if (cached) {
-				console.log('[Claims] Using cached data');
-				claimHistory = cached.claimHistory as any;
-				holdings = cached.holdings as any;
+				logDev('Using cached data');
+				claimHistory = cached.claimHistory;
+				holdings = cached.holdings;
 				totalEarned = cached.totals.earned;
 				totalClaimed = cached.totals.claimed;
 				unclaimedPayout = cached.totals.unclaimed;
@@ -42,15 +76,14 @@
 				return;
 			}
 
-			console.log('[Claims] Loading fresh data');
-			const claims = useClaimsService();
-			const result = await claims.loadClaimsForWallet($signerAddress || '');
+			logDev('Loading fresh data');
+			const result = await claimsService.loadClaimsForWallet(cacheKey);
 			
 			// Store in cache
-			claimsCache.set($signerAddress || '', result);
+			claimsCache.set(cacheKey, result);
 			
-			claimHistory = result.claimHistory as any;
-			holdings = result.holdings as any;
+			claimHistory = result.claimHistory;
+			holdings = result.holdings;
 			totalEarned = result.totals.earned;
 			totalClaimed = result.totals.claimed;
 			unclaimedPayout = result.totals.unclaimed;
@@ -82,7 +115,16 @@
 	async function claimAllPayouts() {
 		claiming = true;
 		try {
-			let orders = [];
+			if (holdings.length === 0 || holdings[0].holdings.length === 0) {
+				throw new Error('No holdings available to claim');
+			}
+
+			const orders: Array<{
+				order: ClaimsHoldingsGroup['holdings'][number]['order'];
+				inputIOIndex: number;
+				outputIOIndex: number;
+				signedContext: readonly ClaimsHoldingsGroup['holdings'][number]['signedContext'][];
+			}> = [];
 			
 			// Collect all orders from all groups
 			for (const group of holdings) {
@@ -91,7 +133,7 @@
 						order: holding.order,
 						inputIOIndex: 0,
 						outputIOIndex: 0,
-						signedContext: [holding.signedContext]
+						signedContext: [holding.signedContext],
 					});
 				}
 			}
@@ -100,17 +142,17 @@
 				minimumInput: 0n,
 				maximumInput: 2n ** 256n - 1n,
 				maximumIORatio: 2n ** 256n - 1n,
-				orders: orders,
+				orders,
 				data: "0x"
 			};
 
 			// Get the orderbook address from the first holding
-			const orderbookAddress = holdings[0].holdings[0].orderBookAddress;
+			const orderbookAddress = holdings[0].holdings[0].orderBookAddress as Hex;
 
 			// Simulate transaction first
 			const { request } = await simulateContract($wagmiConfig, {
 				abi: orderbookAbi,
-				address: orderbookAddress as Hex,
+				address: orderbookAddress,
 				functionName: 'takeOrders2',
 				args: [takeOrdersConfig]
 			});
@@ -122,8 +164,9 @@
 			// Clear cache and reload claims data after successful claim
 			claimsCache.clear();
 			setTimeout(() => {
-				pageLoading = true;
-				loadClaimsData();
+				const address = get(signerAddress) ?? '';
+				if (!address) return;
+				loadClaimsData(address);
 			}, 2000);
 
 		} catch (error) {
@@ -134,10 +177,18 @@
 		}
 	}
 
-	async function handleClaimSingle(group: any) {
+	async function handleClaimSingle(group: ClaimsHoldingsGroup) {
 		claiming = true;
 		try {
-			let orders = [];
+			if (!group.holdings.length) {
+				throw new Error('No orders available for this claim group');
+			}
+			const orders: Array<{
+				order: ClaimsHoldingsGroup['holdings'][number]['order'];
+				inputIOIndex: number;
+				outputIOIndex: number;
+				signedContext: readonly ClaimsHoldingsGroup['holdings'][number]['signedContext'][];
+			}> = [];
 			
 			// Collect all orders from this group
 			for (const holding of group.holdings) {
@@ -145,7 +196,7 @@
 					order: holding.order,
 					inputIOIndex: 0,
 					outputIOIndex: 0,
-					signedContext: [holding.signedContext]
+					signedContext: [holding.signedContext],
 				});
 			}
 			
@@ -153,17 +204,17 @@
 				minimumInput: 0n,
 				maximumInput: 2n ** 256n - 1n,
 				maximumIORatio: 2n ** 256n - 1n,
-				orders: orders,
+				orders,
 				data: "0x"
 			};
 
 			// Get the orderbook address
-			const orderbookAddress = group.holdings[0].orderBookAddress;
+			const orderbookAddress = group.holdings[0].orderBookAddress as Hex;
 
 			// Simulate transaction first
 			const { request } = await simulateContract($wagmiConfig, {
 				abi: orderbookAbi,
-				address: orderbookAddress as Hex,
+				address: orderbookAddress,
 				functionName: 'takeOrders2',
 				args: [takeOrdersConfig]
 			});
@@ -175,8 +226,9 @@
 			// Clear cache and reload claims data after successful claim
 			claimsCache.clear();
 			setTimeout(() => {
-				pageLoading = true;
-				loadClaimsData();
+				const address = get(signerAddress) ?? '';
+				if (!address) return;
+				loadClaimsData(address);
 			}, 2000);
 
 		} catch (error) {
@@ -246,30 +298,34 @@
 			subtitle="Claim your energy asset payouts and track your claims history"
 			showBorder={false}
 		>
-			<!-- Main Stats -->
-			<div class="grid grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-8 mt-8 max-w-4xl mx-auto">
-				<StatsCard
-					title="Available to Claim"
-					value={formatCurrency(unclaimedPayout, { compact: true })}
-					subtitle="Ready now"
-					size="large"
-					valueColor="primary"
-				/>
-				<StatsCard
-					title="Total Earned"
-					value={formatCurrency(totalEarned, { compact: true })}
-					subtitle="All time"
-					size="large"
-				/>
-				<div class="hidden lg:block">
+				<!-- Main Stats -->
+				<div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 lg:gap-8 text-center mt-8 max-w-6xl mx-auto">
+					<StatsCard
+						title="Available to Claim"
+						value={formatCurrency(unclaimedPayout, { compact: true })}
+						subtitle="Ready now"
+						size="small"
+						valueColor="primary"
+					/>
+					<StatsCard
+						title="Total Earned"
+						value={formatCurrency(totalEarned, { compact: true })}
+						subtitle="All time"
+						size="small"
+					/>
 					<StatsCard
 						title="Total Claimed"
 						value={formatCurrency(totalClaimed, { compact: true })}
 						subtitle="Withdrawn"
-						size="large"
+						size="small"
+					/>
+					<StatsCard
+						title="Claims Processed"
+						value={claimHistory.length.toString()}
+						subtitle="All time"
+						size="small"
 					/>
 				</div>
-			</div>
 
 			<!-- Claim All Action -->
 			{#if unclaimedPayout > 0}
@@ -297,8 +353,8 @@
 				<SectionTitle level="h2" size="section" className="mb-6">Claims by Asset</SectionTitle>
 				
 				<div class="grid grid-cols-1 gap-4 lg:gap-6">
-					{#each holdings as group}
-						<Card>
+						{#each holdings as group (group.fieldName)}
+							<Card hoverable={false}>
 							<CardContent paddingClass="p-4 lg:p-6">
 								<div class="grid grid-cols-1 sm:grid-cols-4 lg:grid-cols-5 gap-4 items-center">
 									<div class="sm:col-span-2">
@@ -408,7 +464,7 @@
 									</tr>
 								</thead>
 								<tbody>
-									{#each paginatedHistory as claim}
+									{#each paginatedHistory as claim (claim.txHash || claim.date)}
 										<tr class="border-b border-light-gray last:border-0 hover:bg-light-gray/10 transition-colors">
 											<td class="p-4 text-sm text-black">
 												{formatDate(claim.date)}
@@ -432,7 +488,7 @@
 														href={`https://basescan.org/tx/${claim.txHash}`}
 														target="_blank"
 														rel="noopener noreferrer"
-														class="text-secondary hover:underline text-sm"
+														class="text-secondary text-sm no-underline hover:text-primary"
 													>
 														View TX →
 													</a>

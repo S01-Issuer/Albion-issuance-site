@@ -2,6 +2,7 @@
 
 import { writable, type Writable } from "svelte/store";
 import { sfts, sftMetadata } from "$lib/stores";
+import type { MetaV1S, OffchainAssetReceiptVault } from "$lib/types/graphql";
 
 export const TEST_WALLET = "0x1111111111111111111111111111111111111111";
 
@@ -52,12 +53,25 @@ export function seedSftStoresForFixture() {
     {
       id: sftAddress,
       totalShares: toWei(1000),
+      sharesSupply: toWei(1000),
       deployTimestamp: `${Math.floor(Date.now() / 1000)}`,
       symbol: "PBR1",
       name: "Permian Basin-3",
-      // Unused fields in the page, keep minimal
       tokenHolders: [],
-    } as any,
+      shareHolders: [],
+      shareTransfers: [],
+      receiptBalances: [],
+      certifications: [],
+      receiptVaultInformations: [],
+      deposits: [],
+      withdraws: [],
+      activeAuthorizer: { id: TEST_WALLET },
+      address: sftAddress,
+      admin: TEST_WALLET,
+      deployer: TEST_WALLET,
+      claimableDeposits: [],
+      receiptTokens: [],
+    } as unknown as OffchainAssetReceiptVault,
   ]);
 
   // sftMetadata is decoded via decodeSftInformation; we will mock that to return this shape
@@ -68,7 +82,7 @@ export function seedSftStoresForFixture() {
       meta: "0x",
       metaHash: "0x",
       sender: TEST_WALLET,
-    } as any,
+    } as unknown as MetaV1S,
   ]);
 }
 
@@ -77,13 +91,15 @@ export function mockWagmiModule() {
   const connected: Writable<boolean> = writable(true);
   const signerAddress: Writable<string> = writable(TEST_WALLET);
   const loading: Writable<boolean> = writable(false);
-  const web3Modal: Writable<any> = writable({ open: () => {} });
+  const web3Modal: Writable<{ open: () => void }> = writable({
+    open: () => {},
+  });
   return {
     connected,
     signerAddress,
     loading,
     web3Modal,
-    wagmiConfig: {},
+    wagmiConfig: {} as Record<string, never>,
     chainId: writable(8453),
     disconnectWagmi: async () => {},
   };

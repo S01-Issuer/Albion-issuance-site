@@ -46,7 +46,15 @@ function toNumber(value: unknown): number {
   return 0;
 }
 
-function normalizeRevenue(entry: any): { revenue: number; expenses: number; netIncome: number } {
+type RevenueLike =
+  | Pick<ReceiptsRecord, "revenue" | "expenses" | "netIncome">
+  | ReceiptsRecord["assetData"];
+
+function normalizeRevenue(entry: RevenueLike): {
+  revenue: number;
+  expenses: number;
+  netIncome: number;
+} {
   const revenue = toNumber(entry?.revenue);
   const expenses = toNumber(entry?.expenses);
   const netIncomeRaw = toNumber(entry?.netIncome);
@@ -64,10 +72,6 @@ export function mergeProductionHistory(
   receiptsData: ReceiptsRecord[] | undefined,
   payoutData: PayoutRecord[] | undefined,
 ): MergedReport[] {
-  // Log inputs for visibility
-  console.log("[Merge] historicalProduction:", historicalProduction || []);
-  console.log("[Merge] receiptsData:", receiptsData || []);
-
   const payoutByMonth = new Map<string, number>();
   if (Array.isArray(payoutData)) {
     for (const p of payoutData) {
@@ -98,7 +102,9 @@ export function mergeProductionHistory(
         .filter((r) => !maxHistMonth || (r?.month && r.month > maxHistMonth))
         .map((report) => ({
           month: report?.month || "",
-          production: toNumber(report?.assetData?.production ?? report?.production),
+          production: toNumber(
+            report?.assetData?.production ?? report?.production,
+          ),
           ...normalizeRevenue(report?.assetData ?? report),
           payoutPerToken: payoutByMonth.get(report?.month || "") || 0,
         }))
@@ -107,6 +113,5 @@ export function mergeProductionHistory(
   const merged = [...historical, ...receiptsTail].filter((r) => r.month);
   merged.sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : 0));
 
-  console.log("[Merge] merged productionHistory:", merged);
   return merged;
 }

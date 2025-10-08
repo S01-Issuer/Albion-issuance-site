@@ -26,13 +26,7 @@
 		showPurchaseWidget = true;
 	}
 	
-	function handleBuyTokens(event: CustomEvent) {
-		selectedAssetId = event.detail.assetId;
-		selectedTokenAddress = null;
-		showPurchaseWidget = true;
-	}
-	
-	function handlePurchaseSuccess(event: CustomEvent) {
+	function handlePurchaseSuccess(_event: CustomEvent) {
 		// Purchase successful - could add user notification here
 		showPurchaseWidget = false;
 	}

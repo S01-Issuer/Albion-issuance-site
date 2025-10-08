@@ -6,7 +6,6 @@ import type {
   Location,
   Metadata,
   ISODateTimeString,
-  ISODateOnlyString,
 } from "./sharedTypes";
 
 export enum TokenType {
@@ -57,7 +56,6 @@ export interface Document {
   type: DocumentType;
   ipfs: string;
 }
-
 
 export interface AssetData {
   assetName: string;
@@ -138,8 +136,10 @@ export interface OperationalMetrics {
   uptime: {
     percentage: number;
     period: string;
+    unit?: string;
   };
   hseMetrics: {
+    incidentFreeDays?: number;
     lastIncidentDate: ISODateTimeString; // ISO datetime string
   };
 }

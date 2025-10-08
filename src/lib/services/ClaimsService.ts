@@ -9,6 +9,7 @@ import {
   signContext,
   sortClaimsData,
   type ClaimHistory,
+  type CsvClaimRow,
 } from "$lib/utils/claims";
 import { formatEther, parseEther, type Hex } from "viem";
 import { wagmiConfig } from "svelte-wagmi";
@@ -16,10 +17,40 @@ import { simulateContract, writeContract } from "@wagmi/core";
 import { get } from "svelte/store";
 import orderbookAbi from "$lib/abi/orderbook.json";
 
+type SortClaimsBase = Awaited<ReturnType<typeof sortClaimsData>>;
+type SortedClaimsData = SortClaimsBase & {
+  holdings: HoldingRow[];
+  totalClaimedAmount?: string | number | bigint;
+  totalEarned?: string | number | bigint;
+  totalUnclaimedAmount?: string | number | bigint;
+};
+
+interface HoldingRow {
+  id: string;
+  unclaimedAmount: number | string;
+  [key: string]: unknown;
+}
+
+type SignedContext = ReturnType<typeof signContext>;
+
+interface HoldingWithProof extends HoldingRow {
+  order: ReturnType<typeof decodeOrder>;
+  signedContext: SignedContext;
+  orderBookAddress: string;
+}
+
+interface PendingClaim {
+  holdings: HoldingWithProof[];
+  claims: ClaimHistory[];
+  totalClaimed: number;
+  totalEarned: number;
+  totalUnclaimed: number;
+}
+
 export interface ClaimsHoldingsGroup {
   fieldName: string;
   totalAmount: number;
-  holdings: any[];
+  holdings: HoldingWithProof[];
 }
 
 export interface ClaimsResult {
@@ -33,7 +64,7 @@ export interface ClaimsResult {
 }
 
 export class ClaimsService {
-  private csvCache = new Map<string, any[]>();
+  private csvCache = new Map<string, CsvClaimRow[]>();
   private repository = claimsRepository;
 
   /**
@@ -43,9 +74,10 @@ export class ClaimsService {
     csvLink: string,
     expectedMerkleRoot: string,
     expectedContentHash: string,
-  ): Promise<any[] | null> {
-    if (this.csvCache.has(csvLink)) {
-      return this.csvCache.get(csvLink)!;
+  ): Promise<CsvClaimRow[] | null> {
+    const cached = this.csvCache.get(csvLink);
+    if (cached) {
+      return cached;
     }
 
     const data = await fetchAndValidateCSV(
@@ -78,7 +110,7 @@ export class ClaimsService {
     let totalUnclaimed = 0;
 
     // Collect all claim processing promises for parallel execution
-    const claimPromises: Promise<any>[] = [];
+    const claimPromises: Array<Promise<PendingClaim | null>> = [];
     const claimMetadata: { fieldName: string; claim: Claim }[] = [];
 
     // Build list of all claims to process
@@ -134,7 +166,7 @@ export class ClaimsService {
     claim: Claim,
     ownerAddress: string,
     fieldName: string,
-  ) {
+  ): Promise<PendingClaim | null> {
     if (!claim.csvLink) return null;
 
     // Fetch CSV data, trades and order details in parallel
@@ -156,32 +188,33 @@ export class ClaimsService {
 
     // Build merkle tree and process claims
     const merkleTree = getMerkleTree(csvData);
-    const sortedClaimsData = await sortClaimsData(
+    const sortedClaimsData = (await sortClaimsData(
       csvData,
       trades,
       ownerAddress,
       fieldName,
-    );
+    )) as SortedClaimsData;
 
     // Generate proofs for holdings
-    const holdingsWithProofs = sortedClaimsData.holdings.map((h: any) => {
-      const leaf = getLeaf(h.id, ownerAddress, h.unclaimedAmount);
-      const proofForLeaf = getProofForLeaf(merkleTree, leaf);
-      const holdingSignedContext = signContext(
-        [
-          h.id,
-          parseEther(h.unclaimedAmount.toString()),
-          ...proofForLeaf.proof,
-        ].map((i) => BigInt(i)),
-      );
+    const holdingsWithProofs: HoldingWithProof[] =
+      sortedClaimsData.holdings.map((h) => {
+        const leaf = getLeaf(h.id, ownerAddress, h.unclaimedAmount);
+        const proofForLeaf = getProofForLeaf(merkleTree, leaf);
+        const holdingSignedContext = signContext(
+          [
+            h.id,
+            parseEther(h.unclaimedAmount.toString()),
+            ...proofForLeaf.proof,
+          ].map((i) => BigInt(i)),
+        );
 
-      return {
-        ...h,
-        order: decodedOrder,
-        signedContext: holdingSignedContext,
-        orderBookAddress,
-      };
-    });
+        return {
+          ...h,
+          order: decodedOrder,
+          signedContext: holdingSignedContext,
+          orderBookAddress,
+        };
+      });
 
     return {
       holdings: holdingsWithProofs,
@@ -204,7 +237,7 @@ export class ClaimsService {
   private mergeHoldingsGroup(
     groups: ClaimsHoldingsGroup[],
     fieldName: string,
-    newHoldings: any[],
+    newHoldings: HoldingWithProof[],
   ): void {
     const existing = groups.find((g) => g.fieldName === fieldName);
 
@@ -216,7 +249,7 @@ export class ClaimsService {
       );
     } else {
       const totalAmount = newHoldings.reduce(
-        (sum: number, h: any) => sum + Number(h.unclaimedAmount),
+        (sum, h) => sum + Number(h.unclaimedAmount),
         0,
       );
       groups.push({
@@ -236,8 +269,13 @@ export class ClaimsService {
     }
 
     const cfg = get(wagmiConfig);
-    const allOrders = [] as any[];
-    let orderBookAddress: Hex | undefined = undefined;
+    const allOrders: Array<{
+      order: ReturnType<typeof decodeOrder>;
+      inputIOIndex: number;
+      outputIOIndex: number;
+      signedContext: readonly SignedContext[];
+    }> = [];
+    let orderBookAddress: Hex | undefined;
 
     // Prepare all orders for claiming
     for (const group of holdings) {

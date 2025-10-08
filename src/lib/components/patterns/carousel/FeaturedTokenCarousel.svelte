@@ -4,18 +4,21 @@
 	import type { Asset } from '$lib/types/uiTypes';
 	import { PrimaryButton, SecondaryButton, FormattedNumber, FormattedReturn } from '$lib/components/components';
 	import { sftMetadata, sfts } from '$lib/stores';
-	import { formatCurrency, formatTokenSupply, formatSmartReturn, formatSmartNumber } from '$lib/utils/formatters';
-	import { formatSupplyAmount, getAvailableSupplyBigInt } from '$lib/utils/tokenSupplyUtils';
+	import { formatSmartNumber } from '$lib/utils/formatters';
 	import { formatSupplyDisplay } from '$lib/utils/supplyHelpers';
-    import { getTokenReturns, calculateTokenReturns } from '$lib/utils';
-    import type { TokenMetadata } from '$lib/types/MetaboardTypes';
-    import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
+	import { calculateTokenReturns } from '$lib/utils';
+	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
+	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 
 	export let autoPlay = true;
 	export let autoPlayInterval = 5000;
 	
 	const dispatch = createEventDispatcher();
 	const catalogService = useCatalogService();
+	const isDev = import.meta.env.DEV;
+	const logDev = (...messages: unknown[]) => {
+		if (isDev) console.warn('[FeaturedTokenCarousel]', ...messages);
+	};
 
 	let currentIndex = 0;
 	let featuredTokensWithAssets: Array<{ token: TokenMetadata; asset: Asset }> = [];
@@ -29,7 +32,7 @@
 
 	// Calculate supply values for a token
 	function getTokenSupplyValues(token: TokenMetadata) {
-		const sft = $sfts?.find(s => s.id.toLowerCase() === token.contractAddress.toLowerCase());
+		const sft = $sfts?.find((item) => item.id.toLowerCase() === token.contractAddress.toLowerCase());
 		const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress) ?? undefined;
 
 		if (sft && maxSupply) {
@@ -47,7 +50,7 @@
 		return {
 			maxSupply: 0,
 			mintedSupply: 0,
-			availableSupply: 0
+			availableSupply: 0,
 		};
 	}
 
@@ -72,7 +75,7 @@
 			
 			// Get all tokens and their corresponding assets
 			const allTokens = Object.values(catalog.tokens);
-			console.log(`[Carousel] Processing ${allTokens.length} tokens`);
+			logDev(`Processing ${allTokens.length} tokens`);
 			
 			for (const token of allTokens) {
 				// Find corresponding asset
@@ -92,7 +95,9 @@
 						const totalShares = BigInt(sft.totalShares);
 						const maxSupplyBig = BigInt(maxSupply);
 						hasAvailable = totalShares < maxSupplyBig;
-						console.log(`[Carousel] Token ${token.symbol}: totalShares = ${sft.totalShares}, maxSupply = ${maxSupply}, available = ${maxSupplyBig - totalShares}, hasAvailable = ${hasAvailable}`);
+						logDev(
+							`Token ${token.symbol}: totalShares=${sft.totalShares}, maxSupply=${maxSupply}, available=${maxSupplyBig - totalShares}, hasAvailable=${hasAvailable}`,
+						);
 					} else {
 						// Fallback to heuristic if no maxSupply data
 						if (sft) {
@@ -100,14 +105,14 @@
 							const reasonableMax = BigInt('1000000000000000000000000000'); // 1B tokens in wei
 							hasAvailable = totalShares < reasonableMax;
 						}
-						console.log(`[Carousel] Token ${token.symbol}: using fallback heuristic, hasAvailable = ${hasAvailable}`);
+						logDev(`Token ${token.symbol}: using fallback heuristic, hasAvailable=${hasAvailable}`);
 					}
 
 					if (hasAvailable) {
 						featuredTokensWithAssets.push({ token, asset });
 					}
 				} else {
-					console.log(`[Carousel] Token ${token.symbol} (${token.contractAddress}): NO MATCHING ASSET FOUND`);
+					logDev(`Token ${token.symbol} (${token.contractAddress}): no matching asset found`);
 				}
 			}
 			
@@ -254,67 +259,46 @@
 	}
 
 
-
-	function formatLargeNumber(value: number): string {
-		if (value >= 1000000) {
-			return `${(value / 1000000).toFixed(1)}M`;
-		}
-		if (value >= 1000) {
-			return `${(value / 1000).toFixed(1)}K`;
-		}
-		return value.toString();
-	}
-
-	function formatSupply(supply: string, decimals: number): string {
-		const formatted = formatSupplyAmount(supply, decimals);
-		return formatTokenSupply(formatted);
-	}
-
-	$: currentItem = featuredTokensWithAssets[currentIndex];
-	
 	// Enhanced Tailwind class mappings with better mobile responsiveness - FIXED
-	$: containerClasses = 'relative w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8';
-	$: loadingStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-lg';
-	$: errorStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-lg';
-	$: emptyStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-lg';
-	$: spinnerClasses = 'w-8 h-8 border-4 border-light-gray border-t-primary animate-spin mb-4';
-	$: retryButtonClasses = 'mt-4 px-6 py-3 bg-primary text-white border-none cursor-pointer font-semibold transition-colors duration-200 hover:bg-secondary touch-target rounded';
-	$: carouselWrapperClasses = 'relative overflow-hidden rounded-lg outline-none focus:ring-4 focus:ring-primary/50 touch-pan-y';
-	$: carouselTrackClasses = 'flex w-full transition-transform duration-500 ease-in-out will-change-transform';
-	$: carouselSlideClasses = 'flex-shrink-0 w-full relative';
-	$: activeSlideClasses = 'opacity-100';
-	$: inactiveSlideClasses = 'opacity-100';
-	$: bannerCardClasses = 'grid grid-cols-1 lg:grid-cols-2 bg-white border border-light-gray overflow-hidden';
-	$: tokenSectionClasses = 'p-4 sm:p-6 lg:p-8 bg-white border-b lg:border-b-0 lg:border-r border-light-gray flex flex-col justify-between min-h-[300px] sm:min-h-[350px] lg:min-h-[400px]';
-	$: assetSectionClasses = 'p-4 sm:p-6 lg:p-8 bg-light-gray flex flex-col justify-between min-h-[300px] sm:min-h-[350px] lg:min-h-[400px] hidden lg:flex';
-	$: tokenHeaderClasses = 'mb-3 sm:mb-4 lg:mb-6';
-	$: tokenNameClasses = 'text-lg sm:text-xl lg:text-2xl font-bold text-black tracking-wider mb-2 leading-tight text-left';
-	$: tokenContractClasses = 'text-xs sm:text-sm font-medium text-secondary break-all leading-relaxed py-1 opacity-80 tracking-tight font-figtree text-left';
-	$: assetHeaderClasses = 'mb-3 sm:mb-4 lg:mb-6';
-	$: assetStatusClasses = 'flex items-center gap-2 mb-2';
-	$: statusIndicatorClasses = 'w-2 h-2 bg-secondary rounded-full';
-	$: statusIndicatorProducingClasses = 'w-2 h-2 bg-green-500 rounded-full animate-pulse';
-	$: statusIndicatorFundingClasses = 'w-2 h-2 bg-yellow-500 rounded-full';
-	$: statusIndicatorCompletedClasses = 'w-2 h-2 bg-secondary rounded-full';
-	$: statusTextClasses = 'text-xs sm:text-sm font-medium text-black font-figtree uppercase tracking-wide';
-	$: assetNameClasses = 'text-lg sm:text-xl lg:text-2xl font-bold text-black mb-2 leading-tight text-left';
-	$: assetLocationClasses = 'text-sm sm:text-base text-black leading-relaxed font-figtree text-left opacity-80';
-	$: assetDescriptionClasses = 'text-sm text-black leading-relaxed mb-4 sm:mb-6 font-figtree hidden lg:block';
-	$: tokenStatsClasses = 'grid grid-cols-2 gap-2 sm:gap-3 lg:gap-4 mb-4 sm:mb-6 lg:mb-8';
-	$: assetStatsClasses = 'grid grid-cols-1 gap-2 sm:gap-3 lg:gap-4 mb-4 sm:mb-6 lg:mb-8';
-	$: statItemClasses = 'text-left';
-	$: statLabelClasses = 'text-xs font-medium text-gray-500 mb-1 font-figtree uppercase tracking-wide';
-	$: statValueClasses = 'text-sm sm:text-base lg:text-lg font-bold text-black';
-	$: tokenActionsClasses = 'flex flex-col gap-2 sm:gap-3 mt-auto';
-	$: assetMetaClasses = 'flex flex-col gap-2 mt-auto';
-	$: assetMetaItemClasses = 'flex gap-2';
-	$: assetMetaLabelClasses = 'text-xs font-medium text-gray-500 font-figtree';
-	$: assetMetaValueClasses = 'text-xs text-black opacity-70 font-figtree';
-	
+	const containerClasses = 'relative w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8';
+	const loadingStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-lg';
+	const errorStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-lg';
+	const emptyStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-lg';
+	const spinnerClasses = 'w-8 h-8 border-4 border-light-gray border-t-primary animate-spin mb-4';
+	const retryButtonClasses = 'mt-4 px-6 py-3 bg-primary text-white border-none cursor-pointer font-semibold transition-colors duration-200 hover:bg-secondary touch-target rounded';
+	const carouselWrapperClasses = 'relative overflow-hidden rounded-lg outline-none focus:ring-4 focus:ring-primary/50 touch-pan-y';
+	const carouselTrackClasses = 'flex w-full transition-transform duration-500 ease-in-out will-change-transform';
+	const carouselSlideClasses = 'flex-shrink-0 w-full relative';
+	const activeSlideClasses = 'opacity-100';
+	const inactiveSlideClasses = 'opacity-100';
+	const bannerCardClasses = 'grid grid-cols-1 lg:grid-cols-2 bg-white border border-light-gray overflow-hidden';
+	const tokenSectionClasses = 'p-4 sm:p-6 lg:p-8 bg-white border-b lg:border-b-0 lg:border-r border-light-gray flex flex-col justify-between min-h-[300px] sm:min-h-[350px] lg:min-h-[400px]';
+	const assetSectionClasses = 'p-4 sm:p-6 lg:p-8 bg-light-gray flex flex-col justify-between min-h-[300px] sm:min-h-[350px] lg:min-h-[400px] hidden lg:flex';
+	const tokenHeaderClasses = 'mb-3 sm:mb-4 lg:mb-6';
+	const tokenNameClasses = 'text-lg sm:text-xl lg:text-2xl font-bold text-black tracking-wider mb-2 leading-tight text-left';
+	const tokenContractClasses = 'text-xs sm:text-sm font-medium text-secondary break-all leading-relaxed py-1 opacity-80 tracking-tight font-figtree text-left';
+	const assetHeaderClasses = 'mb-3 sm:mb-4 lg:mb-6';
+	const statusIndicatorClasses = 'w-2 h-2 bg-secondary rounded-full';
+	const statusIndicatorProducingClasses = 'w-2 h-2 bg-green-500 rounded-full animate-pulse';
+	const statusIndicatorFundingClasses = 'w-2 h-2 bg-yellow-500 rounded-full';
+	const statusIndicatorCompletedClasses = 'w-2 h-2 bg-secondary rounded-full';
+	const statusTextClasses = 'text-xs sm:text-sm font-medium text-black font-figtree uppercase tracking-wide';
+	const assetNameClasses = 'text-lg sm:text-xl lg:text-2xl font-bold text-black mb-2 leading-tight text-left';
+	const assetLocationClasses = 'text-sm sm:text-base text-black leading-relaxed font-figtree text-left opacity-80';
+	const tokenStatsClasses = 'grid grid-cols-2 gap-2 sm:gap-3 lg:gap-4 mb-4 sm:mb-6 lg:mb-8';
+	const assetStatsClasses = 'grid grid-cols-1 gap-2 sm:gap-3 lg:gap-4 mb-4 sm:mb-6 lg:mb-8';
+	const statItemClasses = 'text-left';
+	const statLabelClasses = 'text-xs font-medium text-gray-500 mb-1 font-figtree uppercase tracking-wide';
+	const statValueClasses = 'text-sm sm:text-base lg:text-lg font-bold text-black';
+	const tokenActionsClasses = 'flex flex-col gap-2 sm:gap-3 mt-auto';
+	const assetMetaClasses = 'flex flex-col gap-2 mt-auto';
+	const assetMetaItemClasses = 'flex gap-2';
+	const assetMetaLabelClasses = 'text-xs font-medium text-gray-500 font-figtree';
+	const assetMetaValueClasses = 'text-xs text-black opacity-70 font-figtree';
+
 	// Navigation controls - hidden on mobile, shown on desktop
-	$: navButtonClasses = 'hidden lg:flex absolute top-1/2 transform -translate-y-1/2 w-12 h-12 bg-black/70 text-white border-none text-xl cursor-pointer transition-all duration-200 z-10 hover:bg-black hover:scale-110 hover:shadow-lg touch-target items-center justify-center rounded-full';
-	$: prevButtonClasses = 'hidden lg:flex absolute top-1/2 transform -translate-y-1/2 w-12 h-12 bg-black/70 text-white border-none text-xl cursor-pointer transition-all duration-200 z-10 hover:bg-black hover:scale-110 hover:shadow-lg touch-target left-[-4rem] items-center justify-center rounded-full';
-	$: nextButtonClasses = 'hidden lg:flex absolute top-1/2 transform -translate-y-1/2 w-12 h-12 bg-black/70 text-white border-none text-xl cursor-pointer transition-all duration-200 z-10 hover:bg-black hover:scale-110 hover:shadow-lg touch-target right-[-4rem] items-center justify-center rounded-full';
+	const prevButtonClasses = 'hidden lg:flex absolute top-1/2 transform -translate-y-1/2 w-12 h-12 bg-black/70 text-white border-none text-xl cursor-pointer transition-all duration-200 z-10 hover:bg-black hover:scale-110 hover:shadow-lg touch-target left-[-4rem] items-center justify-center rounded-full';
+	const nextButtonClasses = 'hidden lg:flex absolute top-1/2 transform -translate-y-1/2 w-12 h-12 bg-black/70 text-white border-none text-xl cursor-pointer transition-all duration-200 z-10 hover:bg-black hover:scale-110 hover:shadow-lg touch-target right-[-4rem] items-center justify-center rounded-full';
 
 	
 	// Get status-specific classes
@@ -383,12 +367,12 @@
 				class={carouselTrackClasses}
 				style="transform: translateX(-{currentIndex * 100}%)"
 			>
-				{#each featuredTokensWithAssets as item, index}
+				{#each featuredTokensWithAssets as item, index (item.token.contractAddress)}
 					{@const sft = $sfts?.find(s => s.id.toLowerCase() === item.token.contractAddress.toLowerCase())}
 					{@const maxSupply = catalogService.getTokenMaxSupply(item.token.contractAddress) ?? undefined}
 					{@const calculatedReturns = calculateTokenReturns(item.asset, item.token, sft?.totalShares, maxSupply)}
 					{@const supplyValues = getTokenSupplyValues(item.token)}
-					<div class="{carouselSlideClasses} {index === currentIndex ? activeSlideClasses : inactiveSlideClasses}">
+					<div class={`${carouselSlideClasses} ${index === currentIndex ? activeSlideClasses : inactiveSlideClasses}`}>
 						<div class={bannerCardClasses}>
 							<!-- Token Section -->
 							<div class={tokenSectionClasses}>
@@ -413,7 +397,7 @@
 
 												<div class={tokenStatsClasses}>
 					<!-- Total Supply - hidden on mobile -->
-					<div class="{statItemClasses} hidden sm:block">
+					<div class={`${statItemClasses} hidden sm:block`}>
 						<div class={statLabelClasses}>Total Supply</div>
 						<div class={statValueClasses}>
 							<FormattedNumber
@@ -475,7 +459,7 @@
 					</div>
 
 		<!-- Bonus IRR - hidden on mobile -->
-		<div class="{statItemClasses} hidden sm:block">
+		<div class={`${statItemClasses} hidden sm:block`}>
 			<div class={statLabelClasses}>Bonus IRR</div>
 						<div class={statValueClasses + ' text-primary'}>
 							<FormattedReturn value={calculatedReturns?.bonusReturn} showPlus={true} />
@@ -554,9 +538,9 @@
 		<!-- Indicators below carousel (both mobile and desktop) -->
 		{#if featuredTokensWithAssets.length > 1}
 			<div class="flex justify-center gap-1 mt-2 z-10">
-				{#each featuredTokensWithAssets as _, index}
+				{#each featuredTokensWithAssets as indicatorItem, index (indicatorItem.token.contractAddress)}
 					<div 
-						class="{index === currentIndex ? 'w-2 h-2 bg-gray-800 rounded-full' : 'w-2 h-2 bg-gray-300 rounded-full'}"
+						class={index === currentIndex ? 'w-2 h-2 bg-gray-800 rounded-full' : 'w-2 h-2 bg-gray-300 rounded-full'}
 					></div>
 				{/each}
 			</div>

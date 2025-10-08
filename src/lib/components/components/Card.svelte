@@ -19,7 +19,20 @@
 	}
 	
 	// Generate Tailwind classes
-	$: classes = `${showBorder ? 'border border-light-gray' : ''} bg-white shadow-sm transition-all duration-200 relative ${paddingClass} ${roundedClass} ${overflowClass} ${heightClass} ${hoverable ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-card-hover' : ''} ${clickable ? 'active:translate-y-0 active:shadow-sm focus:outline-primary focus:outline-2 focus:outline-offset-2' : ''}`;
+	$: classes = [
+		showBorder ? 'border border-light-gray' : '',
+		'bg-white',
+		'shadow-sm',
+		'transition-all duration-200 relative',
+		paddingClass,
+		roundedClass,
+		overflowClass,
+		heightClass,
+		hoverable ? 'cursor-pointer' : '',
+		clickable ? 'active:translate-y-0 active:shadow-sm focus:outline-primary focus:outline-2 focus:outline-offset-2' : '',
+	]
+		.filter(Boolean)
+		.join(' ');
 </script>
 
 <article 
@@ -31,4 +44,3 @@
 >
 	<slot />
 </article>
-

@@ -1,4 +1,5 @@
 import { ORDERBOOK_CONTRACT_ADDRESS } from "$lib/network";
+import type { Trade } from "$lib/types/graphql";
 import { SimpleMerkleTree } from "@openzeppelin/merkle-tree";
 import { AbiCoder } from "ethers";
 import axios from "axios";
@@ -13,10 +14,10 @@ const abiCoder = AbiCoder.defaultAbiCoder();
 const HYPERSYNC_URL = "https://8453.hypersync.xyz/query";
 const CONTEXT_EVENT_TOPIC =
   "0x17a5c0f3785132a57703932032f6863e7920434150aa1dc940e567b440fdce1f";
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 const IO = "(address token, uint8 decimals, uint256 vaultId)";
 const EvaluableV3 = "(address interpreter, address store, bytes bytecode)";
-const SignedContextV1 = "(address signer, uint256[] context, bytes signature)";
 const OrderV3 = `(address owner, ${EvaluableV3} evaluable, ${IO}[] validInputs, ${IO}[] validOutputs, bytes32 nonce)`;
 
 type OrderV3Type = [
@@ -32,12 +33,93 @@ type SignedContextV1Type = {
   signature: string;
 };
 
+interface DecodedClaimLog {
+  index: string;
+  address: string;
+  amount: string;
+  timestamp?: string;
+}
+
+interface CsvClaimRow extends Record<string, unknown> {
+  index: string;
+  address: string;
+  amount: string;
+  claimed?: boolean;
+  decodedLog?: DecodedClaimLog | null;
+}
+
+type ClaimedCsvRow = CsvClaimRow & {
+  claimed: true;
+  decodedLog: DecodedClaimLog | null;
+};
+
+type UnclaimedCsvRow = CsvClaimRow & {
+  claimed: false;
+  decodedLog?: undefined;
+};
+
+interface HypersyncBlock {
+  number: string;
+  timestamp: string;
+}
+
+interface HypersyncLog {
+  block_number: string;
+  log_index: string;
+  transaction_index: string;
+  transaction_hash: string;
+  data: string;
+  address: string;
+  topic0: string;
+  block?: {
+    timestamp: number | string;
+  };
+}
+
+interface HypersyncEntry {
+  blocks: HypersyncBlock[];
+  logs: HypersyncLog[];
+}
+
+interface HypersyncResponseData {
+  data: HypersyncEntry[];
+  next_block: number;
+}
+
+type HypersyncResult = HypersyncLog & {
+  timestamp: number | null;
+};
+
+function formatAmountWei(value: string | bigint): string {
+  try {
+    const bigintValue = typeof value === "bigint" ? value : BigInt(value);
+    return formatEther(bigintValue);
+  } catch {
+    return "0";
+  }
+}
+
+export interface SortedClaimsResult {
+  claimedCsv: ClaimedCsvRow[];
+  unclaimedCsv: UnclaimedCsvRow[];
+  claims: ClaimHistory[];
+  holdings: ClaimSignedContext[];
+  totalClaims: number;
+  claimedCount: number;
+  unclaimedCount: number;
+  totalClaimedAmount: string;
+  totalUnclaimedAmount: string;
+  totalEarned: string;
+  ownerAddress: string;
+}
+
 export type ClaimHistory = {
   date: string;
   amount: string;
   asset: string;
   txHash: string;
   status: string;
+  fieldName?: string;
 };
 
 export type ClaimSignedContext = {
@@ -76,7 +158,7 @@ export type IPFSValidationResult = {
  * @returns Validation result with details
  */
 export function validateCSVIntegrity(
-  csvData: any[],
+  csvData: CsvClaimRow[],
   expectedMerkleRoot: string,
 ): CSVValidationResult {
   try {
@@ -106,7 +188,7 @@ export function validateCSVIntegrity(
       }
 
       // Validate amount is positive
-      const amount = parseFloat(row.amount);
+      const amount = Number.parseFloat(row.amount);
       if (isNaN(amount) || amount < 0) {
         return {
           isValid: false,
@@ -210,7 +292,7 @@ export async function fetchAndValidateCSV(
   csvLink: string,
   expectedMerkleRoot: string,
   expectedContentHash: string,
-): Promise<any[] | null> {
+): Promise<CsvClaimRow[] | null> {
   try {
     // Step 1: Validate IPFS content integrity
     const ipfsValidation = await validateIPFSContent(
@@ -253,30 +335,40 @@ export async function fetchAndValidateCSV(
  * @param csvText - Raw CSV text
  * @returns Parsed CSV data
  */
-function parseCSVData(csvText: string): any[] {
+function parseCSVData(csvText: string): CsvClaimRow[] {
   const lines = csvText.split("\n");
-  const headers = lines[0].split(",").map((h) => h.trim());
-  const data = lines
+  const headers = lines[0]?.split(",").map((h) => h.trim()) ?? [];
+
+  return lines
     .slice(1)
-    .filter((line) => line.trim())
+    .filter((line) => line.trim().length > 0)
     .map((line) => {
       const values = line.split(",").map((v) => v.trim());
-      const row: any = {};
+      const raw: Record<string, string> = {};
       headers.forEach((header, index) => {
-        row[header] = values[index] || "";
+        raw[header] = values[index] ?? "";
       });
-      return row;
+
+      const indexValue = raw.index || raw.Index || "0";
+      const addressValue = raw.address || raw.Address || ZERO_ADDRESS;
+      const amountValue = raw.amount || raw.Amount || "0";
+
+      return {
+        ...raw,
+        index: indexValue,
+        address: addressValue,
+        amount: amountValue,
+      } satisfies CsvClaimRow;
     });
-  return data;
 }
 
 export async function sortClaimsData(
-  csvClaims: any[],
-  trades: any[],
+  csvClaims: CsvClaimRow[],
+  trades: Trade[],
   ownerAddress: string,
-  feildName: string,
+  fieldName: string,
   orderTimestamp?: string,
-) {
+): Promise<SortedClaimsResult> {
   const blockRange = getBlockRangeFromTrades(trades);
 
   const transactionIds = trades
@@ -296,21 +388,29 @@ export async function sortClaimsData(
   const decodedLogs = logs
     .map((log) => {
       const decodedData = decodeLogData(log.data);
-      if (decodedData && log.block) {
-        // Add timestamp from the block data
-        decodedData.timestamp = new Date(
-          log.block.timestamp * 1000,
-        ).toISOString();
+      if (!decodedData) {
+        return null;
       }
+
+      if (log.block?.timestamp !== undefined) {
+        const timestampValue =
+          typeof log.block.timestamp === "string"
+            ? Number.parseInt(log.block.timestamp, 16)
+            : log.block.timestamp;
+        if (!Number.isNaN(timestampValue)) {
+          decodedData.timestamp = new Date(timestampValue * 1000).toISOString();
+        }
+      } else if (typeof log.timestamp === "number") {
+        decodedData.timestamp = new Date(log.timestamp * 1000).toISOString();
+      }
+
       return decodedData;
     })
-    .filter((log) => {
-      // Filter out null results and zero addresses
-      return (
-        log &&
-        log.address &&
-        log.address !== "0x0000000000000000000000000000000000000000"
-      );
+    .filter((log): log is DecodedClaimLog => {
+      if (!log) return false;
+      const address = log.address;
+      if (!address) return false;
+      return address !== ZERO_ADDRESS;
     });
 
   // Filter by owner address (required parameter)
@@ -351,6 +451,9 @@ export async function sortClaimsData(
     // Find the original log data to get the transaction hash
     const originalLog = logs.find((log) => {
       const decodedData = decodeLogData(log.data);
+      if (!decodedData) {
+        return false;
+      }
       return (
         decodedData.index === claim.index &&
         decodedData.address === claim.address
@@ -362,24 +465,34 @@ export async function sortClaimsData(
     if (claim.decodedLog?.timestamp) {
       claimDate = claim.decodedLog.timestamp;
     } else if (originalLog?.block?.timestamp) {
-      claimDate = new Date(originalLog.block.timestamp * 1000).toISOString();
+      const timestampValue =
+        typeof originalLog.block.timestamp === "number"
+          ? originalLog.block.timestamp
+          : Number.parseInt(originalLog.block.timestamp, 16);
+      if (Number.isFinite(timestampValue)) {
+        claimDate = new Date(timestampValue * 1000).toISOString();
+      }
     } else if (orderTimestamp) {
       // Use the order timestamp (when the order was added to the orderbook)
-      claimDate = new Date(Number(orderTimestamp) * 1000).toISOString();
+      const orderTsNumber = Number(orderTimestamp);
+      if (Number.isFinite(orderTsNumber)) {
+        claimDate = new Date(orderTsNumber * 1000).toISOString();
+      }
     } else if (
       trades.length > 0 &&
       trades[0].tradeEvent?.transaction?.timestamp
     ) {
       // Use the trade timestamp as fallback (all claims in a CSV are from the same payout period)
-      claimDate = new Date(
-        trades[0].tradeEvent.transaction.timestamp * 1000,
-      ).toISOString();
+      const tradeTimestamp = Number(trades[0].tradeEvent.transaction.timestamp);
+      if (Number.isFinite(tradeTimestamp)) {
+        claimDate = new Date(tradeTimestamp * 1000).toISOString();
+      }
     }
 
     return {
       date: claimDate,
-      amount: formatEther(claim.amount),
-      asset: feildName || "Unknown Field",
+      amount: formatAmountWei(claim.amount),
+      asset: fieldName || "Unknown Field",
       txHash: trades[0].tradeEvent?.transaction?.id || "N/A",
       status: "completed",
     };
@@ -389,10 +502,10 @@ export async function sortClaimsData(
   const holdings: ClaimSignedContext[] = unclaimedCsv.map((claim) => {
     return {
       id: claim.index,
-      name: feildName || "Unknown Field",
+      name: fieldName || "Unknown Field",
       location: "",
-      unclaimedAmount: formatEther(claim.amount),
-      totalEarned: formatEther(totalEarned.toString()),
+      unclaimedAmount: formatAmountWei(claim.amount),
+      totalEarned: formatAmountWei(totalEarned),
       lastPayout: new Date().toISOString(),
       lastClaimDate: "",
       status: "producing",
@@ -421,16 +534,14 @@ async function fetchLogs(
   startBlock: number,
   endBlock: number,
   transactionIds?: string[],
-  //eslint-disable-next-line @typescript-eslint/no-explicit-any
-): Promise<Array<any>> {
+): Promise<HypersyncResult[]> {
   let currentBlock = startBlock;
 
-  //eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let logs: Array<any> = [];
+  let logs: HypersyncEntry[] = [];
 
   while (currentBlock <= endBlock) {
     try {
-      const queryResponse = await axios.post(client, {
+      const queryResponse = await axios.post<HypersyncResponseData>(client, {
         from_block: currentBlock,
         logs: [
           {
@@ -453,16 +564,17 @@ async function fetchLogs(
       });
 
       // Concatenate logs if there are any
+      const responseData = queryResponse.data;
       if (
-        queryResponse.data.data &&
-        queryResponse.data.data.length > 0 &&
-        currentBlock != queryResponse.data.next_block
+        responseData.data &&
+        responseData.data.length > 0 &&
+        currentBlock !== responseData.next_block
       ) {
-        logs = logs.concat(queryResponse.data.data);
+        logs = logs.concat(responseData.data);
       }
 
       // Update currentBlock for the next iteration
-      currentBlock = queryResponse.data.next_block;
+      currentBlock = responseData.next_block;
 
       // Exit the loop if nextBlock is invalid
       if (!currentBlock || currentBlock > endBlock) {
@@ -476,18 +588,16 @@ async function fetchLogs(
   const allLogs = logs.flatMap((entry) => {
     // Create a map of block_number to timestamp
     const blockMap = new Map(
-      //eslint-disable-next-line @typescript-eslint/no-explicit-any
-      entry.blocks.map((block: any) => [
+      entry.blocks.map((block) => [
         block.number,
-        parseInt(block.timestamp, 16),
+        Number.parseInt(block.timestamp, 16),
       ]),
     );
 
     // Map each log with the corresponding timestamp
-    //eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return entry.logs.map((log: any) => ({
+    return entry.logs.map((log) => ({
       ...log,
-      timestamp: blockMap.get(log.block_number) || null, // Add timestamp if available
+      timestamp: blockMap.get(log.block_number) ?? null, // Add timestamp if available
     }));
   });
 
@@ -503,7 +613,7 @@ async function fetchLogs(
 }
 
 // Function to get the lowest and highest block numbers from trades
-export function getBlockRangeFromTrades(trades: any[]): {
+export function getBlockRangeFromTrades(trades: Trade[]): {
   lowest: number;
   highest: number;
 } {
@@ -528,7 +638,7 @@ export function getBlockRangeFromTrades(trades: any[]): {
 }
 
 // Function to decode Context event log data using ethers v6
-function decodeLogData(data: string): any {
+function decodeLogData(data: string): DecodedClaimLog | null {
   if (!data || data === "0x") {
     return null;
   }
@@ -544,7 +654,7 @@ function decodeLogData(data: string): any {
   } catch {
     return {
       index: "0",
-      address: "0x0000000000000000000000000000000000000000",
+      address: ZERO_ADDRESS,
       amount: "0",
     };
   }
@@ -552,18 +662,18 @@ function decodeLogData(data: string): any {
 
 // Function to filter CSV claims into claimed and unclaimed arrays
 function filterClaimedAndUnclaimed(
-  csvClaims: any[],
-  decodedLogs: any[],
+  csvClaims: CsvClaimRow[],
+  decodedLogs: DecodedClaimLog[],
 ): {
-  claimedCsv: any[];
-  unclaimedCsv: any[];
+  claimedCsv: ClaimedCsvRow[];
+  unclaimedCsv: UnclaimedCsvRow[];
 } {
   // Create a set of claimed indices for faster lookup
   const claimedIndices = new Set(decodedLogs.map((log) => log.index));
 
   // Filter CSV claims
-  const claimedCsv: any[] = [];
-  const unclaimedCsv: any[] = [];
+  const claimedCsv: ClaimedCsvRow[] = [];
+  const unclaimedCsv: UnclaimedCsvRow[] = [];
 
   csvClaims.forEach((claim) => {
     if (claimedIndices.has(claim.index)) {
@@ -572,11 +682,13 @@ function filterClaimedAndUnclaimed(
       claimedCsv.push({
         ...claim,
         claimed: true,
-        decodedLog: decodedLog || null,
+        decodedLog: decodedLog ?? null,
       });
     } else {
       unclaimedCsv.push({
-        ...claim,
+        index: claim.index,
+        address: claim.address,
+        amount: claim.amount,
         claimed: false,
       });
     }
@@ -605,15 +717,12 @@ export function getLeaf(index: string, address: string, amount: string) {
   return keccak256("0x" + packed);
 }
 
-export function getMerkleTree(csvInput: any[]) {
+export function getMerkleTree(csvInput: CsvClaimRow[]) {
   const leaves = csvInput.map((row) => {
     // Handle CSV data format - row is an object with properties
-    const index = row.index || row.Index || "0";
-    const address =
-      row.address ||
-      row.Address ||
-      "0x0000000000000000000000000000000000000000";
-    const amount = row.amount || row.Amount || "0";
+    const index = row.index || "0";
+    const address = row.address || ZERO_ADDRESS;
+    const amount = row.amount || "0";
 
     // Convert address to uint256 (like uint256(uint160(address)) in Solidity)
     const indexAsUint256 = BigInt(index);
@@ -681,7 +790,7 @@ export function signContext(
 
   // 2. Encode uint256[] context as tightly packed bytes (like abi.encodePacked in Solidity)
   const contextBytes = concat(
-    context.map((n, index) => {
+    context.map((n) => {
       // Always convert to wei for amounts (assuming index 1 is the amount)
       const value =
         typeof n === "string" && n.includes(".")
@@ -713,3 +822,5 @@ export function signContext(
     signature: signatureBytes,
   };
 }
+
+export type { CsvClaimRow };

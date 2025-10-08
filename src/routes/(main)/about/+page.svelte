@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import SectionTitle from '$lib/components/components/SectionTitle.svelte';
 	import PrimaryButton from '$lib/components/components/PrimaryButton.svelte';
 	import SecondaryButton from '$lib/components/components/SecondaryButton.svelte';
@@ -235,4 +234,3 @@
 		</div>
 	</ContentSection>
 </PageLayout>
-

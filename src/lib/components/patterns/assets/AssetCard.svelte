@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { createEventDispatcher, onMount, onDestroy } from 'svelte';
+import { createEventDispatcher, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import type { Asset, Token } from '$lib/types/uiTypes';
-	import { Card, CardImage, CardContent, CardActions, PrimaryButton, SecondaryButton } from '$lib/components/components';
+import type { Asset } from '$lib/types/uiTypes';
+import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 	import { formatCurrency, formatEndDate, formatSmartNumber } from '$lib/utils/formatters';
 	import { getTokenReturns } from '$lib/utils';
 	import { useCatalogService } from '$lib/services';
@@ -79,39 +79,29 @@
 		});
 	}
 	
-	// Mobile-responsive class mappings
-	$: headerClasses = 'mb-4';
-	$: headerMainClasses = 'flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 sm:gap-4';
-	$: nameLocationClasses = 'flex-1';
-	$: operatorClasses = 'flex flex-row sm:flex-col items-center sm:items-end text-left sm:text-right gap-1 sm:gap-0';
-	$: operatorLabelClasses = 'text-xs sm:text-sm text-gray-500 font-medium mb-0 sm:mb-1 font-figtree';
-	$: operatorNameClasses = 'text-sm sm:text-base text-black font-extrabold font-figtree';
-	$: assetNameClasses = 'text-base sm:text-lg lg:text-xl font-extrabold text-black m-0 mb-2 leading-tight text-left font-figtree';
-	$: assetLocationClasses = 'text-gray-500 text-sm sm:text-base m-0 text-left font-figtree';
-	$: assetDescriptionClasses = 'text-gray-700 text-sm leading-relaxed m-0 mb-4 line-clamp-2 font-figtree lg:line-clamp-3 lg:text-base lg:mb-6';
-	$: highlightedStatsClasses = 'grid grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4 my-3 lg:my-4 p-3 lg:p-4 bg-white rounded-lg';
-	$: highlightStatClasses = 'flex flex-col items-center text-center';
-	$: highlightValueClasses = 'text-lg sm:text-xl lg:text-2xl font-extrabold text-secondary mb-1 font-figtree';
-	$: highlightLabelClasses = 'text-xs lg:text-sm text-gray-500 font-medium font-figtree';
-	$: viewDetailsSectionClasses = 'mt-4 lg:mt-6 mb-4 lg:mb-6';
-	
-	// Token section classes - responsive
-	$: tokensSectionClasses = 'mb-4 lg:mb-6';
-	$: tokensTitleClasses = 'text-base lg:text-lg font-extrabold text-black m-0 mb-3 lg:mb-4 font-figtree';
-	$: tokensListClasses = 'flex flex-col gap-2 lg:gap-3';
-	$: tokensListScrollableClasses = 'flex flex-col gap-2 lg:gap-3 max-h-[10rem] lg:max-h-[13rem] overflow-y-auto pr-1 lg:pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400';
-	$: tokenButtonClasses = 'flex flex-col sm:flex-row justify-between items-start sm:items-center w-full p-3 lg:p-4 bg-white rounded-none cursor-pointer transition-all duration-200 text-left relative hover:bg-light-gray border border-light-gray hover:shadow-sm hover:-translate-y-0.5 gap-2 sm:gap-0';
-	$: tokenButtonLeftClasses = 'flex flex-col gap-1 flex-1';
-	$: tokenButtonRightClasses = 'flex flex-row sm:flex-col w-full sm:w-auto justify-between sm:justify-end items-center sm:items-end gap-2';
-	$: tokenSymbolClasses = 'font-extrabold text-sm lg:text-base text-black font-figtree';
-	$: tokenNameClasses = 'text-xs lg:text-sm text-gray-500 leading-tight font-figtree';
-	$: tokenPaymentDateClasses = 'text-xs text-secondary font-medium mt-1 hidden lg:block';
-	$: returnsDisplayClasses = 'flex items-center gap-1 lg:gap-2';
-	$: returnItemClasses = 'flex flex-col items-center text-center';
-	$: returnLabelClasses = 'text-[0.6rem] lg:text-xs text-gray-500 font-medium whitespace-nowrap';
-	$: returnValueClasses = 'text-sm lg:text-lg text-primary font-extrabold font-figtree';
-	$: returnDividerClasses = 'text-xs lg:text-sm text-gray-500 font-medium mx-1';
-	$: buyCtaClasses = 'text-sm lg:text-base font-extrabold text-black font-figtree';
+	// Tailwind class mappings used in markup
+	const assetDescriptionClasses = 'text-gray-700 text-sm leading-relaxed m-0 mb-4 line-clamp-2 font-figtree lg:line-clamp-3 lg:text-base lg:mb-6';
+	const highlightedStatsClasses = 'grid grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4 my-3 lg:my-4 p-3 lg:p-4 bg-white rounded-lg';
+	const highlightStatClasses = 'flex flex-col items-center text-center';
+	const highlightValueClasses = 'text-lg sm:text-xl lg:text-2xl font-extrabold text-secondary mb-1 font-figtree';
+	const highlightLabelClasses = 'text-xs lg:text-sm text-gray-500 font-medium font-figtree';
+	const viewDetailsSectionClasses = 'mt-4 lg:mt-6 mb-4 lg:mb-6';
+	const tokensSectionClasses = 'mb-4 lg:mb-6';
+	const tokensTitleClasses = 'text-base lg:text-lg font-extrabold text-black m-0 mb-3 lg:mb-4 font-figtree';
+	const tokensListClasses = 'flex flex-col gap-2 lg:gap-3';
+	const tokensListScrollableClasses = 'flex flex-col gap-2 lg:gap-3 max-h-[10rem] lg:max-h-[13rem] overflow-y-auto pr-1 lg:pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400';
+	const tokenButtonClasses = 'flex flex-col sm:flex-row justify-between items-start sm:items-center w-full p-3 lg:p-4 bg-white rounded-none cursor-pointer transition-all duration-200 text-left relative hover:bg-light-gray border border-light-gray gap-2 sm:gap-0';
+	const tokenButtonLeftClasses = 'flex flex-col gap-1 flex-1';
+	const tokenButtonRightClasses = 'flex flex-row sm:flex-col w-full sm:w-auto justify-between sm:justify-end items-center sm:items-end gap-2';
+	const tokenSymbolClasses = 'font-extrabold text-sm lg:text-base text-black font-figtree';
+	const tokenNameClasses = 'text-xs lg:text-sm text-gray-500 leading-tight font-figtree';
+	const tokenPaymentDateClasses = 'text-xs text-secondary font-medium mt-1 hidden lg:block';
+	const returnsDisplayClasses = 'flex items-center gap-1 lg:gap-2';
+	const returnItemClasses = 'flex flex-col items-center text-center';
+	const returnLabelClasses = 'text-[0.6rem] lg:text-xs text-gray-500 font-medium whitespace-nowrap';
+	const returnValueClasses = 'text-sm lg:text-lg text-primary font-extrabold font-figtree';
+	const returnDividerClasses = 'text-xs lg:text-sm text-gray-500 font-medium mx-1';
+	const buyCtaClasses = 'text-sm lg:text-base font-extrabold text-black font-figtree';
 
 </script>
 
@@ -195,8 +185,8 @@
 		<div 
 			bind:this={scrollContainer}
 			on:scroll={handleScroll}
-			class="{tokensArray.length > 2 ? tokensListScrollableClasses : tokensListClasses}">
-				{#each tokensArray as tokenItem}
+			class={tokensArray.length > 2 ? tokensListScrollableClasses : tokensListClasses}>
+				{#each tokensArray as tokenItem (tokenItem.contractAddress)}
 				{@const sftForToken = $sfts?.find(s => s.id.toLowerCase() === tokenItem.contractAddress.toLowerCase())}
 				{@const maxSupplyForToken = catalogService.getTokenMaxSupply(tokenItem.contractAddress) ?? undefined}
 				{@const mintedSupplyForToken = sftForToken?.totalShares}
@@ -213,7 +203,7 @@
 							<div class={tokenButtonLeftClasses}>
 								<div class="flex items-center gap-2 w-full">
 									<span class={tokenSymbolClasses}>{tokenItem.symbol}</span>
-									<span class="text-xs font-extrabold text-white bg-secondary px-2 py-1 tracking-wider rounded whitespace-nowrap">{tokenItem.sharePercentage ? `${tokenItem.sharePercentage}%` : shareOfAsset} of Asset</span>
+									<span class="text-xs font-extrabold text-white bg-secondary px-2 py-1 tracking-wider rounded-none whitespace-nowrap">{tokenItem.sharePercentage ? `${tokenItem.sharePercentage}%` : shareOfAsset} of Asset</span>
 								</div>
 								<span class={tokenNameClasses}>{tokenItem.releaseName}</span>
 								<span class={tokenPaymentDateClasses}>First payment: {firstPaymentMonth}</span>

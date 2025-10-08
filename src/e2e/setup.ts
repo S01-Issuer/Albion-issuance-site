@@ -33,7 +33,8 @@ Element.prototype.querySelector = function (selector: string) {
     return element;
   }
 
-  const isPathSelector = selector.includes("path") || selector.includes(".line-path");
+  const isPathSelector =
+    selector.includes("path") || selector.includes(".line-path");
 
   if (isPathSelector && !(element instanceof SVGPathElement)) {
     const pathCandidate = element as SVGPathElement & {
@@ -54,7 +55,7 @@ Element.prototype.querySelector = function (selector: string) {
 // Suppress uncaught errors from chart animations in tests
 if (typeof window !== "undefined") {
   const originalConsoleError = console.error;
-  console.error = (...args: any[]) => {
+  console.error = (...args: unknown[]) => {
     // Suppress specific SVG-related errors in tests
     if (
       args[0]?.toString?.().includes("getTotalLength") ||
@@ -62,6 +63,6 @@ if (typeof window !== "undefined") {
     ) {
       return;
     }
-    originalConsoleError(...args);
+    originalConsoleError(...(args as Parameters<typeof console.error>));
   };
 }

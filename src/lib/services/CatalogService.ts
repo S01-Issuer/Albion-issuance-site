@@ -7,15 +7,14 @@ import {
 } from "$lib/data/transformers/sftTransformers";
 import { sftRepository } from "$lib/data/repositories/sftRepository";
 import authorizerAbi from "$lib/abi/authorizer.json";
-import type { Hex } from "viem";
+import type { Hex, Abi } from "viem";
 import type { Asset } from "$lib/types/uiTypes";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
-import type {
-  OffchainAssetReceiptVault as GraphQLVault,
-  MetaV1S,
-} from "$lib/types/graphql";
+import type { OffchainAssetReceiptVault, MetaV1S } from "$lib/types/graphql";
 import { ENERGY_FIELDS } from "$lib/network";
 import { getMaxSharesSupplyMap } from "$lib/data/clients/onchain";
+
+type DecodedMetadata = ReturnType<typeof decodeSftInformation>;
 
 export interface CatalogData {
   assets: Record<string, Asset>;
@@ -29,8 +28,8 @@ export class CatalogService {
   private lastBuildHash: string | null = null;
 
   private computeDataHash(
-    sftsData: any[] | null | undefined,
-    metaData: any[] | null | undefined,
+    sftsData: ReadonlyArray<{ id: string }> | null | undefined,
+    metaData: ReadonlyArray<{ subject?: string }> | null | undefined,
   ): string {
     // Simple hash to detect data changes
     return JSON.stringify({
@@ -59,51 +58,35 @@ export class CatalogService {
     }
 
     // Try to use store data first
-    let $sfts = get(sfts) ?? [];
-    let $sftMetadata = get(sftMetadata) ?? [];
-
-    console.log("[CatalogService] Store state:", {
-      hasSfts: !!$sfts,
-      sftCount: $sfts?.length || 0,
-      hasMetadata: !!$sftMetadata,
-      metadataCount: $sftMetadata?.length || 0,
-    });
+    let $sfts = (get(sfts) ?? []) as OffchainAssetReceiptVault[];
+    let $sftMetadataRaw = (get(sftMetadata) ?? []) as MetaV1S[];
 
     // If stores are null or empty, fetch from repository
     // Check for null explicitly to distinguish "not loaded" from "loaded but empty"
     if (!Array.isArray($sfts) || $sfts.length === 0) {
-      console.log(
-        "[CatalogService] SFTs not loaded or empty, fetching from repository...",
-      );
       const fetchedSfts = await sftRepository.getAllSfts();
-      console.log("[CatalogService] Fetched SFTs:", fetchedSfts.length);
-      // Convert GraphQL type to store type (they're compatible for our usage)
-      $sfts = fetchedSfts as any[];
-      sfts.set($sfts);
-    } else {
-      console.log("[CatalogService] Using existing SFTs from store");
+      $sfts = fetchedSfts;
+      sfts.set(fetchedSfts);
     }
 
-    if (!Array.isArray($sftMetadata) || $sftMetadata.length === 0) {
-      console.log(
-        "[CatalogService] Metadata not loaded or empty, fetching from repository...",
-      );
+    if (!Array.isArray($sftMetadataRaw) || $sftMetadataRaw.length === 0) {
       const fetchedMetadata = await sftRepository.getSftMetadata();
-      console.log("[CatalogService] Fetched metadata:", fetchedMetadata.length);
-      $sftMetadata = fetchedMetadata as any[];
-      sftMetadata.set($sftMetadata);
-    } else {
-      console.log("[CatalogService] Using existing metadata from store");
+      $sftMetadataRaw = fetchedMetadata;
+      sftMetadata.set(fetchedMetadata);
     }
 
     // Check if data has changed
-    const currentHash = this.computeDataHash($sfts, $sftMetadata);
+    const currentHash = this.computeDataHash($sfts, $sftMetadataRaw);
     if (this.catalog && this.lastBuildHash === currentHash) {
       return this.catalog;
     }
 
     // Start new build
-    this.buildPromise = this._buildInternal($sfts, $sftMetadata, currentHash);
+    this.buildPromise = this._buildInternal(
+      $sfts,
+      $sftMetadataRaw,
+      currentHash,
+    );
 
     try {
       const result = await this.buildPromise;
@@ -114,18 +97,24 @@ export class CatalogService {
   }
 
   private async _buildInternal(
-    $sfts: any[],
-    $sftMetadata: any[],
+    $sfts: OffchainAssetReceiptVault[],
+    $sftMetadata: MetaV1S[],
     currentHash: string,
   ): Promise<CatalogData> {
-    if (!Array.isArray($sfts) || $sfts.length === 0 || !Array.isArray($sftMetadata)) {
+    if (
+      !Array.isArray($sfts) ||
+      $sfts.length === 0 ||
+      !Array.isArray($sftMetadata)
+    ) {
       this.catalog = { assets: {}, tokens: {}, maxSupplyByToken: {} };
       this.lastBuildHash = currentHash;
       return this.catalog;
     }
 
     // Decode metadata
-    const decodedMeta = $sftMetadata.map((m) => decodeSftInformation(m));
+    const decodedMeta: DecodedMetadata[] = $sftMetadata.map((meta) =>
+      decodeSftInformation(meta),
+    );
 
     // Collect authorizer addresses for max supply lookup
     const authorizers: Hex[] = [];
@@ -138,7 +127,7 @@ export class CatalogService {
     // Read max supply from authorizers using multicall
     const maxSupplyByAuthorizer = await getMaxSharesSupplyMap(
       authorizers,
-      authorizerAbi,
+      authorizerAbi as Abi,
     );
 
     const assets: Record<string, Asset> = {};
@@ -147,10 +136,9 @@ export class CatalogService {
 
     for (const sft of $sfts) {
       const targetAddress = `0x000000000000000000000000${sft.id.slice(2)}`;
-      const pinnedMetadata = decodedMeta.find((meta: any) => {
-        const matches = meta?.contractAddress === targetAddress;
-        return matches;
-      });
+      const pinnedMetadata = decodedMeta.find(
+        (meta) => meta?.contractAddress === targetAddress,
+      );
       if (!pinnedMetadata) {
         continue;
       }

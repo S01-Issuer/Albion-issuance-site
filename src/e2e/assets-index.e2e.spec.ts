@@ -8,40 +8,65 @@ vi.mock("$env/static/public", () => ({
 
 import AssetsIndex from "../routes/(main)/assets/+page.svelte";
 import { installHttpMocks } from "./http-mock";
+import type { Navigation, Page } from "@sveltejs/kit";
 
 // Mock app stores
 vi.mock("$app/stores", async () => {
   const { readable } = await import("svelte/store");
+
+  const page = readable<Page>({
+    url: new URL("http://localhost/assets"),
+    params: {},
+    route: { id: null },
+    status: 200,
+    error: null,
+    data: {},
+    state: {} as App.PageState,
+    form: null,
+  });
+
+  const navigating = readable<Navigation | null>(null);
+
+  const baseUpdated = readable(false);
+  const updated = {
+    subscribe: baseUpdated.subscribe,
+    async check() {
+      return false;
+    },
+  };
+
   return {
-    page: readable({
-      url: new URL("http://localhost/assets"),
-      params: {},
-      route: {},
-      status: 200,
-      error: null,
-      data: {},
-    }),
-    navigating: readable(null),
-    updated: { subscribe: () => () => {} },
-  } as any;
+    getStores: () => ({ page, navigating, updated }),
+    page,
+    navigating,
+    updated,
+  };
 });
 
 // Mock wagmi
 vi.mock("svelte-wagmi", async () => {
   const { writable, readable } = await import("svelte/store");
+
+  const mockConfig = readable({
+    chains: [],
+    transports: {},
+    getClient: () => ({}),
+  });
+
   return {
     web3Modal: writable({ open: () => {} }),
     signerAddress: writable("0x1111111111111111111111111111111111111111"),
     connected: writable(true),
     loading: writable(false),
-    wagmiConfig: readable({
-      chains: [],
-      transports: {},
-      getClient: () => ({}), // Add getClient method so wagmi config is considered initialized
-    }),
+    wagmiConfig: mockConfig,
     chainId: writable(8453),
     disconnectWagmi: async () => {},
-  } as any;
+    defaultConfig: vi.fn(),
+    configuredConnectors: [],
+    wagmiLoaded: readable(true),
+    init: vi.fn(),
+    WC: {},
+  };
 });
 
 // Mock @wagmi/core
@@ -57,7 +82,8 @@ vi.mock("@wagmi/core", () => ({
 
 // Mock network config with test URLs
 vi.mock("$lib/network", async () => {
-  const actual = await vi.importActual<any>("$lib/network");
+  const actual =
+    await vi.importActual<typeof import("$lib/network")>("$lib/network");
   return {
     ...actual,
     BASE_SFT_SUBGRAPH_URL: "https://example.com/sft",
@@ -84,7 +110,7 @@ const CSV = "bafkreicjcemmypds6d5c4lonwp56xb2ilzhkk7hty3y6fo4nvdkxnaibgu";
 const WALLET = "0x1111111111111111111111111111111111111111";
 
 describe("Assets Index E2E Tests", () => {
-  let cleanupMocks: () => void;
+  let cleanupMocks: (() => void) | undefined;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -120,17 +146,6 @@ describe("Assets Index E2E Tests", () => {
     ]);
 
     // Debug: Check what data we got
-    if ((import.meta as any).env?.MODE === "test") {
-      console.log("Test setup - SFT data count:", sftData?.length);
-      console.log("Test setup - Metadata count:", metaData?.length);
-      if (metaData?.length > 0) {
-        console.log(
-          "Test setup - First metadata subject:",
-          metaData[0].subject,
-        );
-      }
-    }
-
     // Update stores with the fetched data
     sfts.set(sftData);
     sftMetadata.set(metaData);
@@ -271,7 +286,7 @@ describe("Assets Index E2E Tests", () => {
       const bodyText = document.body.textContent || "";
       // This test verifies the toggle appears if there are sold out assets
       // Since we have available tokens, this is optional
-      const hasSoldOutToggle =
+      const _hasSoldOutToggle =
         bodyText.includes("Show Sold Out") ||
         bodyText.includes("Include Sold Out");
       // No assertion needed - this is an optional UI element

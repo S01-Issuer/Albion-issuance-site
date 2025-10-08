@@ -1,26 +1,40 @@
-import { render, waitFor, screen } from "@testing-library/svelte/svelte5";
+import { render } from "@testing-library/svelte/svelte5";
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import type { Navigation, Page } from "@sveltejs/kit";
 import ClaimsPage from "../routes/(main)/claims/+page.svelte";
 import { installHttpMocks } from "./http-mock";
-import { writable } from "svelte/store";
-// @ts-ignore
-import CBOR from "cbor-web";
 
 // Mock app stores
 vi.mock("$app/stores", async () => {
   const { readable } = await import("svelte/store");
+
+  const page = readable<Page>({
+    url: new URL("http://localhost/claims"),
+    params: {},
+    route: { id: null },
+    status: 200,
+    error: null,
+    data: {},
+    state: {} as App.PageState,
+    form: null,
+  });
+
+  const navigating = readable<Navigation | null>(null);
+
+  const baseUpdated = readable(false);
+  const updated = {
+    subscribe: baseUpdated.subscribe,
+    async check() {
+      return false;
+    },
+  };
+
   return {
-    page: readable({
-      url: new URL("http://localhost/claims"),
-      params: {},
-      route: {},
-      status: 200,
-      error: null,
-      data: {},
-    }),
-    navigating: readable(null),
-    updated: { subscribe: () => () => {} },
-  } as any;
+    getStores: () => ({ page, navigating, updated }),
+    page,
+    navigating,
+    updated,
+  };
 });
 
 // Mock wagmi with wallet connected
@@ -34,12 +48,18 @@ vi.mock("svelte-wagmi", async () => {
     wagmiConfig: readable({ chains: [], transports: {} }),
     chainId: writable(8453),
     disconnectWagmi: async () => {},
-  } as any;
+    defaultConfig: vi.fn(),
+    configuredConnectors: [],
+    wagmiLoaded: readable(true),
+    init: vi.fn(),
+    WC: {},
+  };
 });
 
 // Mock @wagmi/core
 vi.mock("@wagmi/core", async () => {
-  const actual = await vi.importActual<any>("@wagmi/core");
+  const actual =
+    await vi.importActual<typeof import("@wagmi/core")>("@wagmi/core");
   return {
     ...actual,
     writeContract: vi.fn(),
@@ -54,7 +74,8 @@ vi.mock("@wagmi/core", async () => {
 // DO NOT MOCK $lib/stores - use actual production code with HTTP mocks
 
 vi.mock("$lib/network", async () => {
-  const actual = await vi.importActual<any>("$lib/network");
+  const actual =
+    await vi.importActual<typeof import("$lib/network")>("$lib/network");
   return {
     ...actual,
     BASE_SFT_SUBGRAPH_URL: "https://example.com/sft",
@@ -280,12 +301,7 @@ describe("Claims Page E2E Tests", () => {
       render(ClaimsPage);
 
       await new Promise((resolve) => setTimeout(resolve, 100));
-
-      const bodyText = document.body.textContent || "";
-
       // Gas estimate is optional - no assertion needed if not present
-      const hasGas = bodyText.includes("Gas") || bodyText.includes("Fee");
-      // This test just documents the behavior
     });
   });
 

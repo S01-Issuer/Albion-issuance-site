@@ -1,10 +1,12 @@
 <script lang="ts">
-	export let tabs: Array<{
-		id: string;
-		label: string;
-		disabled?: boolean;
-		badge?: string | number;
-	}> = [];
+type TabDefinition = {
+	id: string;
+	label: string;
+	disabled?: boolean;
+	badge?: string | number;
+};
+
+export let tabs: TabDefinition[] = [];
 	export let activeTab: string = '';
 	export let variant: 'default' | 'minimal' | 'pills' = 'default';
 	export let size: 'small' | 'medium' | 'large' = 'medium';
@@ -77,16 +79,25 @@
 	};
 	
 	// Badge class mapping
-	$: badgeClasses = 'inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold text-white bg-primary rounded-full min-w-[1.25rem] h-5';
-	
-	$: containerClasses = `flex items-center gap-1 scroll-smooth ${fullWidth ? 'w-full' : ''} ${centered ? 'justify-center' : ''} ${variantClasses[variant].container}`;
-	$: getTabClasses = (tab: any) => {
+	const badgeClasses = 'inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold text-white bg-primary rounded-full min-w-[1.25rem] h-5';
+
+	$: containerClasses = `flex items-center gap-1 scroll-smooth ${
+		fullWidth ? 'w-full' : ''
+	} ${centered ? 'justify-center' : ''} ${variantClasses[variant].container}`;
+
+	function getTabClasses(tab: TabDefinition): string {
 		const isActive = activeTab === tab.id;
-		const baseClasses = `bg-transparent border-none font-bold cursor-pointer transition-all duration-200 whitespace-nowrap flex items-center gap-2 uppercase tracking-wide relative font-figtree ${sizeClasses[size]} ${variantClasses[variant].tab}`;
-		const stateClasses = isActive ? variantClasses[variant].active : variantClasses[variant].inactive;
+		const baseClasses = [
+			'bg-transparent border-none font-bold cursor-pointer transition-all duration-200 whitespace-nowrap flex items-center gap-2 uppercase tracking-wide relative font-figtree',
+			sizeClasses[size],
+			variantClasses[variant].tab,
+		].join(' ');
+		const stateClasses = isActive
+			? variantClasses[variant].active
+			: variantClasses[variant].inactive;
 		const disabledClasses = tab.disabled ? 'opacity-40 cursor-not-allowed' : '';
 		return `${baseClasses} ${stateClasses} ${disabledClasses}`.trim();
-	};
+	}
 </script>
 
 <div class={containerClasses} role="tablist">
@@ -96,7 +107,7 @@
 			disabled={tab.disabled}
 			role="tab"
 			aria-selected={activeTab === tab.id}
-			aria-controls="tabpanel-{tab.id}"
+			aria-controls={`tabpanel-${tab.id}`}
 			tabindex={activeTab === tab.id ? 0 : -1}
 			on:click={() => handleTabClick(tab.id)}
 			on:keydown={(e) => handleKeydown(e, tab.id)}
@@ -108,4 +119,3 @@
 		</button>
 	{/each}
 </div>
-

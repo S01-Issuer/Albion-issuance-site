@@ -25,7 +25,7 @@
 		<div class="max-w-6xl mx-auto px-4 py-6">
 			<div class="flex items-center justify-between">
 				<img src="/assets/logo.svg" alt="Albion Labs Logo" class="h-12 w-auto" />
-				<a href="/login" class="text-sm text-gray-600 hover:text-gray-900 underline">← Back</a>
+				<a href="/login" class="text-sm text-gray-600 hover:text-gray-900 no-underline">← Back</a>
 			</div>
 		</div>
 	</div>
@@ -69,110 +69,109 @@
 			<!-- Tab Content -->
 			<div class="p-8">
 			{#if activeSection === 'terms'}
-				<SectionTitle level="h2" size="section">Terms of Service</SectionTitle>
-				<p class="text-black opacity-70 text-sm mb-8">Last updated: December 2024</p>
-				
-				<div class="space-y-4">
-					<SectionTitle level="h3" size="subsection" className="mt-8 mb-4">1. Acceptance of Terms</SectionTitle>
-					<p class="leading-relaxed mb-4 text-black">By accessing and using the Albion platform, you accept and agree to be bound by these Terms of Service. If you do not agree to these terms, you may not use our services.</p>
-					
-					<SectionTitle level="h3" size="subsection" className="mt-8 mb-4">2. Platform Description</SectionTitle>
-					<p class="leading-relaxed mb-4 text-black">Albion provides a blockchain-based platform for investing in tokenized oil & gas assets. Our platform enables users to purchase royalty tokens representing fractional ownership in energy production revenue.</p>
-					
-					<SectionTitle level="h3" size="subsection" className="mt-8 mb-4">3. User Eligibility</SectionTitle>
-					<p class="leading-relaxed mb-4 text-black">You must be at least 18 years old and legally capable of entering into binding contracts. You must also comply with all applicable laws and regulations in your jurisdiction.</p>
-					
-					<SectionTitle level="h3" size="subsection" className="mt-8 mb-4">4. Account Registration</SectionTitle>
-					<p class="leading-relaxed mb-4 text-black">To use our platform, you must create an account and complete our Know Your Customer (KYC) verification process. You are responsible for maintaining the security of your account credentials.</p>
-					
-					<SectionTitle level="h3" size="subsection" className="mt-8 mb-4">5. Investment Terms</SectionTitle>
-					<p class="leading-relaxed mb-4 text-black">All investments are subject to specific terms outlined in the respective token offering documents. Past performance does not guarantee future results. Investments may lose value.</p>
-					
-					<SectionTitle level="h3" size="subsection" className="mt-8 mb-4">6. Limitation of Liability</SectionTitle>
-					<p class="leading-relaxed mb-4 text-black">Albion's liability is limited to the maximum extent permitted by law. We are not liable for investment losses, market volatility, or technical issues beyond our control.</p>
-					
-					<SectionTitle level="h3" size="subsection" className="mt-8 mb-4">7. Termination</SectionTitle>
-					<p class="leading-relaxed mb-4 text-black">We may terminate or suspend your account at any time for violation of these terms or applicable laws. You may close your account at any time subject to existing investment commitments.</p>
+				<div class="legal-content">
+					<SectionTitle level="h2" size="section">Terms of Service</SectionTitle>
+					<p class="legal-meta">Last updated: December 2024</p>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">1. Acceptance of Terms</SectionTitle>
+					<p>By accessing and using the Albion platform, you accept and agree to be bound by these Terms of Service. If you do not agree to these terms, you may not use our services.</p>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">2. Platform Description</SectionTitle>
+					<p>Albion provides a blockchain-based platform for investing in tokenized oil &amp; gas assets. Our platform enables users to purchase royalty tokens representing fractional ownership in energy production revenue.</p>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">3. User Eligibility</SectionTitle>
+					<p>You must be at least 18 years old and legally capable of entering into binding contracts. You must also comply with all applicable laws and regulations in your jurisdiction.</p>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">4. Account Registration</SectionTitle>
+					<p>To use our platform, you must create an account and complete our Know Your Customer (KYC) verification process. You are responsible for maintaining the security of your account credentials.</p>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">5. Investment Terms</SectionTitle>
+					<p>All investments are subject to specific terms outlined in the respective token offering documents. Past performance does not guarantee future results. Investments may lose value.</p>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">6. Limitation of Liability</SectionTitle>
+					<p>Albion's liability is limited to the maximum extent permitted by law. We are not liable for investment losses, market volatility, or technical issues beyond our control.</p>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">7. Termination</SectionTitle>
+					<p>We may terminate or suspend your account at any time for violation of these terms or applicable laws. You may close your account at any time subject to existing investment commitments.</p>
 				</div>
 			{:else if activeSection === 'privacy'}
-				<SectionTitle level="h2" size="section">Privacy Policy</SectionTitle>
-				<p class="text-black opacity-70 text-sm mb-8">Last updated: December 2024</p>
-				
-				<div class="space-y-4">
-					<h3>1. Information We Collect</h3>
+				<div class="legal-content">
+					<SectionTitle level="h2" size="section">Privacy Policy</SectionTitle>
+					<p class="legal-meta">Last updated: December 2024</p>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">1. Information We Collect</SectionTitle>
 					<p>We collect personal information necessary for KYC compliance, including name, address, identification documents, and financial information. We also collect usage data and technical information about your interaction with our platform.</p>
-					
-					<h3>2. How We Use Information</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">2. How We Use Information</SectionTitle>
 					<p>Your information is used for account verification, compliance with legal requirements, platform operation, customer support, and communication about your investments.</p>
-					
-					<h3>3. Information Sharing</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">3. Information Sharing</SectionTitle>
 					<p>We may share information with regulatory authorities, service providers, and professional advisors as required by law or necessary for platform operation. We do not sell personal information to third parties.</p>
-					
-					<h3>4. Data Security</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">4. Data Security</SectionTitle>
 					<p>We implement industry-standard security measures including encryption, secure servers, and access controls to protect your personal information.</p>
-					
-					<h3>5. Data Retention</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">5. Data Retention</SectionTitle>
 					<p>We retain personal information for as long as necessary to provide services and comply with legal obligations. Some information may be retained longer for regulatory compliance.</p>
-					
-					<h3>6. Your Rights</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">6. Your Rights</SectionTitle>
 					<p>You have the right to access, correct, or delete your personal information, subject to legal and contractual requirements. Contact us to exercise these rights.</p>
-					
-					<h3>7. Cookies and Tracking</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">7. Cookies and Tracking</SectionTitle>
 					<p>We use cookies and similar technologies to improve platform functionality and user experience. You can control cookie settings in your browser.</p>
-					
-					<h3>8. Contact Information</h3>
-					<p>For privacy-related questions, contact our Data Protection Officer at privacy@albion.com.</p>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">8. Contact Information</SectionTitle>
+					<p>For privacy-related questions, contact our Data Protection Officer at <a href="mailto:privacy@albion.com">privacy@albion.com</a>.</p>
 				</div>
 			{:else if activeSection === 'disclosures'}
-				<SectionTitle level="h2" size="section">Investment Disclosures</SectionTitle>
-				<p class="text-black opacity-70 text-sm mb-8">Last updated: December 2024</p>
-				
-				<div class="space-y-4">
-					<h3>Important Investment Warnings</h3>
-					<div class="bg-yellow-50 border border-yellow-400 p-6 my-8">
-						<h4 class="text-yellow-800 font-extrabold mb-3 text-base">⚠️ High-Return Investment Warning</h4>
-						<p class="text-yellow-800 mb-0 font-semibold">Oil & gas investments carry significant operational, market, and regulatory risks. Returns are not guaranteed and you may lose your entire investment.</p>
+				<div class="legal-content">
+					<SectionTitle level="h2" size="section">Investment Disclosures</SectionTitle>
+					<p class="legal-meta">Last updated: December 2024</p>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">Important Investment Warnings</SectionTitle>
+					<div class="legal-callout">
+						<p><strong>⚠️ High-Return Investment Warning:</strong> Oil &amp; gas investments carry significant operational, market, and regulatory risks. Returns are not guaranteed and you may lose your entire investment.</p>
 					</div>
-					
-					<h3>1. Nature of Investment</h3>
-					<p>Albion tokens represent fractional ownership in oil & gas revenue streams. Token holders receive payments based on actual production and commodity prices, which can be volatile.</p>
-					
-					<h3>2. Principal Investment Risks</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">1. Nature of Investment</SectionTitle>
+					<p>Albion tokens represent fractional ownership in oil &amp; gas revenue streams. Token holders receive payments based on actual production and commodity prices, which can be volatile.</p>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">2. Principal Investment Risks</SectionTitle>
 					<ul>
-						<li><strong>Commodity Price Risk:</strong> Oil and gas prices fluctuate significantly based on market conditions</li>
-						<li><strong>Production Risk:</strong> Wells may produce less than expected due to geological or operational factors</li>
-						<li><strong>Regulatory Risk:</strong> Changes in regulations may affect operations and profitability</li>
-						<li><strong>Liquidity Risk:</strong> Tokens may not be easily tradeable</li>
-						<li><strong>Technology Risk:</strong> Blockchain and smart contract risks</li>
+						<li><strong>Commodity Price Risk:</strong> Oil and gas prices fluctuate significantly based on market conditions.</li>
+						<li><strong>Production Risk:</strong> Wells may produce less than expected due to geological or operational factors.</li>
+						<li><strong>Regulatory Risk:</strong> Changes in regulations may affect operations and profitability.</li>
+						<li><strong>Liquidity Risk:</strong> Tokens may not be easily tradeable.</li>
+						<li><strong>Technology Risk:</strong> Blockchain and smart contract risks.</li>
 					</ul>
-					
-					<h3>3. No Guarantee of Returns</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">3. No Guarantee of Returns</SectionTitle>
 					<p>Projected returns are estimates based on current production and prices. Actual returns may be significantly lower or you may lose your entire investment.</p>
-					
-					<h3>4. Regulatory Considerations</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">4. Regulatory Considerations</SectionTitle>
 					<p>These investments may be considered securities in some jurisdictions. Ensure compliance with local investment laws before participating.</p>
-					
-					<h3>5. Tax Implications</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">5. Tax Implications</SectionTitle>
 					<p>Token ownership and distributions may have tax consequences. Consult with a tax professional regarding your specific situation.</p>
-					
-					<h3>6. Professional Advice</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">6. Professional Advice</SectionTitle>
 					<p>Consider seeking independent financial, legal, and tax advice before making any investment decision.</p>
 				</div>
 			{:else if activeSection === 'compliance'}
-				<SectionTitle level="h2" size="section">Regulatory Compliance</SectionTitle>
-				<p class="text-black opacity-70 text-sm mb-8">Last updated: December 2024</p>
-				
-				<div class="space-y-4">
-					<h3>1. Regulatory Framework</h3>
+				<div class="legal-content">
+					<SectionTitle level="h2" size="section">Regulatory Compliance</SectionTitle>
+					<p class="legal-meta">Last updated: December 2024</p>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">1. Regulatory Framework</SectionTitle>
 					<p>Albion operates in compliance with applicable securities, commodities, and financial services regulations. Our legal framework is designed to protect investors while enabling innovation.</p>
-					
-					<h3>2. Securities Compliance</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">2. Securities Compliance</SectionTitle>
 					<p>Token offerings may be subject to securities regulations. We work with legal counsel to ensure appropriate compliance structures including proper registration or exemptions.</p>
-					
-					<h3>3. Anti-Money Laundering (AML)</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">3. Anti-Money Laundering (AML)</SectionTitle>
 					<p>We maintain comprehensive AML policies including customer due diligence, ongoing monitoring, and suspicious activity reporting as required by law.</p>
-					
-					<h3>4. Know Your Customer (KYC)</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">4. Know Your Customer (KYC)</SectionTitle>
 					<p>All users must complete identity verification including:</p>
 					<ul>
 						<li>Government-issued photo identification</li>
@@ -180,17 +179,17 @@
 						<li>Source of funds verification</li>
 						<li>Sanctions and PEP screening</li>
 					</ul>
-					
-					<h3>5. Data Protection</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">5. Data Protection</SectionTitle>
 					<p>We comply with applicable data protection laws including GDPR, CCPA, and other privacy regulations where applicable.</p>
-					
-					<h3>6. Jurisdictional Restrictions</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">6. Jurisdictional Restrictions</SectionTitle>
 					<p>Our services may not be available in all jurisdictions. We maintain restrictions on certain countries and regions as required by law.</p>
-					
-					<h3>7. Audit and Reporting</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">7. Audit and Reporting</SectionTitle>
 					<p>We engage independent auditors and maintain regular reporting to regulatory authorities as required. All asset valuations and performance data are verified by third parties.</p>
-					
-					<h3>8. Investor Protection</h3>
+
+					<SectionTitle level="h3" size="subsection" className="legal-subheading">8. Investor Protection</SectionTitle>
 					<p>We maintain appropriate investor protection measures including segregated client funds, professional indemnity insurance, and independent custody arrangements where applicable.</p>
 				</div>
 			{/if}
@@ -207,3 +206,64 @@
 	</div>
 </div>
 
+<style>
+	.legal-content {
+		display: flex;
+		flex-direction: column;
+		gap: 1.5rem;
+	}
+
+	.legal-content :global(p) {
+		margin: 0;
+		color: #111827;
+		font-size: 1rem;
+		line-height: 1.75rem;
+	}
+
+	.legal-content :global(a) {
+		color: #0d9488;
+		text-decoration: none;
+	}
+
+	.legal-content :global(a:hover) {
+		text-decoration: underline;
+	}
+
+	.legal-content :global(ul) {
+		margin: 0;
+		padding-left: 1.25rem;
+		list-style-type: disc;
+		color: #111827;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+
+	.legal-content :global(li) {
+		margin: 0;
+		line-height: 1.7rem;
+	}
+
+	.legal-meta {
+		margin: 0;
+		color: rgba(17, 24, 39, 0.7);
+		font-size: 0.875rem;
+	}
+
+	:global(.legal-subheading) {
+		margin-top: 0.5rem;
+	}
+
+	.legal-callout {
+		background-color: #fef3c7;
+		border: 1px solid #facc15;
+		border-radius: 0.75rem;
+		padding: 1.5rem;
+	}
+
+	.legal-callout p {
+		margin: 0;
+		color: #92400e;
+		font-weight: 600;
+	}
+</style>

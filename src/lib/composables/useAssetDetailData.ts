@@ -4,10 +4,9 @@
  */
 
 import { writable, type Writable, get } from "svelte/store";
-import { sftMetadata, sfts } from "$lib/stores";
-import type { Asset, Token } from "$lib/types/uiTypes";
+import type { Asset } from "$lib/types/uiTypes";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
-import { ENERGY_FIELDS, type SftToken } from "$lib/network";
+import { ENERGY_FIELDS } from "$lib/network";
 import { useCatalogService } from "$lib/services";
 import { hasAvailableSupplySync } from "$lib/utils/supplyHelpers";
 
@@ -47,19 +46,6 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
     state.update((s) => ({ ...s, loading: true, error: null }));
 
     try {
-      console.log("[useAssetDetailData] Loading data for ID:", id);
-      console.log(
-        "[useAssetDetailData] Available energy fields:",
-        ENERGY_FIELDS.map((f) => ({
-          name: f.name,
-          slug: f.name
-            .toLowerCase()
-            .replace(/\s+/g, "-")
-            .replace(/[^a-z0-9-]/g, ""),
-          tokens: f.sftTokens.map((t) => t.address),
-        })),
-      );
-
       const catalog = useCatalogService();
       await catalog.build();
 
@@ -75,10 +61,6 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
 
       // If not found, try to match by contract address prefix (fallback from getEnergyFieldId)
       if (!field && id.length === 8) {
-        console.log(
-          "[useAssetDetailData] Trying to match by contract address prefix:",
-          id,
-        );
         field = ENERGY_FIELDS.find((f) =>
           f.sftTokens.some(
             (token) =>
@@ -88,17 +70,9 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
         );
       }
 
-      console.log("[useAssetDetailData] Found field:", field);
-
       if (!field) throw new Error("Energy field not found");
 
       const catalogData = catalog.getCatalog();
-      console.log("[useAssetDetailData] Catalog data:", {
-        hasAssets: !!catalogData?.assets,
-        assetKeys: Object.keys(catalogData?.assets || {}),
-        hasTokens: !!catalogData?.tokens,
-        tokenCount: Object.keys(catalogData?.tokens || {}).length,
-      });
 
       if (!catalogData) throw new Error("Failed to build catalog");
 
@@ -113,13 +87,6 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
         .replace(/\s+/g, "-")
         .replace(/[^a-z0-9-]/g, "");
       const asset = catalogData.assets[assetId] || null;
-
-      console.log("[useAssetDetailData] Result:", {
-        assetId,
-        foundAsset: !!asset,
-        fieldTokensCount: fieldTokens.length,
-        fieldTokenAddresses: fieldTokens.map((t) => t.contractAddress),
-      });
 
       if (fieldTokens.length === 0)
         throw new Error("No tokens found for this energy field");
@@ -148,8 +115,7 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
   }
 
   // Get latest monthly report
-  function getLatestReport(energyFieldId?: string) {
-    const id = energyFieldId || initialEnergyFieldId;
+  function getLatestReport(_energyFieldId?: string) {
     // This should now return data from the SFT asset instance
     const currentState = get(state);
     if (
@@ -164,8 +130,7 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
   }
 
   // Get average monthly revenue
-  function getAverageRevenue(energyFieldId?: string) {
-    const id = energyFieldId || initialEnergyFieldId;
+  function getAverageRevenue(_energyFieldId?: string) {
     // This should now calculate from SFT asset data
     const currentState = get(state);
     if (
@@ -182,8 +147,7 @@ export function useAssetDetailData(initialEnergyFieldId: string) {
   }
 
   // Get production timeline
-  function getProductionTimeline(energyFieldId?: string) {
-    const id = energyFieldId || initialEnergyFieldId;
+  function getProductionTimeline(_energyFieldId?: string) {
     // This should now return data from the SFT asset instance
     const currentState = get(state);
     return currentState.asset?.monthlyReports || [];

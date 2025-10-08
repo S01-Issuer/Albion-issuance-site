@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import ChartTooltip from './ChartTooltip.svelte';
 	
-	export let data: Array<{label: string; value: number}> = [];
+	export let data: Array<{ label: string; value: number }> = [];
 	export let width: number = 950;
 	export let height: number = 400;
 	
@@ -34,22 +34,24 @@ export let horizontalLine: { value: number; label: string; color?: string } | nu
 export let yTickFormat: ((value: number) => string) | null = null;
 	
 	// Helper to determine which labels to show based on data density
-	function getLabelsToShow(data: Array<{label: string; value: number}>): {indices: number[], showYear: boolean} {
-		const count = data.length;
+	function getLabelsToShow(
+		points: Array<{ label: string; value: number }>,
+	): { indices: number[]; showYear: boolean } {
+		const count = points.length;
 		let indices: number[] = [];
 		let showYear = true;
 		
 		if (count <= 12) {
 			// Show all months
-			indices = data.map((_, i) => i);
+			indices = points.map((_, i) => i);
 		} else if (count <= 24) {
 			// Show every other month
-			indices = data.map((_, i) => i).filter(i => i % 2 === 0);
+			indices = points.map((_, i) => i).filter((i) => i % 2 === 0);
 		} else if (count <= 48) {
 			// Show quarterly (Jan, Apr, Jul, Oct)
-			indices = data.map((_, i) => {
+			indices = points.map((_, i) => {
 				try {
-					const dateStr = data[i].label.includes('T') ? data[i].label : data[i].label + 'T00:00:00';
+					const dateStr = points[i].label.includes('T') ? points[i].label : points[i].label + 'T00:00:00';
 					const date = new Date(dateStr);
 					if (isNaN(date.getTime())) return -1;
 					const month = date.getMonth();
@@ -57,16 +59,16 @@ export let yTickFormat: ((value: number) => string) | null = null;
 				} catch {
 					return -1;
 				}
-			}).filter(i => i >= 0);
+			}).filter((i) => i >= 0);
 		} else {
 			// Show only years
-			indices = data.map((_, i) => {
-				const dateStr = data[i].label.includes('T') ? data[i].label : data[i].label + 'T00:00:00';
+			indices = points.map((_, i) => {
+				const dateStr = points[i].label.includes('T') ? points[i].label : points[i].label + 'T00:00:00';
 				const date = new Date(dateStr);
-				const prevDateStr = i > 0 ? (data[i-1].label.includes('T') ? data[i-1].label : data[i-1].label + 'T00:00:00') : null;
+				const prevDateStr = i > 0 ? (points[i - 1].label.includes('T') ? points[i - 1].label : points[i - 1].label + 'T00:00:00') : null;
 				const prevDate = prevDateStr ? new Date(prevDateStr) : null;
 				return !prevDate || date.getFullYear() !== prevDate.getFullYear() ? i : -1;
-			}).filter(i => i >= 0);
+			}).filter((i) => i >= 0);
 			showYear = false; // Don't show year separately as it's in the label
 		}
 		
@@ -81,6 +83,9 @@ export let yTickFormat: ((value: number) => string) | null = null;
 		value: 0,
 		label: ''
 	};
+
+	const TICK_COUNT = 6;
+	const yTickIndices = Array.from({ length: TICK_COUNT }, (_, i) => i);
 	
 	// Responsive padding - smaller on mobile
 	$: padding = isMobile 
@@ -109,11 +114,10 @@ export let yTickFormat: ((value: number) => string) | null = null;
 	$: niceMin = minValue < 0 ? -getNiceNumber(Math.abs(minValue) * 1.1) : 0;
 	$: niceMax = getNiceNumber(maxValue * 1.1); // Add 10% padding
 	$: valueRange = niceMax - niceMin || 1; // Prevent division by zero
-	$: barWidth = chartWidth / Math.max(validData.length, 1) * 0.6;
 	$: barSpacing = validData.length > 1 ? chartWidth / (validData.length - 1) : chartWidth;
 	$: zeroY = padding.top + chartHeight - ((0 - niceMin) / valueRange) * chartHeight;
 	
-	function handleMouseMove(event: MouseEvent, index: number) {
+	function handleMouseMove(_event: MouseEvent, index: number) {
 		if (!svg || index >= validData.length) return;
 		
 		const dataPoint = validData[index];
@@ -128,7 +132,7 @@ export let yTickFormat: ((value: number) => string) | null = null;
 			if (!isNaN(date.getTime())) {
 				formattedLabel = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 			}
-		} catch (e) {
+		} catch {
 			// Keep original label if date parsing fails
 		}
 		
@@ -168,7 +172,7 @@ export let yTickFormat: ((value: number) => string) | null = null;
 		
 		<!-- Grid lines -->
 		{#if showGrid}
-			{#each Array(6) as _, i}
+			{#each yTickIndices as _, i (i)}
 				<line 
 					x1={padding.left} 
 					y1={padding.top + i * (chartHeight / 5)} 
@@ -181,12 +185,14 @@ export let yTickFormat: ((value: number) => string) | null = null;
 		{/if}
 		
 		<!-- Y-axis labels -->
-		{#each Array(6) as _, i}
+		{#each yTickIndices as _, i (i)}
 			{@const value = niceMax - (i / 5) * valueRange}
 			{@const absValue = Math.abs(value)}
-		{@const formattedValue = yTickFormat
-			? yTickFormat(value)
-			: (absValue >= 1000 ? `${value < 0 ? '-' : ''}${Math.round(absValue / 1000)}k` : Math.round(value).toString())}
+			{@const formattedValue = yTickFormat
+				? yTickFormat(value)
+				: absValue >= 1000
+					? `${value < 0 ? '-' : ''}${Math.round(absValue / 1000)}k`
+					: Math.round(value).toString()}
 			<text 
 				x={padding.left - 10} 
 				y={padding.top + i * (chartHeight / 5) + 5} 
@@ -203,7 +209,7 @@ export let yTickFormat: ((value: number) => string) | null = null;
 		<!-- X-axis labels -->
 		{#if validData.length > 0}
 			{@const labelInfo = getLabelsToShow(validData)}
-			{#each validData as item, i}
+			{#each validData as item, i (item.label + i)}
 				{#if labelInfo.indices.includes(i)}
 					{@const dateStr = item.label.includes('T') ? item.label : item.label + 'T00:00:00'}
 					{@const date = new Date(dateStr)}
@@ -269,7 +275,7 @@ export let yTickFormat: ((value: number) => string) | null = null;
 			/>
 			
 			<!-- Data points -->
-			{#each validData as item, i}
+			{#each validData as item, i (item.label + i)}
 				{@const x = padding.left + i * barSpacing}
 				{@const y = padding.top + chartHeight - ((item.value - niceMin) / valueRange) * chartHeight}
 				
@@ -328,7 +334,7 @@ export let yTickFormat: ((value: number) => string) | null = null;
 		
 		<!-- Values on bars (if not using tooltip) -->
 		{#if showValues && !tooltipData.show}
-			{#each validData as item, i}
+			{#each validData as item, i (item.label + i)}
 				{@const x = padding.left + i * barSpacing}
 				{@const y = padding.top + chartHeight - ((item.value - niceMin) / valueRange) * chartHeight - 10}
 				

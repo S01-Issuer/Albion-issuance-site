@@ -16,7 +16,10 @@
 	let loading = true;
 	let showSoldOutAssets = false;
 	let featuredTokensWithAssets: Array<{ token: TokenMetadata; asset: Asset }> = [];
+	let visibleTokensWithAssets: Array<{ token: TokenMetadata; asset: Asset }> = [];
 	let groupedEnergyFields: GroupedEnergyField[] = [];
+	let soldOutCount = 0;
+	let readyToLoad = false;
 	
 	// Token purchase widget state
 	let showPurchaseWidget = false;
@@ -24,75 +27,56 @@
 	let selectedTokenAddress: string | null = null;
 	
 	async function loadTokenAndAssets() {
+		loading = true;
 		try {
-			// Don't set loading = true if we're initializing for the first time
-			// This prevents the double loading state
-			if (!hasInitialized) {
-				// Keep the initial loading = true
-			} else {
-				loading = true;
+			if (!$sftMetadata || !$sfts) {
+				featuredTokensWithAssets = [];
+				return;
 			}
-			
-			if($sftMetadata && $sfts) {
-				const catalog = useCatalogService();
-				await catalog.build();
 
-				const tokens = Object.values(catalog.getCatalog()?.tokens || {});
-				const assetsMap = catalog.getCatalog()?.assets || {};
+			const catalog = useCatalogService();
+			await catalog.build();
+			const catalogData = catalog.getCatalog();
 
-				featuredTokensWithAssets = tokens.map((t) => {
-					const field = ENERGY_FIELDS.find((f) => f.sftTokens.some(s => s.address.toLowerCase() === t.contractAddress.toLowerCase()));
+			if (!catalogData) {
+				throw new Error('Failed to build catalog');
+			}
+
+			const tokens = Object.values(catalogData.tokens || {});
+			const assetsMap = catalogData.assets || {};
+
+			featuredTokensWithAssets = tokens
+				.map((token) => {
+					const field = ENERGY_FIELDS.find((f) =>
+						f.sftTokens.some((s) => s.address.toLowerCase() === token.contractAddress.toLowerCase()),
+					);
 					const assetId = field
 						? field.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
 						: '';
 					const asset = assetId ? assetsMap[assetId] : undefined;
-					return asset ? { token: t, asset } : null;
-				}).filter(Boolean) as Array<{ token: TokenMetadata; asset: Asset }>;
-
-				groupedEnergyFields = groupSftsByEnergyField(featuredTokensWithAssets);
-				hasInitialized = true;
-			}
-			loading = false;
-
-		} catch(err) {
+					return asset ? { token, asset } : null;
+				})
+				.filter(Boolean) as Array<{ token: TokenMetadata; asset: Asset }>;
+		} catch (err) {
 			console.error('Featured tokens loading error:', err);
+		} finally {
 			loading = false;
-			hasInitialized = true;
 		}
 	}
-	
-	// Only load when data is available and we haven't loaded yet
-	$: if($sfts && $sftMetadata && !hasInitialized){
+
+	$: readyToLoad = Boolean($sfts && $sftMetadata);
+	$: if (readyToLoad && !hasInitialized) {
+		hasInitialized = true;
 		loadTokenAndAssets();
 	}
 
-	// Check if an energy field group has available tokens
-	function hasAvailableTokens(group: GroupedEnergyField): boolean {
-		return group.tokens.some(token => {
-			const hasAvailable = hasAvailableSupplySync(token);
-			return hasAvailable;
-		});
-	}
-	
-	// Filter and group assets based on availability
-	$: {
-		if (!loading) {
-			const filteredTokensWithAssets = showSoldOutAssets 
-				? featuredTokensWithAssets 
-				: featuredTokensWithAssets.filter(item => {
-					const hasAvailable = hasAvailableSupplySync(item.token);
-					return hasAvailable;
-				});
-			
-			groupedEnergyFields = groupSftsByEnergyField(filteredTokensWithAssets);
-		}
-	}
-	
-	// Count sold out assets
-	$: soldOutCount = featuredTokensWithAssets.filter(item => {
-		const hasAvailable = hasAvailableSupplySync(item.token);
-		return !hasAvailable;
-	}).length;
+	$: visibleTokensWithAssets = showSoldOutAssets
+		? featuredTokensWithAssets
+		: featuredTokensWithAssets.filter((item) => hasAvailableSupplySync(item.token));
+
+	$: groupedEnergyFields = groupSftsByEnergyField(visibleTokensWithAssets);
+
+	$: soldOutCount = featuredTokensWithAssets.filter((item) => !hasAvailableSupplySync(item.token)).length;
 	
 	function handleBuyTokens(event: CustomEvent) {
 		selectedAssetId = event.detail.assetId;
@@ -100,7 +84,7 @@
 		showPurchaseWidget = true;
 	}
 	
-	function handlePurchaseSuccess(event: CustomEvent) {
+	function handlePurchaseSuccess(_event: CustomEvent) {
 		// Purchase successful - could add user notification here
 		showPurchaseWidget = false;
 	}
@@ -133,8 +117,8 @@
 			<!-- Assets Grid -->
 			<div class="mt-12 sm:mt-16 lg:mt-24">
 				{#if groupedEnergyFields.length === 0}
-					<!-- No Available Assets -->
-					<Card>
+						<!-- No Available Assets -->
+						<Card hoverable={false}>
 						<CardContent>
 							<div class="text-center py-8">
 								<SectionTitle level="h3" size="card">No Available Assets</SectionTitle>
@@ -147,7 +131,7 @@
 				{:else}
 					<!-- Grouped Assets by Energy Field -->
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6 lg:gap-8 items-stretch">
-						{#each groupedEnergyFields as energyField}
+						{#each groupedEnergyFields as energyField (energyField.id)}
 							<AssetCard 
 								asset={energyField.asset} 
 								token={energyField.tokens} 

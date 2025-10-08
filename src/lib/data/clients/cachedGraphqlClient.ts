@@ -3,13 +3,13 @@
  */
 
 interface CacheEntry<T> {
-  data: T;
+  data?: T;
   timestamp: number;
   promise?: Promise<T>;
 }
 
 class GraphQLCache {
-  private cache = new Map<string, CacheEntry<any>>();
+  private cache = new Map<string, CacheEntry<unknown>>();
   private readonly DEFAULT_TTL = 5 * 60 * 1000; // 5 minutes
 
   private getCacheKey(
@@ -37,10 +37,14 @@ class GraphQLCache {
 
     // Skip cache if requested
     if (!options?.skipCache) {
-      const cached = this.cache.get(cacheKey);
+      const cached = this.cache.get(cacheKey) as CacheEntry<T> | undefined;
 
       // Return cached data if valid
-      if (cached && !this.isExpired(cached.timestamp, options?.ttl)) {
+      if (
+        cached &&
+        cached.data !== undefined &&
+        !this.isExpired(cached.timestamp, options?.ttl)
+      ) {
         return cached.data;
       }
 
@@ -55,7 +59,6 @@ class GraphQLCache {
 
     // Store promise for deduplication
     this.cache.set(cacheKey, {
-      data: null,
       timestamp: Date.now(),
       promise,
     });
@@ -82,9 +85,12 @@ class GraphQLCache {
     query: string,
     variables?: Record<string, unknown>,
   ): Promise<T> {
-    console.log(`[GraphQL] Fetching from: ${url}`);
-    console.log(`[GraphQL] Query:`, query.substring(0, 200) + "...");
-    console.log(`[GraphQL] Variables:`, variables);
+    const isDev = import.meta.env?.DEV ?? false;
+    if (isDev) {
+      console.warn(`[GraphQL] Fetching from: ${url}`);
+      console.warn(`[GraphQL] Query:`, `${query.substring(0, 200)}...`);
+      console.warn(`[GraphQL] Variables:`, variables);
+    }
 
     const response = await fetch(url, {
       method: "POST",
@@ -104,8 +110,13 @@ class GraphQLCache {
       throw new Error(`GraphQL errors: ${JSON.stringify(json.errors)}`);
     }
 
-    console.log(`[GraphQL] Response data keys:`, Object.keys(json.data || {}));
-    console.log(`[GraphQL] Response data:`, json.data);
+    if (isDev) {
+      console.warn(
+        `[GraphQL] Response data keys:`,
+        Object.keys(json.data || {}),
+      );
+      console.warn(`[GraphQL] Response data:`, json.data);
+    }
 
     return json.data as T;
   }

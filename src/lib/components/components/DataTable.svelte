@@ -11,7 +11,7 @@
 <div class={containerClasses}>
 	{#if columns.length > 0}
 		<div class={headerClasses}>
-			{#each columns as column}
+			{#each columns as column, index (`${index}-${column}`)}
 				<div class="font-extrabold text-black text-xs uppercase tracking-wider">
 					{column}
 				</div>

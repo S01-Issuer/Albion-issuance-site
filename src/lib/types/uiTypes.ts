@@ -6,7 +6,6 @@
 import type {
   GalleryImage,
   TokenSupply,
-  Coordinates,
   Location,
   Metadata,
   ISODateOnlyString,
@@ -180,7 +179,7 @@ export interface Token {
         description?: string;
         image?: string;
         external_url?: string;
-        attributes?: any[];
+        attributes?: Array<Record<string, unknown>>;
         createdAt?: string;
         updatedAt?: string;
       };

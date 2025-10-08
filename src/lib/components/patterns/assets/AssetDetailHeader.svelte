@@ -1,20 +1,14 @@
 <script lang="ts">
 	import type { Asset } from '$lib/types/uiTypes';
 	import { getImageUrl } from '$lib/utils/imagePath';
-	import { formatCurrency, formatEndDate } from '$lib/utils/formatters';
+	import { formatCurrency } from '$lib/utils/formatters';
 	import { StatsCard } from '$lib/components/components';
 	import { getShareText, getShareUrls, shareViaWebAPI, copyToClipboard, type ShareData } from '$lib/utils/sharing';
-	import { onMount } from 'svelte';
 
-	export let asset: Asset;
-	export let tokenCount: number = 0;
-	export let onTokenSectionClick: (() => void) | undefined = undefined;
-
-	let canUseWebShare = false;
-
-	onMount(() => {
-		canUseWebShare = !!navigator.share;
-	});
+export let asset: Asset;
+export let tokenCount: number = 0;
+export let onTokenSectionClick: (() => void) | undefined = undefined;
+export let onLocationClick: (() => void) | undefined = undefined;
 
 	function getAssetImage(assetData: Asset | null): string {
 		return assetData?.coverImage || '/images/placeholder-asset.jpg';
@@ -157,7 +151,27 @@
 							</div>
 						</div>
 						<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4 mb-2">
-							<span class="text-secondary font-medium text-sm">📍 {asset?.location?.state}, {asset?.location?.country}</span>
+							{#if asset?.location?.state || asset?.location?.country}
+								<button
+									type="button"
+									class="text-secondary font-medium text-sm bg-transparent border-0 p-0 text-left cursor-pointer transition-colors duration-200 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary focus-visible:ring-offset-2 flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+									on:click={onLocationClick}
+									disabled={!onLocationClick}
+								>
+									<span aria-hidden="true">📍</span>
+									<span>{asset?.location?.state}{asset?.location?.state && asset?.location?.country ? ', ' : ''}{asset?.location?.country}</span>
+									<svg
+										class="w-4 h-4"
+										viewBox="0 0 640 640"
+										fill="currentColor"
+										aria-hidden="true"
+									>
+										<path d="M576 112C576 103.7 571.7 96 564.7 91.6C557.7 87.2 548.8 86.8 541.4 90.5L416.5 152.1L244 93.4C230.3 88.7 215.3 89.6 202.1 95.7L77.8 154.3C69.4 158.2 64 166.7 64 176L64 528C64 536.2 68.2 543.9 75.1 548.3C82 552.7 90.7 553.2 98.2 549.7L225.5 489.8L396.2 546.7C409.9 551.3 424.7 550.4 437.8 544.2L562.2 485.7C570.6 481.7 576 473.3 576 464L576 112zM208 146.1L208 445.1L112 490.3L112 191.3L208 146.1zM256 449.4L256 148.3L384 191.8L384 492.1L256 449.4zM432 198L528 150.6L528 448.8L432 494L432 198z" />
+									</svg>
+								</button>
+							{:else}
+								<span class="text-secondary font-medium text-sm">📍 Location unavailable</span>
+							{/if}
 						</div>
 						<div class="text-black opacity-70 text-sm">
 							<span>Operated by {asset?.operator?.name}</span>
@@ -187,7 +201,7 @@
 				value={(() => {
 					const lastReport = asset?.monthlyReports?.[asset.monthlyReports.length - 1];
 					return lastReport?.revenue !== undefined && lastReport.revenue > 0
-						? formatCurrency(lastReport.revenue)
+						? formatCurrency(lastReport.revenue, { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 						: 'N/A';
 				})()}
 				subtitle={(() => {

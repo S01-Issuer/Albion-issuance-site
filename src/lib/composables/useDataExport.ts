@@ -3,8 +3,7 @@
  * Handles CSV export functionality for various data types
  */
 
-import type { Asset, Token } from "$lib/types/uiTypes";
-import { withSyncErrorHandling } from "$lib/utils/errorHandling";
+import type { Asset } from "$lib/types/uiTypes";
 import { formatCurrency, formatNumber } from "$lib/utils/formatters";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
 
@@ -21,7 +20,7 @@ export function useDataExport() {
    * Generic CSV export function
    */
   function exportToCSV(
-    data: any[][],
+    data: string[][],
     headers: string[],
     filename: string,
   ): void {
@@ -87,23 +86,20 @@ export function useDataExport() {
   ): void {
     const currentToken = tokens[0];
 
-    if (!currentToken || !currentToken.payoutData) {
+    if (!currentToken?.payoutData) {
       return;
     }
 
-    const headers = [
-      "Month",
-      "Total Payout (USD)",
-      "Payout Per Token (USD)",
-    ];
+    const headers = ["Month", "Total Payout (USD)", "Payout Per Token (USD)"];
 
     const data = currentToken.payoutData.map((payout) => [
       payout.month,
-      payout.tokenPayout.totalPayout.toFixed(2),
-      payout.tokenPayout.payoutPerToken.toFixed(4),
+      (payout.tokenPayout.totalPayout ?? 0).toFixed(2),
+      (payout.tokenPayout.payoutPerToken ?? 0).toFixed(4),
     ]);
 
-    const filename = `${currentToken.contractAddress}-payment-history.csv`;
+    const filename =
+      options.filename ?? `${currentToken.contractAddress}-payment-history.csv`;
     exportToCSV(data, headers, filename);
   }
 
@@ -123,7 +119,7 @@ export function useDataExport() {
       ["Type", asset.geology?.type || "N/A"],
       ["Interest Type", asset.terms?.interestType || "N/A"],
       ["Revenue Share", asset.terms?.amount || "N/A"],
-      ["Payment Frequency", asset.terms?.paymentFrequency || "N/A"],
+      ["Payment Frequency", "Monthly"],
       ["Estimated Life", asset.geology?.estimatedLife || "N/A"],
       ["Water Depth", asset.location.waterDepth || "Onshore"],
     ];

@@ -10,7 +10,7 @@ interface CacheEntry {
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 function createClaimsCache() {
-  const { subscribe, set, update } = writable<CacheEntry | null>(null);
+  const { subscribe, set } = writable<CacheEntry | null>(null);
 
   return {
     subscribe,

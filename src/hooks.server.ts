@@ -33,8 +33,11 @@ export const handle: Handle = async ({ event, resolve }) => {
   const path = url.pathname;
 
   const debug = false; // DEBUG_LOGIN not available in static env
+  const logDebug = (...messages: unknown[]) => {
+    if (debug) console.warn("[auth debug]", ...messages);
+  };
   if (isAllowlisted(path)) {
-    if (debug) console.log("[auth] allowlisted path", path);
+    logDebug("allowlisted path", path);
     return resolve(event);
   }
 
@@ -44,15 +47,13 @@ export const handle: Handle = async ({ event, resolve }) => {
 
   const valid =
     token && Number.isFinite(timestamp) && verifySessionToken(token, timestamp);
-  if (debug) {
-    console.log("[auth] path", path, {
-      haveUser: !!user,
-      havePass: !!pass,
-      hasToken: !!token,
-      ts: tsStr,
-      valid,
-    });
-  }
+  logDebug("path access", path, {
+    haveUser: !!user,
+    havePass: !!pass,
+    hasToken: !!token,
+    ts: tsStr,
+    valid,
+  });
 
   if (valid) {
     return resolve(event);
@@ -61,7 +62,7 @@ export const handle: Handle = async ({ event, resolve }) => {
   let search = "";
   try {
     search = url.search || "";
-  } catch (e) {
+  } catch {
     // url.search not available during prerendering
     search = "";
   }

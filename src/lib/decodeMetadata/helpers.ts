@@ -2,6 +2,15 @@ import pako from "pako";
 import { ethers } from "ethers";
 import { decodeAllSync, encodeCanonical } from "cbor-web";
 import type { MetaV1S } from "$lib/types/graphql";
+import type { PinnedMetadata } from "$lib/types/PinnedMetadata";
+
+type CborContent = string | ArrayBuffer;
+
+interface CborEncodeOptions {
+  contentEncoding?: string;
+  schema?: unknown;
+  contentLanguage?: string;
+}
 
 export const MAGIC_NUMBERS = {
   /**
@@ -40,15 +49,11 @@ export function deflateJson(data_: string | pako.Data) {
 }
 
 export function cborEncode(
-  payload_: string | ArrayBuffer,
+  payload_: CborContent,
   magicNumber_: bigint,
   contentType_: string | null,
-  options_: {
-    contentEncoding: any;
-    schema?: any;
-    contentLanguage?: any;
-  } | null,
-) {
+  options_: CborEncodeOptions | null,
+): string {
   const m = new Map();
   m.set(0, payload_); // Payload
   m.set(1, magicNumber_); // Magic number
@@ -99,16 +104,18 @@ export function encodeCBORStructure(structure: string, schemaHash: string) {
  * @param {string} key - The key in the objects used for sorting.
  * @returns {Array<Object>} - Sorted array.
  */
-export function mapOrder<T extends Record<string, any>>(
+export function mapOrder<T extends Record<string, unknown>, K extends keyof T>(
   array: T[],
   order: string[],
-  key: keyof T,
+  key: K,
 ): T[] {
   array.sort((a, b) => {
-    const A = a[key],
-      B = b[key];
+    const valueA = a[key];
+    const valueB = b[key];
+    const indexA = typeof valueA === "string" ? order.indexOf(valueA) : -1;
+    const indexB = typeof valueB === "string" ? order.indexOf(valueB) : -1;
 
-    if (order.indexOf(A) > order.indexOf(B)) {
+    if (indexA > indexB) {
       return 1;
     } else {
       return -1;
@@ -118,14 +125,25 @@ export function mapOrder<T extends Record<string, any>>(
   return array;
 }
 
-export function bytesToMeta(bytes: any, type: any) {
+export function bytesToMeta(
+  bytes: ArrayBuffer | Uint8Array | string,
+  type: string,
+): unknown {
   if (ethers.isBytesLike(bytes)) {
     const _bytesArr = ethers.getBytes(bytes);
     let _meta;
     if (type === "json") {
       _meta = pako.inflate(_bytesArr, { to: "string" });
     } else {
-      _meta = new TextDecoder().decode(bytes as any).slice(3);
+      let buffer: Uint8Array;
+      if (bytes instanceof Uint8Array) {
+        buffer = bytes;
+      } else if (typeof bytes === "string") {
+        buffer = ethers.getBytes(bytes);
+      } else {
+        buffer = new Uint8Array(bytes as ArrayBuffer);
+      }
+      _meta = new TextDecoder().decode(buffer).slice(3);
     }
     let res;
     try {
@@ -139,7 +157,7 @@ export function bytesToMeta(bytes: any, type: any) {
   }
 }
 
-export function cborDecode(dataEncoded_: any) {
+export function cborDecode(dataEncoded_: ArrayBuffer | Uint8Array | string) {
   return decodeAllSync(dataEncoded_);
 }
 function getDateValues(date: Date) {
@@ -165,9 +183,9 @@ export function formatDate(date: Date) {
 }
 
 export function convertDotNotationToObject(
-  input: Record<string, any>,
-): Record<string, any> {
-  const result: Record<string, any> = {};
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
 
   for (const key of Object.keys(input)) {
     const value = input[key];
@@ -189,14 +207,14 @@ export function convertDotNotationToObject(
       }
 
       // Move our reference down to the next part of the path
-      currentPart = currentPart[part];
+      currentPart = currentPart[part] as Record<string, unknown>;
     }
   }
 
   return result;
 }
 
-export function decodeSftInformation(metaV1: MetaV1S) {
+export function decodeSftInformation(metaV1: MetaV1S): PinnedMetadata | null {
   try {
     // Decode the metadata using the same process as ReceiptMetadata
     const information = metaV1.meta ? cborDecode(metaV1.meta.slice(18)) : null;
@@ -205,13 +223,16 @@ export function decodeSftInformation(metaV1: MetaV1S) {
     }
 
     const structure = bytesToMeta(information[0].get(0), "json");
-    const convertedStructure = convertDotNotationToObject(structure);
+    const convertedStructure =
+      typeof structure === "object" && structure !== null
+        ? convertDotNotationToObject(structure as Record<string, unknown>)
+        : {};
 
     // Add additional metadata from the original metaV1
     return {
-      ...convertedStructure,
+      ...(convertedStructure as Record<string, unknown>),
       contractAddress: metaV1.subject || metaV1.id,
-    };
+    } as PinnedMetadata;
   } catch {
     return null;
   }
