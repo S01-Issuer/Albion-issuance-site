@@ -31,25 +31,35 @@ export const GET: RequestHandler = async ({ params, setHeaders }) => {
     // Use Pinata SDK to get the file
     const data = await pinata.gateways.get(path);
     
-    // Determine content type based on file extension or default
+    // Pinata SDK returns { data: string, contentType: string } format
+    let actualData: any;
     let contentType = 'application/octet-stream';
-    if (typeof data === 'string') {
-      contentType = 'text/plain';
-    } else if (data && typeof data === 'object') {
-      contentType = 'application/json';
+    
+    if (data && typeof data === 'object' && 'data' in data && 'contentType' in data) {
+      // Pinata SDK response format
+      actualData = data.data;
+      contentType = data.contentType || 'application/octet-stream';
+    } else {
+      // Fallback for other response types
+      actualData = data;
+      if (typeof data === 'string') {
+        contentType = 'text/plain';
+      } else if (data && typeof data === 'object') {
+        contentType = 'application/json';
+      }
     }
     
-    // Handle the response - Pinata SDK might return different types
+    // Handle the response - convert to ArrayBuffer
     let body: ArrayBuffer;
-    if (data instanceof ArrayBuffer) {
-      body = data;
-    } else if (data instanceof Blob) {
-      body = await data.arrayBuffer();
-    } else if (typeof data === 'string') {
-      body = new TextEncoder().encode(data).buffer;
-      contentType = 'text/plain';
+    if (actualData instanceof ArrayBuffer) {
+      body = actualData;
+    } else if (actualData instanceof Blob) {
+      body = await actualData.arrayBuffer();
+    } else if (typeof actualData === 'string') {
+      body = new TextEncoder().encode(actualData).buffer;
     } else {
-      body = new TextEncoder().encode(JSON.stringify(data)).buffer;
+      // Stringify objects that aren't already strings
+      body = new TextEncoder().encode(JSON.stringify(actualData)).buffer;
       contentType = 'application/json';
     }
 
