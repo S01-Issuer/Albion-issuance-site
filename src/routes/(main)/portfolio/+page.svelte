@@ -131,6 +131,7 @@ let activeTab: PortfolioTab = 'overview';
 let allDepositsData: EnrichedDeposit[] = [];
 let claimsHoldings: ClaimGroupSummary[] = [];
 let hasPortfolioHistory = false;
+let latestClaimsSnapshot: ClaimsResult | null = null;
 	
 	// Composables
 	const { show: showTooltipWithDelay, hide: hideTooltip, isVisible: isTooltipVisible } = useTooltip();
@@ -360,7 +361,7 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 		const claims = useClaimsService();
 		
 		// Check cache first
-		let claimsResult: ClaimsResult | null = claimsCache.get($signerAddress || '');
+	let claimsResult: ClaimsResult | null = claimsCache.get($signerAddress || '');
 	if (claimsResult) {
 		logDev('Using cached claims data');
 	} else {
@@ -369,8 +370,9 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 		claimsCache.set($signerAddress || '', claimsResult);
 	}
 		
-		return claimsResult;
-	}
+	latestClaimsSnapshot = claimsResult;
+	return claimsResult;
+}
 
 	async function loadSftData() {
 		if (isLoadingData || !$signerAddress) return;
@@ -409,19 +411,19 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 							claim.fieldName === group.fieldName ||
 							claim.asset === group.fieldName,
 					);
-					const totalEarned = groupClaims.reduce((sum, claim) => {
-						const amount = Number(claim.amount ?? 0);
-						return sum + (Number.isFinite(amount) ? amount : 0);
-					}, 0);
 					const claimedAmount = groupClaims.reduce((sum, claim) => {
 						const amount = Number(claim.amount ?? 0);
 						const isCompleted = !claim.status || claim.status === 'completed';
 						return sum + (isCompleted && Number.isFinite(amount) ? amount : 0);
 					}, 0);
-					const unclaimedAmount = Number(group.totalAmount ?? 0);
+					const unclaimedAmountRaw = Number(group.totalAmount ?? 0);
+					const unclaimedAmount = Number.isFinite(unclaimedAmountRaw)
+						? unclaimedAmountRaw
+						: 0;
+					const totalEarned = claimedAmount + unclaimedAmount;
 					return {
 						fieldName: group.fieldName,
-						unclaimedAmount: Number.isFinite(unclaimedAmount) ? unclaimedAmount : 0,
+						unclaimedAmount,
 						claimedAmount,
 						totalEarned,
 						holdings: group.holdings,
@@ -546,9 +548,9 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 						}
 					}
 					
-					let totalEarnedForSft = 0;
-					let unclaimedAmountForSft = 0;
-					let claimedAmountForSft = 0;
+				let totalEarnedForSft = 0;
+				let unclaimedAmountForSft = 0;
+				let claimedAmountForSft = 0;
 					
 					// Find claims data for this specific SFT by matching field name
 					const sftClaimsGroup = claimsHoldings.find(
@@ -556,11 +558,12 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 					);
 					
 					// Use data from claimsGroup if available (this is the source of truth)
-					if(sftClaimsGroup) {
-						claimedAmountForSft = sftClaimsGroup.claimedAmount || 0;
-						unclaimedAmountForSft = sftClaimsGroup.unclaimedAmount || 0;
-						totalEarnedForSft = sftClaimsGroup.totalEarned || 0;
-					}
+				if (sftClaimsGroup) {
+					claimedAmountForSft = Number(sftClaimsGroup.claimedAmount ?? 0);
+					unclaimedAmountForSft = Number(sftClaimsGroup.unclaimedAmount ?? 0);
+					const groupTotal = Number(sftClaimsGroup.totalEarned ?? 0);
+					totalEarnedForSft = groupTotal || claimedAmountForSft + unclaimedAmountForSft;
+				}
 					
 					// Get claim history for this asset
 					const sftClaims = claimHistory.filter(
@@ -575,16 +578,17 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 						const isCompleted = !claim?.status || claim.status === 'completed';
 						return sum + (isCompleted && Number.isFinite(amount) ? amount : 0);
 					}, 0);
-					if (!totalEarnedForSft && totalEarnedFromHistory) {
-						totalEarnedForSft = totalEarnedFromHistory;
-					}
-					if (!claimedAmountForSft && claimedFromHistory) {
-						claimedAmountForSft = claimedFromHistory;
-					}
-					if (!unclaimedAmountForSft) {
-						const pending = totalEarnedForSft - claimedAmountForSft;
-						unclaimedAmountForSft = pending > 0 ? pending : 0;
-					}
+				if (!claimedAmountForSft && claimedFromHistory) {
+					claimedAmountForSft = claimedFromHistory;
+				}
+				if (!totalEarnedForSft && totalEarnedFromHistory) {
+					totalEarnedForSft = totalEarnedFromHistory;
+				}
+				if (!unclaimedAmountForSft) {
+					const pending = totalEarnedForSft - claimedAmountForSft;
+					unclaimedAmountForSft = pending > 0 ? pending : 0;
+				}
+				totalEarnedForSft = Math.max(totalEarnedForSft, claimedAmountForSft + unclaimedAmountForSft);
 					const plannedProjections = Array.isArray(asset.plannedProduction?.projections)
 						? asset.plannedProduction?.projections ?? []
 						: [];
@@ -1153,13 +1157,18 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 					});
 					
 					// Calculate real metrics from deposits and trades data
-					const grossDeployed = allDepositsData.reduce(
-					(sum, deposit) => sum + Number(formatEther(BigInt(deposit.amount))),
-						0,
-					);
-					
-					const grossPayout = claimHistory.reduce((sum, claim) => sum + Number(claim.amount), 0);
-					const currentNetPosition = grossPayout - grossDeployed;
+				const grossDeployed = allDepositsData.reduce(
+				(sum, deposit) => sum + Number(formatEther(BigInt(deposit.amount))),
+					0,
+				);
+				
+				const earnedSnapshot = latestClaimsSnapshot?.totals.earned ?? 0;
+				const grossPayout = earnedSnapshot > 0
+					? earnedSnapshot
+					: (totalPayoutsEarned > 0
+						? totalPayoutsEarned
+						: claimHistory.reduce((sum, claim) => sum + Number(claim.amount), 0));
+				const currentNetPosition = grossPayout - grossDeployed;
 					
 				return {
 					chartData: dataArray,

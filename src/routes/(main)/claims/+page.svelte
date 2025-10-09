@@ -5,9 +5,11 @@
 	import { web3Modal, signerAddress, connected, wagmiConfig } from 'svelte-wagmi';
 	import { Card, CardContent, PrimaryButton, SecondaryButton, StatusBadge, StatsCard, SectionTitle, CollapsibleSection, FormattedNumber } from '$lib/components/components';
 	import { PageLayout, HeroSection, ContentSection } from '$lib/components/layout';
+	import { graphQLCache } from '$lib/data/clients/cachedGraphqlClient';
 	import { formatCurrency } from '$lib/utils/formatters';
 	import { dateUtils } from '$lib/utils/dateHelpers';
 	import { arrayUtils } from '$lib/utils/arrayHelpers';
+	import { BASE_ORDERBOOK_SUBGRAPH_URL } from '$lib/network';
 	import { useClaimsService } from '$lib/services';
 	import orderbookAbi from '$lib/abi/orderbook.json';
 	import type { Hex } from 'viem';
@@ -40,6 +42,52 @@
 
 	let unsubscribeWallet: (() => void) | null = null;
 
+	function invalidateClaimData() {
+		// Force subsequent loads to re-fetch orderbook data after a claim
+		graphQLCache.invalidate(BASE_ORDERBOOK_SUBGRAPH_URL);
+	}
+
+	function updateClaimsCacheSnapshot() {
+		const address = get(signerAddress) ?? '';
+		if (!address) return;
+		claimsCache.set(address, {
+			holdings,
+			claimHistory,
+			totals: {
+				earned: totalEarned,
+				claimed: totalClaimed,
+				unclaimed: unclaimedPayout
+			}
+		});
+	}
+
+	function applyClaimOptimisticUpdate(claimGroup?: ClaimsHoldingsGroup) {
+		if (claimGroup) {
+			const claimedAmount = claimGroup.totalAmount ?? 0;
+			if (claimedAmount > 0) {
+				totalClaimed += claimedAmount;
+				unclaimedPayout = Math.max(unclaimedPayout - claimedAmount, 0);
+			}
+			holdings = holdings
+				.map((group) =>
+					group.fieldName === claimGroup.fieldName
+						? { ...group, totalAmount: 0, holdings: [] }
+						: group
+				)
+				.filter((group) => group.totalAmount > 0 && group.holdings.length > 0);
+			updateClaimsCacheSnapshot();
+			return;
+		}
+
+		const claimedAmount = unclaimedPayout;
+		if (claimedAmount > 0) {
+			totalClaimed += claimedAmount;
+		}
+		unclaimedPayout = 0;
+		holdings = [];
+		updateClaimsCacheSnapshot();
+	}
+
 	onMount(() => {
 		subscribeToWallet();
 	});
@@ -56,7 +104,7 @@
 		});
 	}
 
-	async function loadClaimsData(addressOverride?: string) {
+	async function loadClaimsData(addressOverride?: string, forceFresh = false) {
 		pageLoading = true;
 		try {
 			const cacheKey = addressOverride ?? $signerAddress ?? '';
@@ -64,7 +112,7 @@
 				pageLoading = false;
 				return;
 			}
-			const cached = claimsCache.get(cacheKey);
+			const cached = forceFresh ? null : claimsCache.get(cacheKey);
 			if (cached) {
 				logDev('Using cached data');
 				claimHistory = cached.claimHistory;
@@ -87,6 +135,7 @@
 			totalEarned = result.totals.earned;
 			totalClaimed = result.totals.claimed;
 			unclaimedPayout = result.totals.unclaimed;
+			updateClaimsCacheSnapshot();
 		} catch (error) {
 			console.error('Error loading claims:', error);
 			// Set defaults on error
@@ -161,12 +210,13 @@
 			await writeContract($wagmiConfig, request);
 			claimSuccess = true;
 			
-			// Clear cache and reload claims data after successful claim
-			claimsCache.clear();
+			applyClaimOptimisticUpdate();
+			// Invalidate caches and reload claims data after successful claim
+			invalidateClaimData();
 			setTimeout(() => {
 				const address = get(signerAddress) ?? '';
 				if (!address) return;
-				loadClaimsData(address);
+				loadClaimsData(address, true);
 			}, 2000);
 
 		} catch (error) {
@@ -223,12 +273,13 @@
 			await writeContract($wagmiConfig, request);
 			claimSuccess = true;
 			
-			// Clear cache and reload claims data after successful claim
-			claimsCache.clear();
+			applyClaimOptimisticUpdate(group);
+				// Invalidate caches and reload claims data after successful claim
+			invalidateClaimData();
 			setTimeout(() => {
 				const address = get(signerAddress) ?? '';
 				if (!address) return;
-				loadClaimsData(address);
+				loadClaimsData(address, true);
 			}, 2000);
 
 		} catch (error) {
