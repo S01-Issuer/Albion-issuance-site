@@ -1,4 +1,10 @@
 {
+  "rewrites": [
+    {
+      "source": "/api/ipfs/:path*",
+      "destination": "https://gateway.pinata.cloud/ipfs/:path*"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
@@ -23,6 +29,23 @@
         },
         { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
         { "key": "Cross-Origin-Resource-Policy", "value": "same-origin" }
+      ]
+    },
+    {
+      "source": "/api/ipfs/:path*",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, HEAD, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type"
+        }
       ]
     }
   ]
