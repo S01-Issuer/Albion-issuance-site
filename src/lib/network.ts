@@ -7,7 +7,7 @@ export const BASE_ORDERBOOK_SUBGRAPH_URL =
 export const BASE_METADATA_SUBGRAPH_URL =
   "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/metadata-base/2025-07-06-594f/gn";
 export const TARGET_NETWORK = "base";
-export const PINATA_GATEWAY = "https://gateway.pinata.cloud/ipfs";
+export const PINATA_GATEWAY = "/api/ipfs";
 export const ORDERBOOK_CONTRACT_ADDRESS =
   "0xd2938E7c9fe3597F78832CE780Feb61945c377d7";
 
