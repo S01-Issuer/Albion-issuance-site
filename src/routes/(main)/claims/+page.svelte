@@ -23,8 +23,6 @@
 		if (isDev) console.warn('[Claims]', ...messages);
 	};
 
-	$: console.log('claims page');
-
 	let totalEarned = 0;
 	let totalClaimed = 0;
 	let unclaimedPayout = 0;
