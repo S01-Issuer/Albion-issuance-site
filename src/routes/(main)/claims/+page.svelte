@@ -5,9 +5,11 @@
 	import { web3Modal, signerAddress, connected, wagmiConfig } from 'svelte-wagmi';
 	import { Card, CardContent, PrimaryButton, SecondaryButton, StatusBadge, StatsCard, SectionTitle, CollapsibleSection, FormattedNumber } from '$lib/components/components';
 	import { PageLayout, HeroSection, ContentSection } from '$lib/components/layout';
+	import { graphQLCache } from '$lib/data/clients/cachedGraphqlClient';
 	import { formatCurrency } from '$lib/utils/formatters';
 	import { dateUtils } from '$lib/utils/dateHelpers';
 	import { arrayUtils } from '$lib/utils/arrayHelpers';
+	import { BASE_ORDERBOOK_SUBGRAPH_URL } from '$lib/network';
 	import { useClaimsService } from '$lib/services';
 	import orderbookAbi from '$lib/abi/orderbook.json';
 	import type { Hex } from 'viem';
@@ -39,6 +41,12 @@
 	}));
 
 	let unsubscribeWallet: (() => void) | null = null;
+
+	function invalidateClaimData() {
+		claimsCache.clear();
+		// Force subsequent loads to re-fetch orderbook data after a claim
+		graphQLCache.invalidate(BASE_ORDERBOOK_SUBGRAPH_URL);
+	}
 
 	onMount(() => {
 		subscribeToWallet();
@@ -161,8 +169,8 @@
 			await writeContract($wagmiConfig, request);
 			claimSuccess = true;
 			
-			// Clear cache and reload claims data after successful claim
-			claimsCache.clear();
+			// Clear caches and reload claims data after successful claim
+			invalidateClaimData();
 			setTimeout(() => {
 				const address = get(signerAddress) ?? '';
 				if (!address) return;
@@ -223,8 +231,8 @@
 			await writeContract($wagmiConfig, request);
 			claimSuccess = true;
 			
-			// Clear cache and reload claims data after successful claim
-			claimsCache.clear();
+			// Clear caches and reload claims data after successful claim
+			invalidateClaimData();
 			setTimeout(() => {
 				const address = get(signerAddress) ?? '';
 				if (!address) return;
