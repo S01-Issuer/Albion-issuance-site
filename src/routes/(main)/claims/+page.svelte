@@ -23,14 +23,13 @@
 		if (isDev) console.warn('[Claims]', ...messages);
 	};
 
-	$: console.log('claims page');
-
 	let totalEarned = 0;
 	let totalClaimed = 0;
 	let unclaimedPayout = 0;
 	let pageLoading = true;
 	let claiming = false;
 	let claimSuccess = false;
+	let dataLoadError = false;
 
 	let holdings: ClaimsHoldingsGroup[] = [];
 	let claimHistory: ClaimHistory[] = [];
@@ -50,6 +49,7 @@
 	}
 
 	function updateClaimsCacheSnapshot() {
+		if (dataLoadError) return;
 		const address = get(signerAddress) ?? '';
 		if (!address) return;
 		claimsCache.set(address, {
@@ -59,8 +59,17 @@
 				earned: totalEarned,
 				claimed: totalClaimed,
 				unclaimed: unclaimedPayout
-			}
+			},
+			hasCsvLoadError: false
 		});
+	}
+
+	function resetClaimsState() {
+		claimHistory = [];
+		holdings = [];
+		totalEarned = 0;
+		totalClaimed = 0;
+		unclaimedPayout = 0;
 	}
 
 	function applyClaimOptimisticUpdate(claimGroup?: ClaimsHoldingsGroup) {
@@ -108,6 +117,7 @@
 
 	async function loadClaimsData(addressOverride?: string, forceFresh = false) {
 		pageLoading = true;
+		dataLoadError = false;
 		try {
 			const cacheKey = addressOverride ?? $signerAddress ?? '';
 			if (!cacheKey) {
@@ -117,6 +127,12 @@
 			const cached = forceFresh ? null : claimsCache.get(cacheKey);
 			if (cached) {
 				logDev('Using cached data');
+				dataLoadError = !!cached.hasCsvLoadError;
+				if (dataLoadError) {
+					resetClaimsState();
+					pageLoading = false;
+					return;
+				}
 				claimHistory = cached.claimHistory;
 				holdings = cached.holdings;
 				totalEarned = cached.totals.earned;
@@ -130,22 +146,26 @@
 			const result = await claimsService.loadClaimsForWallet(cacheKey);
 			
 			// Store in cache
-			claimsCache.set(cacheKey, result);
+			dataLoadError = !!result.hasCsvLoadError;
+			if (!dataLoadError) {
+				claimsCache.set(cacheKey, result);
+			}
 			
-			claimHistory = result.claimHistory;
-			holdings = result.holdings;
-			totalEarned = result.totals.earned;
-			totalClaimed = result.totals.claimed;
-			unclaimedPayout = result.totals.unclaimed;
-			updateClaimsCacheSnapshot();
+			if (!dataLoadError) {
+				claimHistory = result.claimHistory;
+				holdings = result.holdings;
+				totalEarned = result.totals.earned;
+				totalClaimed = result.totals.claimed;
+				unclaimedPayout = result.totals.unclaimed;
+				updateClaimsCacheSnapshot();
+			} else {
+				resetClaimsState();
+			}
 		} catch (error) {
 			console.error('Error loading claims:', error);
 			// Set defaults on error
-			claimHistory = [];
-			holdings = [];
-			totalEarned = 0;
-			totalClaimed = 0;
-			unclaimedPayout = 0;
+			resetClaimsState();
+			dataLoadError = true;
 		} finally {
 			pageLoading = false;
 		}
@@ -342,6 +362,15 @@
 			<div class="text-center">
 				<div class="w-8 h-8 border-4 border-light-gray border-t-primary animate-spin mx-auto mb-4"></div>
 				<p>Loading your claims data...</p>
+			</div>
+		</ContentSection>
+	{:else if dataLoadError}
+		<ContentSection background="white" padding="standard" centered>
+			<div class="text-center py-16 px-4" role="alert" aria-live="assertive">
+				<p class="text-3xl font-black text-black mb-4">Unable to load data.</p>
+				<p class="text-lg text-black opacity-80 max-w-2xl mx-auto">
+					This might be due to unusually high IPFS traffic. Please try again later.
+				</p>
 			</div>
 		</ContentSection>
 	{:else}

@@ -17,6 +17,15 @@ import { simulateContract, writeContract } from "@wagmi/core";
 import { get } from "svelte/store";
 import orderbookAbi from "$lib/abi/orderbook.json";
 
+export class ClaimsCsvLoadError extends Error {
+  readonly code = "CLAIMS_CSV_LOAD_ERROR";
+
+  constructor(message = "Unable to load claims CSV data") {
+    super(message);
+    this.name = "ClaimsCsvLoadError";
+  }
+}
+
 type SortClaimsBase = Awaited<ReturnType<typeof sortClaimsData>>;
 type SortedClaimsData = SortClaimsBase & {
   holdings: HoldingRow[];
@@ -61,6 +70,7 @@ export interface ClaimsResult {
     claimed: number;
     unclaimed: number;
   };
+  hasCsvLoadError: boolean;
 }
 
 export class ClaimsService {
@@ -100,6 +110,7 @@ export class ClaimsService {
         holdings: [],
         claimHistory: [],
         totals: { earned: 0, claimed: 0, unclaimed: 0 },
+        hasCsvLoadError: false,
       };
     }
 
@@ -108,6 +119,7 @@ export class ClaimsService {
     let totalClaimed = 0;
     let totalEarned = 0;
     let totalUnclaimed = 0;
+    let csvLoadFailed = false;
 
     // Collect all claim processing promises for parallel execution
     const claimPromises: Array<Promise<PendingClaim | null>> = [];
@@ -128,11 +140,21 @@ export class ClaimsService {
     }
 
     // Process all claims in parallel
-    const results = await Promise.all(claimPromises);
+    const results = await Promise.allSettled(claimPromises);
 
-    // Merge results
-    results.forEach((claimData, index) => {
-      if (!claimData) return;
+    for (let index = 0; index < results.length; index += 1) {
+      const result = results[index];
+
+      if (result.status === "rejected") {
+        if (result.reason instanceof ClaimsCsvLoadError) {
+          csvLoadFailed = true;
+          continue;
+        }
+        throw result.reason;
+      }
+
+      const claimData = result.value;
+      if (!claimData) continue;
 
       const { fieldName } = claimMetadata[index];
 
@@ -146,7 +168,7 @@ export class ClaimsService {
       totalClaimed += claimData.totalClaimed;
       totalEarned += claimData.totalEarned;
       totalUnclaimed += claimData.totalUnclaimed;
-    });
+    }
 
     return {
       holdings,
@@ -156,6 +178,7 @@ export class ClaimsService {
         claimed: totalClaimed,
         unclaimed: totalUnclaimed,
       },
+      hasCsvLoadError: csvLoadFailed,
     };
   }
 
@@ -180,7 +203,9 @@ export class ClaimsService {
       this.repository.getOrderByHash(claim.orderHash),
     ]);
 
-    if (!csvData) return null;
+    if (!csvData) {
+      throw new ClaimsCsvLoadError();
+    }
     if (!orderDetails || orderDetails.length === 0) return null;
 
     const orderBookAddress = orderDetails[0].orderbook.id;

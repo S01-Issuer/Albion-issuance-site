@@ -79,6 +79,7 @@ const CLAIMS_RESULT = {
       status: "ready",
     },
   ],
+  hasCsvLoadError: false,
 } as unknown as ClaimsResult;
 
 const SFT_FIXTURE = {

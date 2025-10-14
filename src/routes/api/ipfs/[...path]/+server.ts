@@ -3,7 +3,7 @@ import { error } from '@sveltejs/kit';
 import { pinata } from '$lib/server/pinata';
 
 // Simple in-memory cache to reduce gateway requests
-const cache = new Map<string, { body: ArrayBuffer; contentType: string; timestamp: number }>();
+const cache = new Map<string, { body: Uint8Array; contentType: string; timestamp: number }>();
 const CACHE_TTL = 1000 * 60 * 60; // 1 hour
 
 export const GET: RequestHandler = async ({ params, setHeaders }) => {
@@ -50,16 +50,18 @@ export const GET: RequestHandler = async ({ params, setHeaders }) => {
     }
     
     // Handle the response - convert to ArrayBuffer
-    let body: ArrayBuffer;
-    if (actualData instanceof ArrayBuffer) {
+    let body: Uint8Array;
+    if (actualData instanceof Uint8Array) {
       body = actualData;
+    } else if (actualData instanceof ArrayBuffer) {
+      body = new Uint8Array(actualData);
     } else if (actualData instanceof Blob) {
-      body = await actualData.arrayBuffer();
+      body = new Uint8Array(await actualData.arrayBuffer());
     } else if (typeof actualData === 'string') {
-      body = new TextEncoder().encode(actualData).buffer;
+      body = new TextEncoder().encode(actualData);
     } else {
       // Stringify objects that aren't already strings
-      body = new TextEncoder().encode(JSON.stringify(actualData)).buffer;
+      body = new TextEncoder().encode(JSON.stringify(actualData));
       contentType = 'application/json';
     }
 
@@ -140,4 +142,3 @@ export const OPTIONS: RequestHandler = async () => {
     },
   });
 };
-
