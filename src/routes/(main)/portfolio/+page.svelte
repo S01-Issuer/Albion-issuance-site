@@ -132,6 +132,7 @@ let allDepositsData: EnrichedDeposit[] = [];
 let claimsHoldings: ClaimGroupSummary[] = [];
 let hasPortfolioHistory = false;
 let latestClaimsSnapshot: ClaimsResult | null = null;
+let claimsDataUnavailable = false;
 	
 	// Composables
 	const { show: showTooltipWithDelay, hide: hideTooltip, isVisible: isTooltipVisible } = useTooltip();
@@ -187,16 +188,24 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 		return 0;
 	}
 
-	function normalizeMonth(value: unknown): string {
-		if (typeof value !== 'string') return '';
-		const trimmed = value.trim();
-		if (!trimmed) return '';
-		if (/^\d{4}-\d{2}$/.test(trimmed)) {
-			return trimmed;
-		}
-		const match = trimmed.match(/^(\d{4})-(\d{2})/);
-		return match ? `${match[1]}-${match[2]}` : '';
+function normalizeMonth(value: unknown): string {
+	if (typeof value !== 'string') return '';
+	const trimmed = value.trim();
+	if (!trimmed) return '';
+	if (/^\d{4}-\d{2}$/.test(trimmed)) {
+		return trimmed;
 	}
+	const match = trimmed.match(/^(\d{4})-(\d{2})/);
+	return match ? `${match[1]}-${match[2]}` : '';
+}
+
+function currencyDisplay(value: number, options?: Parameters<typeof formatCurrency>[1]): string {
+	return claimsDataUnavailable ? 'N/A' : formatCurrency(value, options);
+}
+
+function percentageDisplay(value: number): string {
+	return claimsDataUnavailable ? 'N/A' : formatPercentage(value);
+}
 
 	function normalizeDate(value: unknown): string {
 		if (value instanceof Date && !Number.isNaN(value.getTime())) {
@@ -357,22 +366,45 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 	}
 
 	async function loadAllClaimsData(): Promise<ClaimsResult | null> {
-		// Use ClaimsService for efficient parallel loading with caching
 		const claims = useClaimsService();
-		
-		// Check cache first
-	let claimsResult: ClaimsResult | null = claimsCache.get($signerAddress || '');
-	if (claimsResult) {
-		logDev('Using cached claims data');
-	} else {
+		const address = $signerAddress || '';
+		claimsDataUnavailable = false;
+
+		if (!address) {
+			latestClaimsSnapshot = null;
+			return null;
+		}
+
+		const cached = claimsCache.get(address);
+		if (cached) {
+			logDev('Using cached claims data');
+			claimsDataUnavailable = !!cached.hasCsvLoadError;
+			if (claimsDataUnavailable) {
+				latestClaimsSnapshot = null;
+				return null;
+			}
+			latestClaimsSnapshot = cached;
+			return cached;
+		}
+
 		logDev('Loading fresh claims data');
-		claimsResult = await claims.loadClaimsForWallet($signerAddress || '');
-		claimsCache.set($signerAddress || '', claimsResult);
+		try {
+			const result = await claims.loadClaimsForWallet(address);
+			claimsDataUnavailable = !!result.hasCsvLoadError;
+			if (!claimsDataUnavailable) {
+				claimsCache.set(address, result);
+				latestClaimsSnapshot = result;
+				return result;
+			}
+			latestClaimsSnapshot = null;
+			return null;
+		} catch (error) {
+			console.error('[Portfolio] Failed to load claims data:', error);
+			claimsDataUnavailable = true;
+			latestClaimsSnapshot = null;
+			return null;
+		}
 	}
-		
-	latestClaimsSnapshot = claimsResult;
-	return claimsResult;
-}
 
 	async function loadSftData() {
 		if (isLoadingData || !$signerAddress) return;
@@ -820,10 +852,16 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 			{:else}
 				<div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 lg:gap-8 text-center max-w-6xl mx-auto mt-6">
 					<StatsCard title="Total Invested" value={formatCurrency(totalInvested, { compact: true })} subtitle="Capital Deployed" size="small" />
-					<StatsCard title="Total Earned" value={formatCurrency(totalPayoutsEarned, { compact: true })} subtitle="All Payouts" size="small" />
-					<StatsCard title="Unclaimed" value={formatCurrency(unclaimedPayout, { compact: true })} subtitle="Ready to Claim" size="small" />
+					<StatsCard title="Total Earned" value={claimsDataUnavailable ? 'N/A' : formatCurrency(totalPayoutsEarned, { compact: true })} subtitle="All Payouts" size="small" />
+					<StatsCard title="Unclaimed" value={claimsDataUnavailable ? 'N/A' : formatCurrency(unclaimedPayout, { compact: true })} subtitle="Ready to Claim" size="small" />
 					<StatsCard title="Active Assets" value={activeAssetsCount.toString()} subtitle="Assets Held" size="small" />
 				</div>
+
+				{#if claimsDataUnavailable}
+					<div class="mt-6 max-w-3xl mx-auto px-4 py-3 border border-yellow-400 bg-yellow-50 text-yellow-900 text-sm font-medium rounded-lg" role="alert" aria-live="polite">
+						Some data could not be loaded. Please try again later.
+					</div>
+				{/if}
 			{/if}
 		</HeroSection>
 
@@ -931,7 +969,7 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 															Payouts to Date
 														</div>
 														<div class="text-lg lg:text-xl font-extrabold text-primary">
-															{formatCurrency(holding.totalPayoutsEarned)}
+															{currencyDisplay(holding.totalPayoutsEarned)}
 														</div>
 														<div class="text-xs lg:text-sm text-black opacity-70">Cumulative</div>
 													</div>
@@ -947,7 +985,7 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 																tabindex="0">ⓘ</span>
 														</div>
 														<div class="text-lg lg:text-xl font-extrabold text-black">
-															{formatPercentage(holding.capitalReturned / 100)}
+															{percentageDisplay(holding.capitalReturned / 100)}
 														</div>
 														<div class="text-xs lg:text-sm text-black opacity-70">To Date</div>
 														{#if isTooltipVisible('capital-' + holding.id)}
@@ -984,7 +1022,7 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 															{holding.unrecoveredCapital > 0 ? 'Capital To be Recovered' : 'Lifetime Profit'}
 														</div>
 														<div class="text-lg lg:text-xl font-extrabold {holding.unrecoveredCapital > 0 ? 'text-black' : 'text-primary'}">
-															{formatCurrency(holding.unrecoveredCapital > 0 ? holding.unrecoveredCapital : holding.totalPayoutsEarned - holding.totalInvested)}
+															{currencyDisplay(holding.unrecoveredCapital > 0 ? holding.unrecoveredCapital : holding.totalPayoutsEarned - holding.totalInvested)}
 														</div>
 														<div class="text-xs lg:text-sm text-black opacity-70">
 															{holding.unrecoveredCapital > 0 ? 'Remaining' : 'To Date'}
@@ -1244,7 +1282,7 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 					<div class="space-y-4">
 						<div class="bg-white border border-light-gray rounded-lg p-4 relative overflow-hidden">
 							<div class="text-sm font-bold text-black opacity-70 uppercase tracking-wider mb-2">Total External Capital</div>
-							<div class="text-xl font-extrabold text-black mb-1 break-all">{formatCurrency(capitalWalkData.totalExternalCapital)}</div>
+							<div class="text-xl font-extrabold text-black mb-1 break-all">{currencyDisplay(capitalWalkData.totalExternalCapital)}</div>
 							<div class="text-xs text-black opacity-70">Peak cash required</div>
 							<div 
 								class="absolute top-4 right-4 w-4 h-4 rounded-full bg-light-gray text-black text-xs flex items-center justify-center cursor-help"
@@ -1284,7 +1322,7 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 						
 						<div class="bg-white border border-light-gray rounded-lg p-4 relative overflow-hidden">
 							<div class="text-sm font-bold text-black opacity-70 uppercase tracking-wider mb-2">Gross Payout</div>
-							<div class="text-xl font-extrabold text-primary mb-1 break-all">{formatCurrency(capitalWalkData.grossPayout)}</div>
+							<div class="text-xl font-extrabold text-primary mb-1 break-all">{currencyDisplay(capitalWalkData.grossPayout)}</div>
 							<div class="text-xs text-black opacity-70">Total distributions</div>
 							<div 
 								class="absolute top-4 right-4 w-4 h-4 rounded-full bg-light-gray text-black text-xs flex items-center justify-center cursor-help"
@@ -1305,7 +1343,7 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 						<div class="bg-white border border-light-gray rounded-lg p-4 relative overflow-hidden">
 							<div class="text-sm font-bold text-black opacity-70 uppercase tracking-wider mb-2">Current Net Position</div>
 							<div class="text-xl font-extrabold {capitalWalkData.currentNetPosition >= 0 ? 'text-green-600' : 'text-red-600'} mb-1 break-all">
-								{formatCurrency(capitalWalkData.currentNetPosition)}
+								{currencyDisplay(capitalWalkData.currentNetPosition)}
 							</div>
 							<div class="text-xs text-black opacity-70">Total Payouts - Total Invested</div>
 							<div 
@@ -1413,7 +1451,7 @@ $: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.leng
 
 					<ActionCard
 						title="Claim Payouts"
-						description={`${formatCurrency(unclaimedPayout)} available`}
+						description={claimsDataUnavailable ? 'Some data could not be loaded' : `${formatCurrency(unclaimedPayout)} available`}
 						icon="💰"
 						actionText="Claim Now"
 						actionVariant="claim"
