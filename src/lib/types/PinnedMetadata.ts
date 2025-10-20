@@ -50,6 +50,8 @@ export interface PinnedMetadataGalleryImage {
 export interface PinnedMetadataAsset {
   assetName?: string;
   description?: string;
+  cashflowProvider?: string;
+  cashflowStartDate?: string;
   coverImage?: string;
   galleryImages?: PinnedMetadataGalleryImage[];
   location?: {
