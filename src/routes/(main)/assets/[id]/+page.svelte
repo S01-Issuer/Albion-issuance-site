@@ -227,6 +227,13 @@ let loadedAssetId: string | null = null;
 	// Reactive data from composable
 	$: ({ asset: assetData, tokens: assetTokens, loading, error } = $assetDetailState);
 	$: primaryToken = assetTokens && assetTokens.length > 0 ? assetTokens[0] : null;
+
+	// Sort tokens by firstPaymentDate in ascending order
+	$: sortedTokens = assetTokens ? [...assetTokens].sort((a, b) => {
+		const dateA = a.firstPaymentDate || '';
+		const dateB = b.firstPaymentDate || '';
+		return dateA.localeCompare(dateB);
+	}) : [];
 	$: receiptsData = primaryToken?.asset?.receiptsData ?? [];
 $: revenueReports = buildRevenueReports(receiptsData, assetData?.monthlyReports ?? []);
 $: revenueReportsWithIncome = revenueReports.filter((report) => report.revenue > 0);
@@ -1095,8 +1102,8 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 				<div class="py-6">
 					<h3 class="text-3xl md:text-2xl font-extrabold text-black uppercase tracking-wider mb-8">Token Information</h3>
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-	
-				{#each assetTokens as token (token.contractAddress)}
+
+				{#each sortedTokens as token (token.contractAddress)}
 				{@const sft = $sfts?.find((s) => s.id.toLowerCase() === token.contractAddress.toLowerCase())}
 				{@const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress) ?? undefined}
 				{@const supply = getTokenSupply(token, sft, maxSupply)}

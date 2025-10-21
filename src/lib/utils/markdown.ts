@@ -109,6 +109,8 @@ export function renderMarkdown(markdown: string): string {
   let listStack: Array<{ type: "ul" | "ol"; indent: number }> = [];
   let inBlockquote = false;
   let tableBuffer: string[] = [];
+  let htmlTableBuffer: string[] = [];
+  let inHtmlTable = false;
 
   const closeParagraph = () => {
     if (paragraphBuffer.length) {
@@ -138,9 +140,37 @@ export function renderMarkdown(markdown: string): string {
     }
   };
 
+  const closeHtmlTable = () => {
+    if (htmlTableBuffer.length) {
+      html += htmlTableBuffer.join("\n");
+      htmlTableBuffer = [];
+      inHtmlTable = false;
+    }
+  };
+
   for (const rawLine of lines) {
     const line = rawLine.trimEnd();
     const trimmedLine = line.trimStart();
+
+    // Check if we're entering or inside an HTML table
+    if (trimmedLine.match(/^<table/i)) {
+      closeParagraph();
+      closeLists();
+      closeBlockquote();
+      closeTable();
+      inHtmlTable = true;
+      htmlTableBuffer.push(line);
+      continue;
+    }
+
+    if (inHtmlTable) {
+      htmlTableBuffer.push(line);
+      if (trimmedLine.match(/<\/table>/i)) {
+        closeHtmlTable();
+      }
+      continue;
+    }
+
     if (!trimmedLine) {
       closeParagraph();
       closeBlockquote();
@@ -249,6 +279,7 @@ export function renderMarkdown(markdown: string): string {
   closeLists();
   closeBlockquote();
   closeTable();
+  closeHtmlTable();
 
   return html;
 }
