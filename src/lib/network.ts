@@ -158,6 +158,12 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
           },
         ],
       },
+      {
+        address: "0x1d57246fd0ba134d7cc78ddf3ed829379d95f4b7",
+        claims: [
+          // Future claims
+        ],
+      }
     ],
   },
 ];

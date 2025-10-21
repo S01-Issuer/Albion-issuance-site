@@ -28,7 +28,8 @@ function formatInline(text: string, skipLinks = false): string {
   // Strong emphasis **text**
   escaped = escaped.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 
-  // Emphasis *text*
+  // Emphasis _text_ or *text*
+  escaped = escaped.replace(/(?<![_*])_([^_]+)_(?![_*])/g, "<em>$1</em>");
   escaped = escaped.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
 
   // Inline code `code`
@@ -105,10 +106,11 @@ export function renderMarkdown(markdown: string): string {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   let html = "";
   let paragraphBuffer: string[] = [];
-  let inUnorderedList = false;
-  let inOrderedList = false;
+  let listStack: Array<{ type: "ul" | "ol"; indent: number }> = [];
   let inBlockquote = false;
   let tableBuffer: string[] = [];
+  let htmlTableBuffer: string[] = [];
+  let inHtmlTable = false;
 
   const closeParagraph = () => {
     if (paragraphBuffer.length) {
@@ -118,13 +120,9 @@ export function renderMarkdown(markdown: string): string {
   };
 
   const closeLists = () => {
-    if (inUnorderedList) {
-      html += "</ul>";
-      inUnorderedList = false;
-    }
-    if (inOrderedList) {
-      html += "</ol>";
-      inOrderedList = false;
+    while (listStack.length > 0) {
+      const list = listStack.pop();
+      html += list?.type === "ul" ? "</ul>" : "</ol>";
     }
   };
 
@@ -142,9 +140,37 @@ export function renderMarkdown(markdown: string): string {
     }
   };
 
+  const closeHtmlTable = () => {
+    if (htmlTableBuffer.length) {
+      html += htmlTableBuffer.join("\n");
+      htmlTableBuffer = [];
+      inHtmlTable = false;
+    }
+  };
+
   for (const rawLine of lines) {
     const line = rawLine.trimEnd();
     const trimmedLine = line.trimStart();
+
+    // Check if we're entering or inside an HTML table
+    if (trimmedLine.match(/^<table/i)) {
+      closeParagraph();
+      closeLists();
+      closeBlockquote();
+      closeTable();
+      inHtmlTable = true;
+      htmlTableBuffer.push(line);
+      continue;
+    }
+
+    if (inHtmlTable) {
+      htmlTableBuffer.push(line);
+      if (trimmedLine.match(/<\/table>/i)) {
+        closeHtmlTable();
+      }
+      continue;
+    }
+
     if (!trimmedLine) {
       closeParagraph();
       closeBlockquote();
@@ -177,16 +203,33 @@ export function renderMarkdown(markdown: string): string {
       continue;
     }
 
+    // Calculate indentation level (count leading spaces/tabs)
+    const indent = line.length - line.trimStart().length;
+
     const unorderedMatch = trimmedLine.match(/^[-*]\s+(.*)$/);
     if (unorderedMatch) {
       closeParagraph();
       closeBlockquote();
       closeTable();
-      if (!inUnorderedList) {
-        closeLists();
-        html += "<ul>";
-        inUnorderedList = true;
+
+      // Close lists that are at a deeper indent level
+      while (
+        listStack.length > 0 &&
+        listStack[listStack.length - 1].indent >= indent
+      ) {
+        const list = listStack.pop();
+        html += list?.type === "ul" ? "</ul>" : "</ol>";
       }
+
+      // Open new list if needed
+      if (
+        listStack.length === 0 ||
+        listStack[listStack.length - 1].indent < indent
+      ) {
+        html += "<ul>";
+        listStack.push({ type: "ul", indent });
+      }
+
       html += `<li>${formatInline(unorderedMatch[1])}</li>`;
       continue;
     }
@@ -196,16 +239,26 @@ export function renderMarkdown(markdown: string): string {
       closeParagraph();
       closeBlockquote();
       closeTable();
-      if (!inOrderedList) {
-        closeLists();
+
+      // Close lists that are at a deeper indent level
+      while (
+        listStack.length > 0 &&
+        listStack[listStack.length - 1].indent >= indent
+      ) {
+        const list = listStack.pop();
+        html += list?.type === "ul" ? "</ul>" : "</ol>";
+      }
+
+      // Open new list if needed
+      const lastList = listStack[listStack.length - 1];
+      if (!lastList || lastList.indent < indent || lastList.type !== "ol") {
         const startNum = Number(orderedMatch[1]);
         const startAttr = startNum !== 1 ? ` start="${startNum}"` : "";
         html += `<ol${startAttr}>`;
-        inOrderedList = true;
+        listStack.push({ type: "ol", indent });
       }
-      html += `<li value="${orderedMatch[1]}">${formatInline(
-        orderedMatch[2],
-      )}</li>`;
+
+      html += `<li>${formatInline(orderedMatch[2])}</li>`;
       continue;
     }
 
@@ -226,6 +279,7 @@ export function renderMarkdown(markdown: string): string {
   closeLists();
   closeBlockquote();
   closeTable();
+  closeHtmlTable();
 
   return html;
 }

@@ -1,11 +1,13 @@
 <script lang="ts">
 	import type { Asset } from '$lib/types/uiTypes';
+	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import SectionTitle from '$lib/components/components/SectionTitle.svelte';
 	import { formatEndDate } from '$lib/utils/formatters';
 	import { useTooltip } from '$lib/composables';
 
 export let asset: Asset;
 export let onLocationClick: (() => void) | undefined = undefined;
+export let primaryToken: TokenMetadata | null = undefined;
 
 	const { showTooltipWithDelay, hideTooltip, showTooltip } = useTooltip();
 
@@ -117,6 +119,23 @@ export let onLocationClick: (() => void) | undefined = undefined;
 				<div class="flex justify-between pb-3 border-b border-light-gray text-base last:border-b-0 last:pb-0">
 					<span class="font-semibold text-black">Payment Frequency</span>
 					<span class="text-black">Monthly</span>
+				</div>
+				<div class="flex justify-between pb-3 border-b border-light-gray text-base last:border-b-0 last:pb-0">
+					<span class="font-semibold text-black relative">
+						Cash flow Start
+						<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100"
+							on:mouseenter={() => showTooltipWithDelay('cashflowStart')}
+							on:mouseleave={hideTooltip}
+							role="button"
+							tabindex="0">ⓘ</span>
+						{#if $showTooltip === 'cashflowStart'}
+							<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">
+								Tokens have a claim on cash flows from this month. Cash flows received before the token first payment date will be accrued and distributed after first payment date
+								<div class="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-[5px] border-r-[5px] border-t-[5px] border-l-transparent border-r-transparent border-t-black"></div>
+							</div>
+						{/if}
+					</span>
+					<span class="text-black">{formatEndDate(primaryToken?.asset?.cashflowStartDate || primaryToken?.firstPaymentDate || '')}</span>
 				</div>
 				<div class="flex justify-between pb-3 border-b border-light-gray text-base last:border-b-0 last:pb-0">
 					<span class="font-semibold text-black">Water Depth</span>

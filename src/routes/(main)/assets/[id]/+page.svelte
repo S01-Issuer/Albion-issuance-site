@@ -11,7 +11,7 @@
 	import TabButton from '$lib/components/components/TabButton.svelte';
 	import { PageLayout, ContentSection } from '$lib/components/layout';
 	import { getImageUrl } from '$lib/utils/imagePath';
-	import { formatCurrency, formatSmartReturn, formatHash } from '$lib/utils/formatters';
+	import { formatCurrency, formatSmartReturn, formatHash, formatEndDate } from '$lib/utils/formatters';
 	import { hasIncompleteReleases } from '$lib/utils/futureReleases';
 	import { useAssetDetailData, useDataExport } from '$lib/composables';
 	import AssetDetailHeader from '$lib/components/patterns/assets/AssetDetailHeader.svelte';
@@ -227,6 +227,13 @@ let loadedAssetId: string | null = null;
 	// Reactive data from composable
 	$: ({ asset: assetData, tokens: assetTokens, loading, error } = $assetDetailState);
 	$: primaryToken = assetTokens && assetTokens.length > 0 ? assetTokens[0] : null;
+
+	// Sort tokens by firstPaymentDate in ascending order
+	$: sortedTokens = assetTokens ? [...assetTokens].sort((a, b) => {
+		const dateA = a.firstPaymentDate || '';
+		const dateB = b.firstPaymentDate || '';
+		return dateA.localeCompare(dateB);
+	}) : [];
 	$: receiptsData = primaryToken?.asset?.receiptsData ?? [];
 $: revenueReports = buildRevenueReports(receiptsData, assetData?.monthlyReports ?? []);
 $: revenueReportsWithIncome = revenueReports.filter((report) => report.revenue > 0);
@@ -257,8 +264,10 @@ $: nextReportDueLabel = (() => {
 		if (label) return label;
 	}
 
-	if (primaryToken?.firstPaymentDate) {
-		const label = labelFromMonth(primaryToken.firstPaymentDate, 1);
+	// Fall back to cashflowStartDate if available, otherwise firstPaymentDate
+	const fallbackDate = primaryToken?.asset?.cashflowStartDate || primaryToken?.firstPaymentDate;
+	if (fallbackDate) {
+		const label = labelFromMonth(fallbackDate, 1);
 		if (label) return label;
 	}
 
@@ -643,7 +652,7 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
         		<!-- Overview in collapsible section -->
         		<CollapsibleSection title="Overview" isOpenByDefault={false} alwaysOpenOnDesktop={false}>
 	        			{#if assetData}
-	        				<AssetOverviewTab asset={assetData} onLocationClick={handleLocationClick} />
+	        				<AssetOverviewTab asset={assetData} onLocationClick={handleLocationClick} primaryToken={primaryToken} />
 	        			{/if}
         		</CollapsibleSection>
         		
@@ -868,7 +877,7 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 			<div class="p-8 min-h-[500px] flex flex-col">
 				{#if activeTab === 'overview'}
 				{#if assetData}
-					<AssetOverviewTab asset={assetData} onLocationClick={handleLocationClick} />
+					<AssetOverviewTab asset={assetData} onLocationClick={handleLocationClick} primaryToken={primaryToken} />
 				{/if}
 				{:else if activeTab === 'production'}
 					<div class="flex-1 flex flex-col">
@@ -1093,8 +1102,8 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 				<div class="py-6">
 					<h3 class="text-3xl md:text-2xl font-extrabold text-black uppercase tracking-wider mb-8">Token Information</h3>
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-	
-				{#each assetTokens as token (token.contractAddress)}
+
+				{#each sortedTokens as token (token.contractAddress)}
 				{@const sft = $sfts?.find((s) => s.id.toLowerCase() === token.contractAddress.toLowerCase())}
 				{@const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress) ?? undefined}
 				{@const supply = getTokenSupply(token, sft, maxSupply)}
@@ -1158,12 +1167,16 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 										</span>
 										<span class="text-base font-extrabold text-black text-right">{
 											calculatedReturns?.breakEvenOilPrice !== undefined
-												? `US$${calculatedReturns.breakEvenOilPrice.toFixed(2)}`
+												? `US$${calculatedReturns?.breakEvenOilPrice.toFixed(2)}`
 												: 'US$0.00'
 										}</span>
 										{#if showTooltip === 'breakeven'}
 											<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">Oil price required to cover operational costs and maintain profitability</div>
 										{/if}
+									</div>
+									<div class="flex justify-between items-start">
+										<span class="text-base font-medium text-black opacity-70 relative font-figtree">First Payment Date</span>
+										<span class="text-base font-extrabold text-black text-right">{formatEndDate(token.firstPaymentDate || '')}</span>
 									</div>
 								</div>
 

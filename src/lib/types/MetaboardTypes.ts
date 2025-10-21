@@ -60,6 +60,8 @@ export interface Document {
 export interface AssetData {
   assetName: string;
   description: string;
+  cashflowProvider?: string;
+  cashflowStartDate?: ISOYearMonthString;
   location: Location;
   operator: Operator;
   technical: TechnicalDetails;
