@@ -19,6 +19,15 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 	const dispatch = createEventDispatcher();
 	const catalogService = useCatalogService();
 
+	// Tooltip state management
+	let tooltipId = '';
+	function showTooltip(id: string) {
+		tooltipId = id;
+	}
+	function hideTooltip() {
+		tooltipId = '';
+	}
+
 	// Generate consistent asset URL from token contract address
 	$: consistentAssetId = token.length > 0 ? getEnergyFieldId(token[0].contractAddress) : (energyFieldId || asset.id);
 	
@@ -211,14 +220,50 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 							<div class={tokenButtonRightClasses}>
 								<div class={returnsDisplayClasses}>
 									<div class={returnItemClasses}>
-										<span class={returnLabelClasses}>Base IRR</span>
+										<div class="relative flex items-center gap-1">
+											<span class={returnLabelClasses}>Base IRR</span>
+											<span
+												class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100"
+												on:mouseenter={() => showTooltip('base-irr')}
+												on:mouseleave={hideTooltip}
+												on:focus={() => showTooltip('base-irr')}
+												on:blur={hideTooltip}
+												tabindex="0"
+												role="button"
+											>
+												ⓘ
+											</span>
+											{#if tooltipId === 'base-irr'}
+												<div class="absolute top-full left-0 mt-1 bg-black text-white p-2 rounded text-xs max-w-xs z-[1000] whitespace-normal">
+													The estimated IRR @ $65 Brent oil price and that supply = max supply
+												</div>
+											{/if}
+										</div>
 										<span class={returnValueClasses}>
 											<FormattedReturn value={baseReturn} />
 										</span>
 									</div>
 									<div class={returnDividerClasses}>+</div>
 									<div class={returnItemClasses}>
-										<span class={returnLabelClasses}>Bonus IRR</span>
+										<div class="relative flex items-center gap-1">
+											<span class={returnLabelClasses}>Bonus IRR</span>
+											<span
+												class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100"
+												on:mouseenter={() => showTooltip('bonus-irr')}
+												on:mouseleave={hideTooltip}
+												on:focus={() => showTooltip('bonus-irr')}
+												on:blur={hideTooltip}
+												tabindex="0"
+												role="button"
+											>
+												ⓘ
+											</span>
+											{#if tooltipId === 'bonus-irr'}
+												<div class="absolute top-full left-0 mt-1 bg-black text-white p-2 rounded text-xs max-w-xs z-[1000] whitespace-normal">
+													The incremental IRR @ $65 Brent oil price assuming no further tokens minted
+												</div>
+											{/if}
+										</div>
 										<span class={returnValueClasses}>
 											<FormattedReturn value={bonusReturn} />
 										</span>
