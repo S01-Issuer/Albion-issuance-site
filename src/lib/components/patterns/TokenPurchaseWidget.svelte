@@ -177,7 +177,7 @@
 				abi: erc20Abi,
 				address: paymentToken as Hex,
 				functionName: 'allowance',
-				args: [$signerAddress as Hex, authorizerAddress as Hex]
+				args: [$signerAddress as Hex, tokenAddress as Hex]
 			});
 
 			const requiredAmount = BigInt(parseUnits(normalizedInvestmentAmount.toString(), paymentTokenDecimals));
@@ -188,15 +188,19 @@
 					abi: erc20Abi,
 					address: paymentToken as Hex,
 					functionName: 'approve',
-					args: [authorizerAddress as Hex, requiredAmount]
+					args: [tokenAddress as Hex, requiredAmount]
 				});
 
 				const approvalHash = await writeContract($wagmiConfig, approvalRequest);
-				
-				// Wait for approval transaction to be confirmed
+
+				// Wait for approval transaction to be confirmed with 2 block confirmations
 				await waitForTransactionReceipt($wagmiConfig, {
-					hash: approvalHash
+					hash: approvalHash,
+					confirmations: 2
 				});
+
+				// Small delay to ensure RPC nodes have synced the state
+				await new Promise(resolve => setTimeout(resolve, 1000));
 			}
 
 			// Simulate deposit transaction
