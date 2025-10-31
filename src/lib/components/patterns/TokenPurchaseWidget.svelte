@@ -37,6 +37,7 @@
 	let purchaseSuccess = false;
 	let purchaseError: string | null = null;
 	let canProceed = false;
+	let transactionHash: string | null = null;
 
 	// Data
 	let assetData: Asset | null = null;
@@ -177,7 +178,7 @@
 				abi: erc20Abi,
 				address: paymentToken as Hex,
 				functionName: 'allowance',
-				args: [$signerAddress as Hex, tokenAddress as Hex]
+				args: [$signerAddress as Hex, authorizerAddress as Hex]
 			});
 
 			const requiredAmount = BigInt(parseUnits(normalizedInvestmentAmount.toString(), paymentTokenDecimals));
@@ -188,7 +189,7 @@
 					abi: erc20Abi,
 					address: paymentToken as Hex,
 					functionName: 'approve',
-					args: [tokenAddress as Hex, requiredAmount]
+					args: [authorizerAddress as Hex, requiredAmount]
 				});
 
 				const approvalHash = await writeContract($wagmiConfig, approvalRequest);
@@ -212,7 +213,8 @@
 			});
 
 			// Execute deposit transaction
-			await writeContract($wagmiConfig, depositRequest);
+			const depositHash = await writeContract($wagmiConfig, depositRequest);
+			transactionHash = depositHash;
 
 			purchaseSuccess = true;
 			dispatch('purchaseSuccess', {
@@ -241,6 +243,7 @@
 		purchasing = false;
 		purchaseSuccess = false;
 		purchaseError = null;
+		transactionHash = null;
 		assetData = null;
 		tokenData = null;
 		supply = null;
@@ -339,6 +342,20 @@
 						<div class={successIconClasses}>✓</div>
 						<h3 class={successTitleClasses}>Purchase Successful!</h3>
 						<p class={successTextClasses}>You have successfully purchased <FormattedNumber value={order.tokens} type="token" /> tokens.</p>
+						{#if transactionHash}
+							<div class="mt-6 p-4 bg-light-gray rounded">
+								<p class="text-sm text-gray-600 mb-2">Transaction Hash:</p>
+								<p class="text-xs font-mono text-black break-all mb-3">{transactionHash}</p>
+								<a
+									href="https://basescan.org/tx/{transactionHash}"
+									target="_blank"
+									rel="noopener noreferrer"
+									class="text-primary hover:text-secondary font-medium text-sm"
+								>
+									View on Basescan →
+								</a>
+							</div>
+						{/if}
 					</div>
 				{:else if purchaseError}
 					<!-- Error State -->
