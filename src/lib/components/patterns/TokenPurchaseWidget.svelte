@@ -347,7 +347,7 @@
 								<p class="text-sm text-gray-600 mb-2">Transaction Hash:</p>
 								<p class="text-xs font-mono text-black break-all mb-3">{transactionHash}</p>
 								<a
-									href="https://basescan.org/tx/{transactionHash}"
+									href={`https://basescan.org/tx/${transactionHash}`}
 									target="_blank"
 									rel="noopener noreferrer"
 									class="text-primary hover:text-secondary font-medium text-sm"

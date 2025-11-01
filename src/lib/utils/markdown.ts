@@ -106,7 +106,7 @@ export function renderMarkdown(markdown: string): string {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   let html = "";
   let paragraphBuffer: string[] = [];
-  let listStack: Array<{ type: "ul" | "ol"; indent: number }> = [];
+  const listStack: Array<{ type: "ul" | "ol"; indent: number }> = [];
   let inBlockquote = false;
   let tableBuffer: string[] = [];
   let htmlTableBuffer: string[] = [];

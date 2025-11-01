@@ -7,7 +7,7 @@
 
 export let asset: Asset;
 export let onLocationClick: (() => void) | undefined = undefined;
-export let primaryToken: TokenMetadata | null = undefined;
+export let primaryToken: TokenMetadata | null | undefined = undefined;
 
 	const { showTooltipWithDelay, hideTooltip, showTooltip } = useTooltip();
 
