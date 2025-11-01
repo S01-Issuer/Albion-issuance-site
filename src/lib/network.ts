@@ -163,7 +163,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
         claims: [
           // Future claims
         ],
-      }
+      },
     ],
   },
 ];

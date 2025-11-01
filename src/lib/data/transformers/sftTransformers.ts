@@ -268,8 +268,12 @@ function buildTokenAssetData(asset: PinnedMetadataAsset): AssetData {
   return {
     assetName: toString(asset.assetName),
     description: toString(asset.description),
-    cashflowProvider: asset.cashflowProvider ? toString(asset.cashflowProvider) : undefined,
-    cashflowStartDate: asset.cashflowStartDate ? ensureYearMonth(asset.cashflowStartDate) : undefined,
+    cashflowProvider: asset.cashflowProvider
+      ? toString(asset.cashflowProvider)
+      : undefined,
+    cashflowStartDate: asset.cashflowStartDate
+      ? ensureYearMonth(asset.cashflowStartDate)
+      : undefined,
     location: {
       state: toString(asset.location?.state),
       county: toString(asset.location?.county),
