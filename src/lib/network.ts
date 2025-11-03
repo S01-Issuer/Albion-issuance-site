@@ -156,6 +156,15 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
             expectedContentHash:
               "bafkreibm6mrdbmbowc2qyw3gn3xygzmr3cj75gmmyc7apyxe34wfqzqjru",
           },
+          {
+            orderHash:
+              "0x3b9902f8f9424e88c3c847ffb7337dc8b9a88fb4a2672d6bbfc8b12372eaebd2",
+            csvLink: `${PINATA_GATEWAY}/bafkreidr2twhqtwwjkrcota6jvc2xij3povpz7wc4i5dnel3hl6gga5ohu`,
+            expectedMerkleRoot:
+              "0x0e7e29b1582fe6724b60f59d35066cf35318516aeb0b27b1f2c8b6d5fac6f40b",
+            expectedContentHash:
+              "bafkreidr2twhqtwwjkrcota6jvc2xij3povpz7wc4i5dnel3hl6gga5ohu",
+          },
         ],
       },
       {
