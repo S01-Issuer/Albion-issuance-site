@@ -8,9 +8,10 @@
 		waitForTransactionReceipt,
 		simulateContract,
 	} from '@wagmi/core';
-	import { signerAddress, wagmiConfig } from 'svelte-wagmi';
-	import { formatEther, parseUnits, type Hex } from 'viem';
+	import { signerAddress, wagmiConfig, chainId } from 'svelte-wagmi';
+	import { formatEther, formatUnits, parseUnits, type Hex } from 'viem';
 	import { erc20Abi } from 'viem';
+	import { onMount } from 'svelte';
 	import { PrimaryButton, SecondaryButton, FormattedNumber } from '$lib/components/components';
 	import { sftMetadata, sfts } from '$lib/stores';
 	import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
@@ -23,6 +24,7 @@
 	import OffchainAssetReceiptVaultAbi from '$lib/abi/OffchainAssetReceiptVault.json';
 	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 	import { getTokenTermsPath } from '$lib/utils/tokenTerms';
+	import { getTxUrl } from '$lib/utils/explorer';
 
 	export let isOpen = false;
 	export let tokenAddress: string | null = null;
@@ -39,6 +41,10 @@
 	let canProceed = false;
 	let transactionHash: string | null = null;
 
+	// USDC balance state
+	let usdcBalance = 0;
+	let loadingBalance = false;
+
 	// Data
 	let assetData: Asset | null = null;
 	let tokenData: Token | null = null;
@@ -49,6 +55,8 @@
 	} | null = null;
 	let currentSft: OffchainAssetReceiptVault | null = null;
 	let tokenTermsUrl: string | null = null;
+	let paymentToken: Hex | null = null;
+	let paymentTokenDecimals = 18;
 
 	// Reactive calculations
 	$: if (isOpen && (tokenAddress || assetId)) {
@@ -128,6 +136,27 @@
 					availableSupply:
 						sftMaxSharesSupply - BigInt(sft.totalShares ?? '0'),
 				};
+
+				// Get payment token and decimals
+				const paymentTokenAddress = (await readContract($wagmiConfig, {
+					abi: authorizerAbi,
+					address: sft.activeAuthorizer?.address as Hex,
+					functionName: 'paymentToken',
+					args: []
+				})) as Hex;
+
+				const paymentTokenDecimalsValue = (await readContract($wagmiConfig, {
+					abi: authorizerAbi,
+					address: sft.activeAuthorizer?.address as Hex,
+					functionName: 'paymentTokenDecimals',
+					args: []
+				})) as number;
+
+				paymentToken = paymentTokenAddress;
+				paymentTokenDecimals = paymentTokenDecimalsValue;
+
+				// Load USDC balance after getting payment token info
+				await loadUsdcBalance();
 			}
 		} catch (error) {
 			console.error('Error loading token data:', error);
@@ -137,6 +166,40 @@
 
 	function isSoldOut(): boolean {
 		return supply ? supply.availableSupply <= 0n : false;
+	}
+
+	async function loadUsdcBalance() {
+		try {
+			if (!$signerAddress || !paymentToken || !currentSft) {
+				usdcBalance = 0;
+				return;
+			}
+
+			loadingBalance = true;
+
+			const balance = (await readContract($wagmiConfig, {
+				abi: erc20Abi,
+				address: paymentToken,
+				functionName: 'balanceOf',
+				args: [$signerAddress as Hex]
+			})) as bigint;
+
+			// Use the actual token decimals (USDC is 6, not 18)
+			usdcBalance = parseFloat(formatUnits(balance, paymentTokenDecimals));
+		} catch (error) {
+			console.error('Error loading USDC balance:', error);
+			usdcBalance = 0;
+		} finally {
+			loadingBalance = false;
+		}
+	}
+
+	function setQuickInvestAmount(percentage: number) {
+		// Calculate percentage of balance, but cap by available supply
+		const percentageOfBalance = (usdcBalance * percentage) / 100;
+		const maxAvailable = Number.isFinite(maxInvestmentAmount) ? maxInvestmentAmount : 0;
+
+		investmentAmount = Math.min(percentageOfBalance, maxAvailable);
 	}
 
 
@@ -347,12 +410,12 @@
 								<p class="text-sm text-gray-600 mb-2">Transaction Hash:</p>
 								<p class="text-xs font-mono text-black break-all mb-3">{transactionHash}</p>
 								<a
-									href={`https://basescan.org/tx/${transactionHash}`}
+									href={getTxUrl(transactionHash, $chainId)}
 									target="_blank"
 									rel="noopener noreferrer"
 									class="text-primary hover:text-secondary font-medium text-sm"
 								>
-									View on Basescan →
+									View Transaction →
 								</a>
 							</div>
 						{/if}
@@ -390,13 +453,26 @@
 									<div class={detailItemClasses}>
 										<span class={detailLabelClasses}>Current Supply</span>
 										<span class={detailValueClasses}>
-											<FormattedNumber 
-												value={formatEther(supply?.mintedSupply ?? 0n)} 
+											<FormattedNumber
+												value={formatEther(supply?.mintedSupply ?? 0n)}
 												type="token"
 											/>
 										</span>
 									</div>
 								</div>
+							</div>
+						{/if}
+
+						<!-- Available for Purchase -->
+						{#if tokenData}
+							<div class="bg-white border-b-2 border-light-gray py-4 px-0">
+								{#if isSoldOut()}
+									<span class="text-base font-bold text-red-600">Sold Out</span>
+								{:else}
+									<span class="text-base font-bold text-black">
+										Available: {parseFloat(formatEther(supply?.availableSupply ?? 0n)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} tokens
+									</span>
+								{/if}
 							</div>
 						{/if}
 
@@ -407,6 +483,9 @@
 								<span class={usdcBadgeClasses}>
 									With
 									<img src="/images/USDC.png" alt="USDC" class={usdcIconClasses} loading="lazy" />
+									On
+									<img src="/assets/BASE.svg" alt="Base" class={usdcIconClasses} loading="lazy" />
+									Base
 								</span>
 							</div>
 							<input 
@@ -420,13 +499,55 @@
 								class={amountInputClasses}
 								disabled={isSoldOut()}
 							/>
-							<div class={availableTokensClasses}>
-								{#if isSoldOut()}
-									<span class={soldOutClasses}>Sold Out</span>
-								{:else}
-									<span>Available: <FormattedNumber value={formatEther(supply?.availableSupply || BigInt(0))} type="number" compact={false} /> tokens</span>
-								{/if}
+
+							<!-- USDC Balance -->
+							<div class="mt-3 mb-4">
+								<div class="text-sm text-secondary font-medium">
+									{#if loadingBalance}
+										Loading balance...
+									{:else}
+										Your Base USDC Balance: <span class="font-bold">{usdcBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> USDC
+									{/if}
+								</div>
 							</div>
+
+							<!-- Quick Invest Buttons -->
+							{#if !isSoldOut() && usdcBalance > 0}
+								<div class="grid grid-cols-4 gap-2 mb-4">
+									<button
+										type="button"
+										on:click={() => setQuickInvestAmount(25)}
+										class="text-xs font-medium py-2 px-2 border border-light-gray rounded hover:bg-light-gray transition-colors duration-200"
+										disabled={isSoldOut()}
+									>
+										25%
+									</button>
+									<button
+										type="button"
+										on:click={() => setQuickInvestAmount(50)}
+										class="text-xs font-medium py-2 px-2 border border-light-gray rounded hover:bg-light-gray transition-colors duration-200"
+										disabled={isSoldOut()}
+									>
+										50%
+									</button>
+									<button
+										type="button"
+										on:click={() => setQuickInvestAmount(75)}
+										class="text-xs font-medium py-2 px-2 border border-light-gray rounded hover:bg-light-gray transition-colors duration-200"
+										disabled={isSoldOut()}
+									>
+										75%
+									</button>
+									<button
+										type="button"
+										on:click={() => setQuickInvestAmount(100)}
+										class="text-xs font-medium py-2 px-2 border border-light-gray rounded hover:bg-light-gray transition-colors duration-200"
+										disabled={isSoldOut()}
+									>
+										Max
+									</button>
+								</div>
+							{/if}
 							{#if !isSoldOut() && Number.isFinite(maxInvestmentAmount) && normalizedInvestmentAmount > maxInvestmentAmount}
 								<div class={warningNoteClasses}>
 									Investment amount exceeds available supply.

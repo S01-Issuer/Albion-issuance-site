@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { sftMetadata, sfts, dataLoaded } from '$lib/stores';
+	import { connected, web3Modal, chainId } from 'svelte-wagmi';
 	import type {
 		Asset,
 		MonthlyReport,
@@ -20,6 +21,7 @@ import { calculateTokenReturns, getTokenPayoutHistory, getTokenSupply } from '$l
 import { PINATA_GATEWAY } from '$lib/network';
 import { catalogService } from '$lib/services';
 import { getTokenTermsPath } from '$lib/utils/tokenTerms';
+import { getTxUrl, getAddressUrl } from '$lib/utils/explorer';
 
 const isDev = import.meta.env.DEV;
 const logDev = (...messages: unknown[]) => {
@@ -594,8 +596,15 @@ function closeHistoryModal() {
 	}
 
 
-function handleBuyTokens(tokenAddress: string, event?: Event) {
+async function handleBuyTokens(tokenAddress: string, event?: Event) {
 	event?.stopPropagation();
+
+	// Check if wallet is connected, if not prompt user to connect
+	if (!$connected) {
+		await $web3Modal.open();
+		return;
+	}
+
 	selectedTokenAddress = tokenAddress;
 	showPurchaseWidget = true;
 }
@@ -1126,9 +1135,16 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 												{token.sharePercentage || 25}% of Asset
 											</div>
 										</div>
-										<p class="text-sm text-secondary font-medium break-all tracking-tight opacity-80 font-figtree">{token.contractAddress}</p>
+										<a
+											href={getAddressUrl(token.contractAddress, $chainId)}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="text-sm text-secondary font-medium break-all tracking-tight opacity-80 font-figtree no-underline hover:text-primary hover:opacity-100 transition-all block"
+										>
+											{token.contractAddress}
+										</a>
 										{#if tokenTermsUrl}
-											<a href={tokenTermsUrl} target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-sm font-semibold text-secondary no-underline hover:text-primary mt-2 font-figtree">
+											<a href={tokenTermsUrl} target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-sm font-semibold text-secondary no-underline hover:text-primary font-figtree">
 												View terms →
 											</a>
 										{/if}
@@ -1273,7 +1289,14 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 					{#if selectedHistoryToken}
 						<div class="mb-6">
 							<h4 class="text-lg font-extrabold text-black uppercase tracking-wider mb-1">{selectedHistoryToken.releaseName}</h4>
-							<p class="text-xs text-black opacity-70 break-all">{selectedHistoryToken.contractAddress}</p>
+							<a
+								href={getAddressUrl(selectedHistoryToken.contractAddress, $chainId)}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="text-xs text-black opacity-70 break-all no-underline hover:text-primary hover:opacity-100 transition-all inline-block"
+							>
+								{selectedHistoryToken.contractAddress}
+							</a>
 						</div>
 
 						{#if historyPayouts.length > 0}
@@ -1311,7 +1334,7 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 												<div class="text-left font-semibold text-secondary">
 													{#if payout.txHash}
 														<a
-															href={`https://basescan.org/tx/${payout.txHash}`}
+															href={getTxUrl(payout.txHash, $chainId)}
 															target="_blank"
 															rel="noopener noreferrer"
 															class="inline-flex items-center gap-1 no-underline hover:text-primary break-all"

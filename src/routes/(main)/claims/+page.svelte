@@ -2,7 +2,7 @@
 	import { writeContract, simulateContract } from '@wagmi/core';
 	import { derived, get } from 'svelte/store';
 	import { onMount, onDestroy } from 'svelte';
-	import { web3Modal, signerAddress, connected, wagmiConfig } from 'svelte-wagmi';
+	import { web3Modal, signerAddress, connected, wagmiConfig, chainId } from 'svelte-wagmi';
 	import { Card, CardContent, PrimaryButton, SecondaryButton, StatusBadge, StatsCard, SectionTitle, CollapsibleSection, FormattedNumber } from '$lib/components/components';
 	import { PageLayout, HeroSection, ContentSection } from '$lib/components/layout';
 	import { graphQLCache } from '$lib/data/clients/cachedGraphqlClient';
@@ -10,6 +10,7 @@
 	import { dateUtils } from '$lib/utils/dateHelpers';
 	import { arrayUtils } from '$lib/utils/arrayHelpers';
 	import { BASE_ORDERBOOK_SUBGRAPH_URL } from '$lib/network';
+	import { getTxUrl } from '$lib/utils/explorer';
 	import { useClaimsService } from '$lib/services';
 	import orderbookAbi from '$lib/abi/orderbook.json';
 	import type { Hex } from 'viem';
@@ -567,7 +568,7 @@
 											<td class="p-4 text-center">
 												{#if claim.txHash}
 													<a 
-														href={`https://basescan.org/tx/${claim.txHash}`}
+														href={getTxUrl(claim.txHash, $chainId)}
 														target="_blank"
 														rel="noopener noreferrer"
 														class="text-secondary text-sm no-underline hover:text-primary"
