@@ -4,11 +4,13 @@
 	import type { Asset } from '$lib/types/uiTypes';
 	import { PrimaryButton, SecondaryButton, FormattedNumber, FormattedReturn } from '$lib/components/components';
 	import { sftMetadata, sfts } from '$lib/stores';
+	import { chainId } from 'svelte-wagmi';
 	import { formatSmartNumber } from '$lib/utils/formatters';
 	import { formatSupplyDisplay } from '$lib/utils/supplyHelpers';
 	import { calculateTokenReturns } from '$lib/utils';
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
+	import { getAddressUrl } from '$lib/utils/explorer';
 
 	export let autoPlay = true;
 	export let autoPlayInterval = 5000;
@@ -209,29 +211,6 @@
 		tooltipId = '';
 	}
 
-	function handleKeydown(event: KeyboardEvent) {
-		if (featuredTokensWithAssets.length <= 1) return;
-		
-		switch (event.key) {
-			case 'ArrowLeft':
-				event.preventDefault();
-				prevSlide();
-				break;
-			case 'ArrowRight':
-				event.preventDefault();
-				nextSlide();
-				break;
-			case 'Home':
-				event.preventDefault();
-				goToSlide(0);
-				break;
-			case 'End':
-				event.preventDefault();
-				goToSlide(featuredTokensWithAssets.length - 1);
-				break;
-		}
-	}
-
 	function handleTouchStart(event: TouchEvent) {
 		touchStartX = event.touches[0].clientX;
 	}
@@ -355,12 +334,8 @@
 			class={carouselWrapperClasses}
 			on:mouseenter={handleMouseEnter}
 			on:mouseleave={handleMouseLeave}
-			on:keydown={handleKeydown}
 			on:touchstart={handleTouchStart}
 			on:touchend={handleTouchEnd}
-			role="button"
-			aria-label="Featured tokens carousel - use arrow keys to navigate"
-			tabindex="0"
 		>
 			<!-- Carousel track -->
 			<div 
@@ -392,7 +367,15 @@
 									<div class="mb-3">
 										<h3 class={tokenNameClasses}>{item.token.releaseName}</h3>
 									</div>
-									<div class={tokenContractClasses}>{item.token.contractAddress}</div>
+									<a
+										href={getAddressUrl(item.token.contractAddress, $chainId)}
+										target="_blank"
+										rel="noopener noreferrer"
+										class={tokenContractClasses + " no-underline hover:text-primary transition-colors"}
+										on:click|stopPropagation
+									>
+										{item.token.contractAddress}
+									</a>
 								</div>
 
 												<div class={tokenStatsClasses}>
