@@ -10,6 +10,7 @@
 	import { useCatalogService } from '$lib/services';
 	import { hasAvailableSupplySync } from '$lib/utils/supplyHelpers';
 	import { ENERGY_FIELDS } from '$lib/network';
+	import { connected, web3Modal } from 'svelte-wagmi';
 
 	// Track if initial load is done to prevent double loading
 	let hasInitialized = false;
@@ -78,7 +79,13 @@
 
 	$: soldOutCount = featuredTokensWithAssets.filter((item) => !hasAvailableSupplySync(item.token)).length;
 	
-	function handleBuyTokens(event: CustomEvent) {
+	async function handleBuyTokens(event: CustomEvent) {
+		// Check if wallet is connected, if not prompt user to connect
+		if (!$connected) {
+			await $web3Modal.open();
+			return;
+		}
+
 		selectedAssetId = event.detail.assetId;
 		selectedTokenAddress = event.detail.tokenAddress;
 		showPurchaseWidget = true;
