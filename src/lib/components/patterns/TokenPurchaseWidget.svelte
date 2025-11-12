@@ -194,11 +194,11 @@
 	}
 
 	function setQuickInvestAmount(percentage: number) {
+		// Calculate percentage of balance, but cap by available supply
+		const percentageOfBalance = (usdcBalance * percentage) / 100;
 		const maxAvailable = Number.isFinite(maxInvestmentAmount) ? maxInvestmentAmount : 0;
-		const maxByBalance = usdcBalance;
-		const maxAmount = Math.min(maxAvailable, maxByBalance);
 
-		investmentAmount = (maxAmount * percentage) / 100;
+		investmentAmount = Math.min(percentageOfBalance, maxAvailable);
 	}
 
 
@@ -458,20 +458,20 @@
 											/>
 										</span>
 									</div>
-									<div class={detailItemClasses}>
-										<span class={detailLabelClasses}>Available for Purchase</span>
-										{#if isSoldOut()}
-											<span class="text-lg font-bold text-red-600">Sold Out</span>
-										{:else}
-											<span class={detailValueClasses}>
-												<FormattedNumber
-													value={formatEther(supply?.availableSupply ?? 0n)}
-													type="token"
-												/>
-											</span>
-										{/if}
-									</div>
 								</div>
+							</div>
+						{/if}
+
+						<!-- Available for Purchase -->
+						{#if tokenData}
+							<div class="bg-white border-b-2 border-light-gray py-4 px-0">
+								{#if isSoldOut()}
+									<span class="text-base font-bold text-red-600">Sold Out</span>
+								{:else}
+									<span class="text-base font-bold text-black">
+										Available: <FormattedNumber value={formatEther(supply?.availableSupply ?? 0n)} type="token" compact={false} /> tokens
+									</span>
+								{/if}
 							</div>
 						{/if}
 
