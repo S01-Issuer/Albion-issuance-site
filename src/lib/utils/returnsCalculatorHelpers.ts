@@ -125,11 +125,13 @@ export function calculateMonthlyTokenCashflows(
 	}
 
 	// Step 7: Divide entire array by current token supply
-	// For now, divide by 1 (assuming per-token calculation for a single token)
-	// In production, this would use actual token supply from on-chain data
+	// Apply the token's share percentage to normalize cashflows
+	const sharePercentage = token.sharePercentage || 100; // Default to 100% if not specified
+	const shareMultiplier = sharePercentage / 100;
+
 	const finalCashflows: Array<{ month: string; cashflow: number }> = resultMonths.map((item) => ({
 		month: item.month,
-		cashflow: item.cashflow / 1,
+		cashflow: item.cashflow * shareMultiplier,
 	}));
 
 	// Step 8: Prepend -$1 cost to the beginning

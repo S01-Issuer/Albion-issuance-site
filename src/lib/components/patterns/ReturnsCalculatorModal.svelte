@@ -44,8 +44,11 @@
 		updateCalculations();
 	}
 
-	// Update when user changes inputs
-	$: oilPrice, discountRate, updateCalculations();
+	// Update when user changes inputs - trigger on any input change
+	$: if (token) {
+		oilPrice, discountRate;
+		updateCalculations();
+	}
 
 	function updateCalculations() {
 		if (!token) return;
@@ -54,21 +57,28 @@
 			if (mode === 'token') {
 				// Token Mode Calculations
 				monthlyTokenCashflows = calculateMonthlyTokenCashflows(token, oilPrice);
+				console.log('Monthly token cashflows:', monthlyTokenCashflows);
 
 				if (monthlyTokenCashflows.length > 0) {
 					const cashflows = monthlyTokenCashflows.map((m) => m.cashflow);
+					console.log('Cashflows array:', cashflows);
 
 					// Calculate NPV using monthly discount rate
 					const monthlyDiscountRate = Math.pow(1 + discountRate / 100, 1 / 12) - 1;
+					console.log('Monthly discount rate:', monthlyDiscountRate);
 					npv = calculateNPV(cashflows, monthlyDiscountRate);
+					console.log('NPV:', npv);
 
 					// Calculate IRR (returns monthly rate as decimal)
 					const monthlyIRR = calculateIRR(cashflows);
+					console.log('Monthly IRR (as decimal):', monthlyIRR);
 					// Annualize: (1 + monthlyRate)^12 - 1, then convert to percentage
 					annualizedIRR = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99;
+					console.log('Annualized IRR (%):', annualizedIRR);
 
 					// Calculate payback period in months
 					paybackMonths = calculatePaybackPeriod(cashflows);
+					console.log('Payback period (months):', paybackMonths);
 				}
 			} else {
 				// Asset Mode Calculations
@@ -280,6 +290,14 @@
 							<p class="text-sm text-black">
 								<strong>Note:</strong> This calculator uses {token.asset.plannedProduction?.projections.length ?? 0} months of projected production data.
 							</p>
+						</div>
+
+						<!-- Debug Info -->
+						<div class="bg-gray-100 border border-gray-300 rounded-lg p-4 text-xs">
+							<p class="font-bold text-black mb-2">Debug Info:</p>
+							<p class="text-black">Cashflows count: {monthlyTokenCashflows.length}</p>
+							<p class="text-black">Monthly IRR (decimal): {monthlyTokenCashflows.length > 0 ? calculateIRR(monthlyTokenCashflows.map((m) => m.cashflow)).toFixed(6) : 'N/A'}</p>
+							<p class="text-black">First 3 cashflows: {monthlyTokenCashflows.slice(0, 3).map(m => `${m.month}: $${m.cashflow.toFixed(2)}`).join(' | ')}</p>
 						</div>
 					{:else}
 						<!-- ASSET MODE -->
