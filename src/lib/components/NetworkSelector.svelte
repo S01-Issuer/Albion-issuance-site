@@ -48,13 +48,13 @@
 		/>
 		<span class="hidden sm:inline font-medium">{currentNetwork.name}</span>
 		<svg
-			class="w-3 h-3 sm:w-4 sm:h-4 transition-transform duration-200"
+			class="w-4 h-4 transition-transform duration-200"
 			class:rotate-180={isOpen}
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
 		>
-			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6" />
 		</svg>
 	</button>
 

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { sftMetadata, sfts, dataLoaded } from '$lib/stores';
+	import { connected, web3Modal } from 'svelte-wagmi';
 	import type {
 		Asset,
 		MonthlyReport,
@@ -596,6 +597,13 @@ function closeHistoryModal() {
 
 function handleBuyTokens(tokenAddress: string, event?: Event) {
 	event?.stopPropagation();
+
+	// Check if wallet is connected, if not prompt user to connect
+	if (!$connected) {
+		$web3Modal.open();
+		return;
+	}
+
 	selectedTokenAddress = tokenAddress;
 	showPurchaseWidget = true;
 }
