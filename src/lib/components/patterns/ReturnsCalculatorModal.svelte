@@ -223,14 +223,14 @@
 										<thead>
 											<tr class="border-b border-gray-300">
 												<th class="text-left p-2 font-semibold text-black">Month</th>
-												<th class="text-right p-2 font-semibold text-black">Cashflow ($)</th>
+												<th class="text-right p-2 font-semibold text-black">Cashflow (USDC)</th>
 											</tr>
 										</thead>
 										<tbody>
 											{#each monthlyTokenCashflows.slice(0, 24) as row, index}
 												<tr class={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
 													<td class="p-2 text-black">{row.month}</td>
-													<td class="text-right p-2 text-black font-mono">${row.cashflow.toFixed(2)}</td>
+													<td class="text-right p-2 text-black font-mono">${row.cashflow.toFixed(6)}</td>
 												</tr>
 											{/each}
 										</tbody>
@@ -246,16 +246,16 @@
 										<thead>
 											<tr class="border-b border-gray-300">
 												<th class="text-left p-2 font-semibold text-black">Month</th>
-												<th class="text-right p-2 font-semibold text-black">Projected ($)</th>
-												<th class="text-right p-2 font-semibold text-black">Actual ($)</th>
+												<th class="text-right p-2 font-semibold text-black">Projected (USDC)</th>
+												<th class="text-right p-2 font-semibold text-black">Actual (USDC)</th>
 											</tr>
 										</thead>
 										<tbody>
 											{#each monthlyAssetCashflows.slice(0, 24) as row, index}
 												<tr class={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
 													<td class="p-2 text-black">{row.month}</td>
-													<td class="text-right p-2 text-black font-mono">${row.projected.toFixed(2)}</td>
-													<td class="text-right p-2 text-black font-mono">${row.actual.toFixed(2)}</td>
+													<td class="text-right p-2 text-black font-mono">${row.projected.toFixed(6)}</td>
+													<td class="text-right p-2 text-black font-mono">${row.actual.toFixed(6)}</td>
 												</tr>
 											{/each}
 										</tbody>
@@ -273,13 +273,13 @@
 							<div class={metricGridClasses}>
 								<div class={metricCardClasses}>
 									<div class={metricValueClasses}>
-										{isFinite(annualizedIRR) ? annualizedIRR.toFixed(1) : '—'}%
+										{isFinite(annualizedIRR) ? annualizedIRR.toFixed(2) : '—'}%
 									</div>
 									<div class={metricLabelClasses}>IRR (Annualized)</div>
 								</div>
 								<div class={metricCardClasses}>
 									<div class={metricValueClasses}>
-										${npv.toFixed(2)}
+										${npv.toFixed(6)}
 									</div>
 									<div class={metricLabelClasses}>NPV @ {discountRate}%</div>
 								</div>

@@ -95,12 +95,15 @@ export function calculateMonthlyTokenCashflows(
 	// Build monthly cashflows starting from first projection
 	const monthlyDataMap = new Map<string, number>();
 
+	// Calculate the 12-month baseline period
+	const baselineEndDate = addMonths(cashflowStartDate, 12);
+
 	for (const projection of projections) {
 		// Step 1 & 2: Production * oil price to get cash flow
 		let monthlyCashflow = projection.production * oilPrice;
 
-		// Step 4: Apply baseline income if on or after cashflowStartDate
-		if (!isDateBefore(projection.month, cashflowStartDate)) {
+		// Step 4: Apply baseline income for the first 12 months from cashflowStartDate
+		if (!isDateBefore(projection.month, cashflowStartDate) && isDateBefore(projection.month, baselineEndDate)) {
 			monthlyCashflow += monthlyBaseline;
 		}
 
