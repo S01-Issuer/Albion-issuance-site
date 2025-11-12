@@ -135,27 +135,28 @@
 					availableSupply:
 						sftMaxSharesSupply - BigInt(sft.totalShares ?? '0'),
 				};
+
+				// Get payment token and decimals
+				const paymentTokenAddress = (await readContract($wagmiConfig, {
+					abi: authorizerAbi,
+					address: sft.activeAuthorizer?.address as Hex,
+					functionName: 'paymentToken',
+					args: []
+				})) as Hex;
+
+				const paymentTokenDecimalsValue = (await readContract($wagmiConfig, {
+					abi: authorizerAbi,
+					address: sft.activeAuthorizer?.address as Hex,
+					functionName: 'paymentTokenDecimals',
+					args: []
+				})) as number;
+
+				paymentToken = paymentTokenAddress;
+				paymentTokenDecimals = paymentTokenDecimalsValue;
+
+				// Load USDC balance after getting payment token info
+				await loadUsdcBalance();
 			}
-			// Get payment token and decimals
-			const paymentTokenAddress = (await readContract($wagmiConfig, {
-				abi: authorizerAbi,
-				address: sft.activeAuthorizer?.address as Hex,
-				functionName: 'paymentToken',
-				args: []
-			})) as Hex;
-
-			const paymentTokenDecimalsValue = (await readContract($wagmiConfig, {
-				abi: authorizerAbi,
-				address: sft.activeAuthorizer?.address as Hex,
-				functionName: 'paymentTokenDecimals',
-				args: []
-			})) as number;
-
-			paymentToken = paymentTokenAddress;
-			paymentTokenDecimals = paymentTokenDecimalsValue;
-
-			// Load USDC balance after getting payment token info
-			await loadUsdcBalance();
 		} catch (error) {
 			console.error('Error loading token data:', error);
 			purchaseError = 'Failed to load token data';
