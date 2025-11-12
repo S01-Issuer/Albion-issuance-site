@@ -595,12 +595,12 @@ function closeHistoryModal() {
 	}
 
 
-function handleBuyTokens(tokenAddress: string, event?: Event) {
+async function handleBuyTokens(tokenAddress: string, event?: Event) {
 	event?.stopPropagation();
 
 	// Check if wallet is connected, if not prompt user to connect
 	if (!$connected) {
-		$web3Modal.open();
+		await $web3Modal.open();
 		return;
 	}
 
