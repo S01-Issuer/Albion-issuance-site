@@ -329,6 +329,8 @@
 							<p class="text-sm text-black">
 								<strong>Token Share:</strong> {token.sharePercentage}% of asset
 								<br />
+								<strong>Pending Distributions:</strong> Applied to first 12 months from cashflow start date (only remaining months shown)
+								<br />
 								<strong>Production Data:</strong> {token.asset.plannedProduction?.projections.length ?? 0} months
 							</p>
 						</div>

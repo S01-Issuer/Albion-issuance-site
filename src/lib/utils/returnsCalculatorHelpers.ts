@@ -81,36 +81,39 @@ export function calculateMonthlyTokenCashflows(
 	const cashflowStartDate = asset.cashflowStartDate || projections[0]?.month;
 	const receiptsData = asset.receiptsData || [];
 
-	// Step 3: Sum netIncome from receipts data for months before cashflowStartDate
-	let historicalIncome = 0;
+	// Step 3: Sum netIncome from receipts data for months before cashflowStartDate (pending distributions)
+	let pendingDistributionsTotal = 0;
 	for (const receipt of receiptsData) {
 		if (isDateBefore(receipt.month, cashflowStartDate)) {
-			historicalIncome += receipt.assetData.netIncome || 0;
+			pendingDistributionsTotal += receipt.assetData.netIncome || 0;
 		}
 	}
 
-	// Step 4: Divide historical income by 12 to get monthly baseline
-	const monthlyBaseline = historicalIncome / 12;
+	// Step 4: Divide pending distributions total by 12 to get monthly pending distribution amount
+	const monthlyPendingDistribution = pendingDistributionsTotal / 12;
 
 	// Build monthly cashflows starting from first projection
 	const monthlyDataMap = new Map<string, number>();
 
-	// Calculate the 12-month baseline period
-	const baselineEndDate = addMonths(cashflowStartDate, 12);
+	// Calculate the 12-month pending distributions period (from cashflowStartDate)
+	const pendingDistributionsEndDate = addMonths(cashflowStartDate, 12);
 
 	for (const projection of projections) {
 		// Step 1 & 2: Production * oil price to get cash flow
 		let monthlyCashflow = projection.production * oilPrice;
 
-		// Step 4: Apply baseline income for the first 12 months from cashflowStartDate
-		if (!isDateBefore(projection.month, cashflowStartDate) && isDateBefore(projection.month, baselineEndDate)) {
-			monthlyCashflow += monthlyBaseline;
+		// Step 4: Add pending distributions for the first 12 months from cashflowStartDate
+		// These will be sliced later to only include remaining months
+		if (!isDateBefore(projection.month, cashflowStartDate) && isDateBefore(projection.month, pendingDistributionsEndDate)) {
+			monthlyCashflow += monthlyPendingDistribution;
 		}
 
 		monthlyDataMap.set(projection.month, monthlyCashflow);
 	}
 
 	// Step 5 & 6: Slice off months before current month and pro-rate current month
+	// This naturally limits pending distributions to remaining months in the 12-month period
+	// Example: if 4 months have passed since cashflowStartDate, only 8 months of pending distributions remain
 	const currentYearMonth = getCurrentYearMonth();
 	const resultMonths: Array<{ month: string; cashflow: number }> = [];
 	const proration = getCurrentMonthProration();
@@ -120,7 +123,7 @@ export function calculateMonthlyTokenCashflows(
 			// Pro-rate current month
 			resultMonths.push({ month, cashflow: cashflow * proration });
 		} else if (month > currentYearMonth) {
-			// Include future months
+			// Include future months (with pending distributions only if still within 12-month period)
 			resultMonths.push({ month, cashflow });
 		}
 	}
