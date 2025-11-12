@@ -469,7 +469,7 @@
 									<span class="text-base font-bold text-red-600">Sold Out</span>
 								{:else}
 									<span class="text-base font-bold text-black">
-										Available: <FormattedNumber value={formatEther(supply?.availableSupply ?? 0n)} type="token" compact={false} /> tokens
+										Available: {parseFloat(formatEther(supply?.availableSupply ?? 0n)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} tokens
 									</span>
 								{/if}
 							</div>
