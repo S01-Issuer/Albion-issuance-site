@@ -20,6 +20,7 @@
 	// User inputs
 	let oilPrice = 65;
 	let discountRate = 10;
+	let showAssetData = false; // Toggle between token and asset mode data view
 
 	// Token Mode Calculated values
 	let monthlyTokenCashflows: Array<{ month: string; cashflow: number }> = [];
@@ -57,28 +58,21 @@
 			if (mode === 'token') {
 				// Token Mode Calculations
 				monthlyTokenCashflows = calculateMonthlyTokenCashflows(token, oilPrice);
-				console.log('Monthly token cashflows:', monthlyTokenCashflows);
 
 				if (monthlyTokenCashflows.length > 0) {
 					const cashflows = monthlyTokenCashflows.map((m) => m.cashflow);
-					console.log('Cashflows array:', cashflows);
 
 					// Calculate NPV using monthly discount rate
 					const monthlyDiscountRate = Math.pow(1 + discountRate / 100, 1 / 12) - 1;
-					console.log('Monthly discount rate:', monthlyDiscountRate);
 					npv = calculateNPV(cashflows, monthlyDiscountRate);
-					console.log('NPV:', npv);
 
 					// Calculate IRR (returns monthly rate as decimal)
 					const monthlyIRR = calculateIRR(cashflows);
-					console.log('Monthly IRR (as decimal):', monthlyIRR);
 					// Annualize: (1 + monthlyRate)^12 - 1, then convert to percentage
 					annualizedIRR = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99;
-					console.log('Annualized IRR (%):', annualizedIRR);
 
 					// Calculate payback period in months
 					paybackMonths = calculatePaybackPeriod(cashflows);
-					console.log('Payback period (months):', paybackMonths);
 				}
 			} else {
 				// Asset Mode Calculations
@@ -195,37 +189,81 @@
 				{#if token}
 					{#if mode === 'token'}
 						<!-- TOKEN MODE -->
-						<!-- Chart Section -->
+						<!-- Data Toggle -->
 						<div class={sectionClasses}>
-							<h3 class={sectionTitleClasses}>Monthly Cashflows</h3>
-							<div class="flex justify-center overflow-x-auto bg-light-gray p-6 rounded-lg">
-								<svg {chartWidth} {chartHeight} viewBox="0 0 {chartWidth} {chartHeight}" class="min-w-full">
-									<!-- Y-axis -->
-									<line x1={margin.left} y1={margin.top} x2={margin.left} y2={chartHeight - margin.bottom} stroke="#d0d0d0" stroke-width="2" />
-									<!-- X-axis -->
-									<line x1={margin.left} y1={chartHeight - margin.bottom} x2={chartWidth - margin.right} y2={chartHeight - margin.bottom} stroke="#d0d0d0" stroke-width="2" />
-									<!-- Y label -->
-									<text x="20" y={margin.top + innerHeight / 2} text-anchor="middle" font-size="12" fill="#666" transform="rotate(-90 20 {margin.top + innerHeight / 2})">
-										Cashflow ($)
-									</text>
-									<!-- Bars -->
-									{#each tokenChartData as bar, index}
-										<rect
-											x={bar.x - 8}
-											y={Math.min(bar.y, margin.top + innerHeight / 2)}
-											width="16"
-											height={bar.height}
-											fill={bar.color}
-											opacity="0.8"
-										/>
-										{#if index % 3 === 0}
-											<text x={bar.x} y={chartHeight - 20} text-anchor="middle" font-size="11" fill="#666">
-												{bar.month}
-											</text>
-										{/if}
-									{/each}
-								</svg>
+							<h3 class={sectionTitleClasses}>Monthly Returns Data</h3>
+							<div class="flex gap-4 mb-4">
+								<button
+									on:click={() => (showAssetData = false)}
+									class={`px-4 py-2 rounded font-semibold transition-colors ${
+										!showAssetData
+											? 'bg-primary text-white'
+											: 'bg-light-gray text-black hover:bg-gray-300'
+									}`}
+								>
+									Token Mode
+								</button>
+								<button
+									on:click={() => (showAssetData = true)}
+									class={`px-4 py-2 rounded font-semibold transition-colors ${
+										showAssetData
+											? 'bg-primary text-white'
+											: 'bg-light-gray text-black hover:bg-gray-300'
+									}`}
+								>
+									Asset Mode
+								</button>
 							</div>
+
+							<!-- Token Mode Data Table -->
+							{#if !showAssetData}
+								<div class="overflow-x-auto bg-light-gray p-4 rounded-lg">
+									<table class="w-full text-sm border-collapse">
+										<thead>
+											<tr class="border-b border-gray-300">
+												<th class="text-left p-2 font-semibold text-black">Month</th>
+												<th class="text-right p-2 font-semibold text-black">Cashflow ($)</th>
+											</tr>
+										</thead>
+										<tbody>
+											{#each monthlyTokenCashflows.slice(0, 24) as row, index}
+												<tr class={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+													<td class="p-2 text-black">{row.month}</td>
+													<td class="text-right p-2 text-black font-mono">${row.cashflow.toFixed(2)}</td>
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+									{#if monthlyTokenCashflows.length === 0}
+										<p class="text-center text-gray-600 p-4">No token cashflows calculated</p>
+									{/if}
+								</div>
+							{:else}
+								<!-- Asset Mode Data Table -->
+								<div class="overflow-x-auto bg-light-gray p-4 rounded-lg">
+									<table class="w-full text-sm border-collapse">
+										<thead>
+											<tr class="border-b border-gray-300">
+												<th class="text-left p-2 font-semibold text-black">Month</th>
+												<th class="text-right p-2 font-semibold text-black">Projected ($)</th>
+												<th class="text-right p-2 font-semibold text-black">Actual ($)</th>
+											</tr>
+										</thead>
+										<tbody>
+											{#each monthlyAssetCashflows.slice(0, 24) as row, index}
+												<tr class={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+													<td class="p-2 text-black">{row.month}</td>
+													<td class="text-right p-2 text-black font-mono">${row.projected.toFixed(2)}</td>
+													<td class="text-right p-2 text-black font-mono">${row.actual.toFixed(2)}</td>
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+									{#if monthlyAssetCashflows.length === 0}
+										<p class="text-center text-gray-600 p-4">No asset cashflows calculated</p>
+									{/if}
+								</div>
+							{/if}
 						</div>
 
 						<!-- Financial Metrics -->
@@ -288,16 +326,10 @@
 						<!-- Data Info -->
 						<div class="bg-blue-50 border border-primary rounded-lg p-4">
 							<p class="text-sm text-black">
-								<strong>Note:</strong> This calculator uses {token.asset.plannedProduction?.projections.length ?? 0} months of projected production data.
+								<strong>Token Share:</strong> {token.sharePercentage}% of asset
+								<br />
+								<strong>Production Data:</strong> {token.asset.plannedProduction?.projections.length ?? 0} months
 							</p>
-						</div>
-
-						<!-- Debug Info -->
-						<div class="bg-gray-100 border border-gray-300 rounded-lg p-4 text-xs">
-							<p class="font-bold text-black mb-2">Debug Info:</p>
-							<p class="text-black">Cashflows count: {monthlyTokenCashflows.length}</p>
-							<p class="text-black">Monthly IRR (decimal): {monthlyTokenCashflows.length > 0 ? calculateIRR(monthlyTokenCashflows.map((m) => m.cashflow)).toFixed(6) : 'N/A'}</p>
-							<p class="text-black">First 3 cashflows: {monthlyTokenCashflows.slice(0, 3).map(m => `${m.month}: $${m.cashflow.toFixed(2)}`).join(' | ')}</p>
 						</div>
 					{:else}
 						<!-- ASSET MODE -->
