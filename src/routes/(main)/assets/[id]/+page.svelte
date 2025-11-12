@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { sftMetadata, sfts, dataLoaded } from '$lib/stores';
-	import { connected, web3Modal } from 'svelte-wagmi';
+	import { connected, web3Modal, chainId } from 'svelte-wagmi';
 	import type {
 		Asset,
 		MonthlyReport,
@@ -21,6 +21,7 @@ import { calculateTokenReturns, getTokenPayoutHistory, getTokenSupply } from '$l
 import { PINATA_GATEWAY } from '$lib/network';
 import { catalogService } from '$lib/services';
 import { getTokenTermsPath } from '$lib/utils/tokenTerms';
+import { getTxUrl } from '$lib/utils/explorer';
 
 const isDev = import.meta.env.DEV;
 const logDev = (...messages: unknown[]) => {
@@ -1319,7 +1320,7 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 												<div class="text-left font-semibold text-secondary">
 													{#if payout.txHash}
 														<a
-															href={`https://basescan.org/tx/${payout.txHash}`}
+															href={getTxUrl(payout.txHash, $chainId)}
 															target="_blank"
 															rel="noopener noreferrer"
 															class="inline-flex items-center gap-1 no-underline hover:text-primary break-all"

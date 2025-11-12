@@ -8,7 +8,7 @@
 		waitForTransactionReceipt,
 		simulateContract,
 	} from '@wagmi/core';
-	import { signerAddress, wagmiConfig } from 'svelte-wagmi';
+	import { signerAddress, wagmiConfig, chainId } from 'svelte-wagmi';
 	import { formatEther, formatUnits, parseUnits, type Hex } from 'viem';
 	import { erc20Abi } from 'viem';
 	import { onMount } from 'svelte';
@@ -24,6 +24,7 @@
 	import OffchainAssetReceiptVaultAbi from '$lib/abi/OffchainAssetReceiptVault.json';
 	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 	import { getTokenTermsPath } from '$lib/utils/tokenTerms';
+	import { getTxUrl } from '$lib/utils/explorer';
 
 	export let isOpen = false;
 	export let tokenAddress: string | null = null;
@@ -409,12 +410,12 @@
 								<p class="text-sm text-gray-600 mb-2">Transaction Hash:</p>
 								<p class="text-xs font-mono text-black break-all mb-3">{transactionHash}</p>
 								<a
-									href={`https://basescan.org/tx/${transactionHash}`}
+									href={getTxUrl(transactionHash, $chainId)}
 									target="_blank"
 									rel="noopener noreferrer"
 									class="text-primary hover:text-secondary font-medium text-sm"
 								>
-									View on Basescan →
+									View Transaction →
 								</a>
 							</div>
 						{/if}
