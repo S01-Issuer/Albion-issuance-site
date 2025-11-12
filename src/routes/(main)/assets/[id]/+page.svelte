@@ -17,6 +17,7 @@
 	import { useAssetDetailData, useDataExport } from '$lib/composables';
 	import AssetDetailHeader from '$lib/components/patterns/assets/AssetDetailHeader.svelte';
 	import AssetOverviewTab from '$lib/components/patterns/assets/AssetOverviewTab.svelte';
+	import ReturnsCalculatorModal from '$lib/components/patterns/ReturnsCalculatorModal.svelte';
 import { calculateTokenReturns, getTokenPayoutHistory, getTokenSupply } from '$lib/utils/returnCalculations';
 import { PINATA_GATEWAY } from '$lib/network';
 import { catalogService } from '$lib/services';
@@ -470,6 +471,20 @@ $: historyPayouts = selectedHistoryToken
   : [];
 $: if (!historyModalOpen && historyModalToken) {
   historyModalToken = null;
+}
+
+// Returns Calculator Modal state
+let returnsCalculatorOpen = false;
+let selectedReturnsToken: TokenMetadata | null = null;
+
+function openReturnsCalculator(token: TokenMetadata) {
+	selectedReturnsToken = token;
+	returnsCalculatorOpen = true;
+}
+
+function closeReturnsCalculator() {
+	returnsCalculatorOpen = false;
+	selectedReturnsToken = null;
 }
 
 // Tooltip state
@@ -1248,7 +1263,7 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 								</div>
 
 								<div class="px-4 sm:px-8 pb-6 sm:pb-8">
-									<div class="grid grid-cols-2 gap-2 sm:gap-3">
+									<div class="grid grid-cols-3 gap-2 sm:gap-3">
 										{#if hasAvailableSupply}
 											<PrimaryButton
 												fullWidth
@@ -1268,8 +1283,16 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 											size="small"
 											on:click={(event) => handleHistoryButtonClick(token.contractAddress, event)}
 										>
-											<span class="hidden sm:inline">Distributions History</span>
+											<span class="hidden sm:inline">Distributions</span>
 											<span class="sm:hidden">History</span>
+										</SecondaryButton>
+										<SecondaryButton
+											fullWidth
+											size="small"
+											on:click={() => openReturnsCalculator(token)}
+										>
+											<span class="hidden sm:inline">Returns</span>
+											<span class="sm:hidden">Returns</span>
 										</SecondaryButton>
 									</div>
 								</div>
@@ -1374,6 +1397,15 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 					{/if}
 				</Modal>
 			{/if}
+
+			<!-- Returns Calculator Modal -->
+			<ReturnsCalculatorModal
+				isOpen={returnsCalculatorOpen}
+				token={selectedReturnsToken}
+				mode="token"
+				onClose={closeReturnsCalculator}
+			/>
+
 					<!-- Future Releases Card -->
 						{#if hasFutureReleases}
 							<Card hoverable={false}>
