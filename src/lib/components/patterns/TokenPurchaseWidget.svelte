@@ -9,7 +9,7 @@
 		simulateContract,
 	} from '@wagmi/core';
 	import { signerAddress, wagmiConfig } from 'svelte-wagmi';
-	import { formatEther, parseUnits, type Hex } from 'viem';
+	import { formatEther, formatUnits, parseUnits, type Hex } from 'viem';
 	import { erc20Abi } from 'viem';
 	import { onMount } from 'svelte';
 	import { PrimaryButton, SecondaryButton, FormattedNumber } from '$lib/components/components';
@@ -183,7 +183,8 @@
 				args: [$signerAddress as Hex]
 			})) as bigint;
 
-			usdcBalance = parseFloat(formatEther(balance));
+			// Use the actual token decimals (USDC is 6, not 18)
+			usdcBalance = parseFloat(formatUnits(balance, paymentTokenDecimals));
 		} catch (error) {
 			console.error('Error loading USDC balance:', error);
 			usdcBalance = 0;
