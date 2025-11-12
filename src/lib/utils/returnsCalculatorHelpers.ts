@@ -64,11 +64,13 @@ function isDateBefore(dateA: string, dateB: string): boolean {
  * Calculate monthly token cashflows based on the specified algorithm
  * @param token Token metadata with asset data
  * @param oilPrice Oil price assumption in USD per barrel
+ * @param mintedSupply Number of tokens minted (for normalizing per-token cashflows)
  * @returns Array of monthly cashflows starting from today
  */
 export function calculateMonthlyTokenCashflows(
 	token: TokenMetadata,
-	oilPrice: number
+	oilPrice: number,
+	mintedSupply: number = 1
 ): Array<{ month: string; cashflow: number }> {
 	if (!token.asset?.plannedProduction?.projections || token.asset.plannedProduction.projections.length === 0) {
 		return [];
@@ -124,14 +126,15 @@ export function calculateMonthlyTokenCashflows(
 		return [];
 	}
 
-	// Step 7: Divide entire array by current token supply
-	// Apply the token's share percentage to normalize cashflows
+	// Step 7: Divide entire array by current token supply and apply share percentage
+	// First apply the token's share percentage, then divide by number of tokens minted
 	const sharePercentage = token.sharePercentage || 100; // Default to 100% if not specified
 	const shareMultiplier = sharePercentage / 100;
+	const normalizer = mintedSupply > 0 ? mintedSupply : 1;
 
 	const finalCashflows: Array<{ month: string; cashflow: number }> = resultMonths.map((item) => ({
 		month: item.month,
-		cashflow: item.cashflow * shareMultiplier,
+		cashflow: (item.cashflow * shareMultiplier) / normalizer,
 	}));
 
 	// Step 8: Prepend -$1 cost to the beginning

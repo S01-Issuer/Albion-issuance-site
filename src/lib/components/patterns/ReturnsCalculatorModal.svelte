@@ -16,6 +16,7 @@
 	export let token: TokenMetadata | null = null;
 	export let mode: 'token' | 'asset' = 'token';
 	export let onClose: () => void = () => {};
+	export let mintedSupply: number = 0; // Minted supply for normalizing cashflows per token
 
 	// User inputs
 	let oilPrice = 65;
@@ -57,7 +58,7 @@
 		try {
 			if (mode === 'token') {
 				// Token Mode Calculations
-				monthlyTokenCashflows = calculateMonthlyTokenCashflows(token, oilPrice);
+				monthlyTokenCashflows = calculateMonthlyTokenCashflows(token, oilPrice, mintedSupply);
 
 				if (monthlyTokenCashflows.length > 0) {
 					const cashflows = monthlyTokenCashflows.map((m) => m.cashflow);
