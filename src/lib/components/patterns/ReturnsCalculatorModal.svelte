@@ -8,6 +8,8 @@
 		calculateNPV,
 		calculateIRR,
 		calculatePaybackPeriod,
+		calculateLifetimeIRR,
+		getLifetimeCashflows,
 	} from '$lib/utils/returnsCalculatorHelpers';
 	import FormattedNumber from '$lib/components/components/FormattedNumber.svelte';
 
@@ -18,16 +20,26 @@
 	export let onClose: () => void = () => {};
 	export let mintedSupply: number = 0; // Minted supply for normalizing cashflows per token
 
+	// Constants
+	const mintPrice = 1; // Price per token in USD (may be configurable in future)
+
 	// User inputs
 	let oilPrice = 65;
 	let discountRate = 10;
 	let showAssetData = false; // Toggle between token and asset mode data view
 
-	// Token Mode Calculated values
+	// Token Mode Calculated values - Remaining (from current month)
 	let monthlyTokenCashflows: Array<{ month: string; cashflow: number }> = [];
-	let npv = 0;
-	let annualizedIRR = 0;
-	let paybackMonths = Infinity;
+	let remainingNPV = 0;
+	let remainingIRR = 0;
+	let remainingPayback = Infinity;
+	let remainingAPR = 0;
+
+	// Token Mode Calculated values - Lifetime (from cashflow start)
+	let lifetimeIRR = 0;
+	let lifetimeNPV = 0;
+	let lifetimePayback = Infinity;
+	let lifetimeAPR = 0;
 
 	// Asset Mode Calculated values
 	let monthlyAssetCashflows: Array<{ month: string; projected: number; actual: number }> = [];
@@ -57,23 +69,58 @@
 
 		try {
 			if (mode === 'token') {
-				// Token Mode Calculations
+				// Token Mode Calculations - Remaining cashflows
 				monthlyTokenCashflows = calculateMonthlyTokenCashflows(token, oilPrice, mintedSupply);
 
 				if (monthlyTokenCashflows.length > 0) {
 					const cashflows = monthlyTokenCashflows.map((m) => m.cashflow);
 
-					// Calculate NPV using monthly discount rate
+					// Calculate remaining NPV using monthly discount rate
 					const monthlyDiscountRate = Math.pow(1 + discountRate / 100, 1 / 12) - 1;
-					npv = calculateNPV(cashflows, monthlyDiscountRate);
+					remainingNPV = calculateNPV(cashflows, monthlyDiscountRate);
 
-					// Calculate IRR (returns monthly rate as decimal)
+					// Calculate remaining IRR (returns monthly rate as decimal)
 					const monthlyIRR = calculateIRR(cashflows);
 					// Annualize: (1 + monthlyRate)^12 - 1, then convert to percentage
-					annualizedIRR = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99;
+					remainingIRR = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99;
 
-					// Calculate payback period in months
-					paybackMonths = calculatePaybackPeriod(cashflows);
+					// Calculate remaining payback period in months
+					remainingPayback = calculatePaybackPeriod(cashflows);
+
+					// Calculate remaining APR: (Sum_all_cashflows + mintPrice)^(12/count_periods) - 1
+					// Include the initial -mintPrice investment in the sum
+					const sumAllCashflows = cashflows.reduce((sum, cf) => sum + cf, 0);
+					const countPeriods = cashflows.length - 1; // Number of periods (excluding initial investment)
+					if (countPeriods > 0 && sumAllCashflows > -mintPrice) {
+						remainingAPR = (Math.pow(sumAllCashflows + mintPrice, 12 / countPeriods) - 1) * 100;
+					} else {
+						remainingAPR = -99;
+					}
+				}
+
+				// Lifetime calculations
+				lifetimeIRR = calculateLifetimeIRR(token, oilPrice, mintedSupply);
+
+				// Calculate lifetime cashflows for NPV, Payback, and APR
+				const lifetimeCashflows = getLifetimeCashflows(token, oilPrice, mintedSupply);
+
+				if (lifetimeCashflows.length > 0) {
+					// Calculate lifetime NPV using monthly discount rate
+					const monthlyDiscountRate = Math.pow(1 + discountRate / 100, 1 / 12) - 1;
+					lifetimeNPV = calculateNPV(lifetimeCashflows, monthlyDiscountRate);
+
+					// Calculate lifetime payback period
+					lifetimePayback = calculatePaybackPeriod(lifetimeCashflows);
+
+					// Calculate lifetime APR: (Sum_all_cashflows + mintPrice)^(12/count_periods) - 1
+					// Include the initial -mintPrice investment in the sum
+					const sumAllCashflows = lifetimeCashflows.reduce((sum, cf) => sum + cf, 0);
+					const countPeriods = lifetimeCashflows.length - 1; // Number of periods (excluding initial investment)
+					if (countPeriods > 0 && sumAllCashflows > -mintPrice) {
+						lifetimeAPR = (Math.pow(sumAllCashflows + mintPrice, 12 / countPeriods) - 1) * 100;
+					} else {
+						lifetimeAPR = -99;
+					}
 				}
 			} else {
 				// Asset Mode Calculations
@@ -270,24 +317,66 @@
 						<!-- Financial Metrics -->
 						<div class={sectionClasses}>
 							<h3 class={sectionTitleClasses}>Financial Metrics</h3>
-							<div class={metricGridClasses}>
-								<div class={metricCardClasses}>
-									<div class={metricValueClasses}>
-										{isFinite(annualizedIRR) ? annualizedIRR.toFixed(2) : '—'}%
+
+							<!-- Remaining Metrics Row -->
+							<div class="mb-6">
+								<h4 class="text-sm font-semibold text-gray-600 uppercase mb-3">Remaining (From Today)</h4>
+								<div class={metricGridClasses}>
+									<div class={metricCardClasses}>
+										<div class={metricValueClasses}>
+											{isFinite(remainingIRR) ? remainingIRR.toFixed(2) : '—'}%
+										</div>
+										<div class={metricLabelClasses}>Annualized IRR</div>
 									</div>
-									<div class={metricLabelClasses}>IRR (Annualized)</div>
+									<div class={metricCardClasses}>
+										<div class={metricValueClasses}>
+											${remainingNPV.toFixed(6)}
+										</div>
+										<div class={metricLabelClasses}>NPV @ {discountRate}%</div>
+									</div>
+									<div class={metricCardClasses}>
+										<div class={metricValueClasses}>
+											{isFinite(remainingPayback) ? remainingPayback.toFixed(1) : '—'} mo
+										</div>
+										<div class={metricLabelClasses}>Payback Period</div>
+									</div>
+									<div class={metricCardClasses}>
+										<div class={metricValueClasses}>
+											{isFinite(remainingAPR) ? remainingAPR.toFixed(2) : '—'}%
+										</div>
+										<div class={metricLabelClasses}>APR</div>
+									</div>
 								</div>
-								<div class={metricCardClasses}>
-									<div class={metricValueClasses}>
-										${npv.toFixed(6)}
+							</div>
+
+							<!-- Lifetime Metrics Row -->
+							<div>
+								<h4 class="text-sm font-semibold text-gray-600 uppercase mb-3">Lifetime (From Start)</h4>
+								<div class={metricGridClasses}>
+									<div class={metricCardClasses}>
+										<div class={metricValueClasses}>
+											{isFinite(lifetimeIRR) ? lifetimeIRR.toFixed(2) : '—'}%
+										</div>
+										<div class={metricLabelClasses}>Annualized IRR</div>
 									</div>
-									<div class={metricLabelClasses}>NPV @ {discountRate}%</div>
-								</div>
-								<div class={metricCardClasses}>
-									<div class={metricValueClasses}>
-										{isFinite(paybackMonths) ? paybackMonths.toFixed(1) : '—'} mo
+									<div class={metricCardClasses}>
+										<div class={metricValueClasses}>
+											${lifetimeNPV.toFixed(6)}
+										</div>
+										<div class={metricLabelClasses}>NPV @ {discountRate}%</div>
 									</div>
-									<div class={metricLabelClasses}>Payback Period</div>
+									<div class={metricCardClasses}>
+										<div class={metricValueClasses}>
+											{isFinite(lifetimePayback) ? lifetimePayback.toFixed(1) : '—'} mo
+										</div>
+										<div class={metricLabelClasses}>Payback Period</div>
+									</div>
+									<div class={metricCardClasses}>
+										<div class={metricValueClasses}>
+											{isFinite(lifetimeAPR) ? lifetimeAPR.toFixed(2) : '—'}%
+										</div>
+										<div class={metricLabelClasses}>APR</div>
+									</div>
 								</div>
 							</div>
 						</div>

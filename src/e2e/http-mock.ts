@@ -136,11 +136,11 @@ export function installHttpMocks(cfg: HttpMockConfig) {
         ? {
             name: "Gulf Deep Water 3% Royalty",
             symbol: "ALB-GDW-R1",
-            contractAddress: "0xa111111111111111111111111111111111111111",
+            contractAddress: "0x1d57246fd0ba134d7cc78ddf3ed829379d95f4b7",
             attributes: {
-              sharePercentage: 3.0,
-              oilPriceAssumption: 70,
-              benchmarkPremium: 2.5,
+              sharePercentage: 7.5,
+              oilPriceAssumption: 65,
+              benchmarkPremium: 0,
               baseReturn: 15.0,
               bonusReturn: 2500.0,
               location: "Gulf of Mexico, United States",
@@ -151,14 +151,47 @@ export function installHttpMocks(cfg: HttpMockConfig) {
               paymentFrequency: "30 days",
               breakEvenOilPrice: 8.5,
               impliedBarrelsPerToken: 0.18,
-              transportCosts: 2.5,
+              transportCosts: 0,
+              cashflowStartDate: "2025-11", // Cashflow starts in November
+              receiptsData: [
+                {
+                  month: "2025-05",
+                  assetData: { production: 347.76, revenue: 30992, expenses: 0, netIncome: 30992 },
+                  realisedPrice: { oilPrice: 89.13, gasPrice: 0 }
+                },
+                {
+                  month: "2025-06",
+                  assetData: { production: 330.885, revenue: 25040, expenses: 0, netIncome: 25040 },
+                  realisedPrice: { oilPrice: 75.67, gasPrice: 0 }
+                },
+                {
+                  month: "2025-07",
+                  assetData: { production: 336.24, revenue: 23614.71, expenses: 0, netIncome: 23614.71 },
+                  realisedPrice: { oilPrice: 70.24, gasPrice: 0 }
+                },
+                {
+                  month: "2025-08",
+                  assetData: { production: 330.615, revenue: 21490.98, expenses: 0, netIncome: 21490.98 },
+                  realisedPrice: { oilPrice: 65.00, gasPrice: 0 }
+                },
+                // Note: 2025-09 and 2025-10 are missing - will be estimated from projections
+              ],
               plannedProduction: {
-                oilPriceAssumption: 70,
+                oilPriceAssumption: 65,
                 oilPriceAssumptionCurrency: "USD",
                 projections: [
-                  { month: "2025-05", production: 450.0, revenue: 0 },
-                  { month: "2025-06", production: 445.0, revenue: 0 },
-                  { month: "2025-07", production: 440.0, revenue: 0 },
+                  { month: "2025-05", production: 347.76, revenue: 0 },
+                  { month: "2025-06", production: 330.885, revenue: 0 },
+                  { month: "2025-07", production: 336.24, revenue: 0 },
+                  { month: "2025-08", production: 330.615, revenue: 0 },
+                  { month: "2025-09", production: 314.64, revenue: 0 },
+                  { month: "2025-10", production: 319.725, revenue: 0 },
+                  { month: "2025-11", production: 304.245, revenue: 0 },
+                  { month: "2025-12", production: 302.85, revenue: 0 },
+                  { month: "2026-01", production: 297.72, revenue: 0 },
+                  { month: "2026-02", production: 252.675, revenue: 0 },
+                  { month: "2026-03", production: 280.08, revenue: 0 },
+                  { month: "2026-04", production: 136.26, revenue: 0 },
                 ],
               },
             },
@@ -182,6 +215,29 @@ export function installHttpMocks(cfg: HttpMockConfig) {
               breakEvenOilPrice: 6.94,
               impliedBarrelsPerToken: 0.144,
               transportCosts: 0,
+              cashflowStartDate: "2025-05", // Original start date (will be overridden to 2025-08 for 0xf836...)
+              receiptsData: [
+                {
+                  month: "2025-05",
+                  assetData: { production: 347.76, revenue: 30992, expenses: 0, netIncome: 30992 },
+                  realisedPrice: { oilPrice: 89.13, gasPrice: 0 }
+                },
+                {
+                  month: "2025-06",
+                  assetData: { production: 330.885, revenue: 25040, expenses: 0, netIncome: 25040 },
+                  realisedPrice: { oilPrice: 75.67, gasPrice: 0 }
+                },
+                {
+                  month: "2025-07",
+                  assetData: { production: 336.24, revenue: 23614.71, expenses: 0, netIncome: 23614.71 },
+                  realisedPrice: { oilPrice: 70.24, gasPrice: 0 }
+                },
+                {
+                  month: "2025-08",
+                  assetData: { production: 330.615, revenue: 21490.98, expenses: 0, netIncome: 21490.98 },
+                  realisedPrice: { oilPrice: 65.00, gasPrice: 0 }
+                },
+              ],
               plannedProduction: {
                 oilPriceAssumption: 65,
                 oilPriceAssumptionCurrency: "USD",

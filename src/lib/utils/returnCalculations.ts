@@ -165,16 +165,64 @@ export function calculateTokenReturns(
     mintedSupply = 0;
   }
 
+  // Get pending distributions (from receiptsData before firstPaymentDate)
+  const receiptsData = token.asset?.receiptsData || [];
+
+  // Use token.firstPaymentDate as cashflow start, with hardcoded override for specific token
+  let cashflowStartDate = token.firstPaymentDate || projections[0]?.month;
+  if (token.contractAddress?.toLowerCase() === '0xf836a500910453a397084ade41321ee20a5aade1') {
+    cashflowStartDate = '2025-08';
+  }
+
+  // Calculate pending distributions
+  let pendingDistributionsTotal = 0;
+  const receiptsMap = new Map<string, number>();
+  for (const receipt of receiptsData) {
+    if (receipt.assetData?.revenue !== undefined) {
+      receiptsMap.set(receipt.month, receipt.assetData.revenue);
+    }
+  }
+
+  // Sum pending distributions from months before cashflowStartDate
+  for (const projection of projections) {
+    if (projection.month < cashflowStartDate) {
+      if (receiptsMap.has(projection.month)) {
+        pendingDistributionsTotal += receiptsMap.get(projection.month) || 0;
+      } else {
+        // Estimate using production * oil price
+        pendingDistributionsTotal += projection.production * adjustedOilPrice;
+      }
+    }
+  }
+
+  const monthlyPendingDistribution = pendingDistributionsTotal / 12;
+
+  // Helper function to add months
+  function addMonths(dateStr: string, months: number): string {
+    const [year, month] = dateStr.split('-').map(Number);
+    const date = new Date(year, month - 1, 1);
+    date.setMonth(date.getMonth() + months);
+    const newYear = date.getFullYear();
+    const newMonth = String(date.getMonth() + 1).padStart(2, '0');
+    return `${newYear}-${newMonth}`;
+  }
+
   // Build cash flows for IRR calculation
   // Start with initial investment of -$1 at month 0
   const baseCashFlows = [-1]; // Month 0: pay $1 per token
   const mintedCashFlows = [-1]; // Month 0: pay $1 per token
 
   let totalProduction = 0;
+  const pendingDistributionsEndDate = addMonths(cashflowStartDate, 12);
 
   for (const projection of projections) {
     // Step 1 & 2: Production * adjusted oil price (with benchmark premium and transport costs)
-    const monthlyRevenue = projection.production * adjustedOilPrice;
+    let monthlyRevenue = projection.production * adjustedOilPrice;
+
+    // Add pending distributions for first 12 months from cashflowStartDate
+    if (projection.month >= cashflowStartDate && projection.month < pendingDistributionsEndDate) {
+      monthlyRevenue += monthlyPendingDistribution;
+    }
 
     // Step 3: Apply token's share of asset
     const tokenShareRevenue = monthlyRevenue * sharePercentage;

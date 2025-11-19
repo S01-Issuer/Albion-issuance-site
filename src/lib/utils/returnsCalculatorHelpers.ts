@@ -78,14 +78,55 @@ export function calculateMonthlyTokenCashflows(
 
 	const asset = token.asset;
 	const { projections } = asset.plannedProduction;
-	const cashflowStartDate = asset.cashflowStartDate || projections[0]?.month;
+
+	// Get pricing adjustments from asset technical data
+	const benchmarkPremiumStr = asset.technical?.pricing?.benchmarkPremium;
+	const transportCostsStr = asset.technical?.pricing?.transportCosts;
+
+	const benchmarkPremium = benchmarkPremiumStr
+		? (parseFloat(String(benchmarkPremiumStr).replace(/[^-\d.]/g, '')) || 0)
+		: 0;
+	const transportCosts = transportCostsStr
+		? (parseFloat(String(transportCostsStr).replace(/[^-\d.]/g, '')) || 0)
+		: 0;
+
+	// Calculate adjusted oil price
+	const adjustedOilPrice = oilPrice + benchmarkPremium - transportCosts;
+
+	// Use token.firstPaymentDate as the cashflow start date
+	// TEMPORARY HARDCODED FIX: Override for specific token
+	let cashflowStartDate = token.firstPaymentDate || projections[0]?.month;
+	if (token.contractAddress?.toLowerCase() === '0xf836a500910453a397084ade41321ee20a5aade1') {
+		cashflowStartDate = '2025-08';
+	}
+
 	const receiptsData = asset.receiptsData || [];
 
-	// Step 3: Sum netIncome from receipts data for months before cashflowStartDate (pending distributions)
+	// Step 3: Sum revenue from receipts data for months before cashflowStartDate (pending distributions)
+	// If receipts are missing for months between last receipt and cashflowStartDate, estimate using projections
 	let pendingDistributionsTotal = 0;
+
+	// Create a map of receipts by month for quick lookup
+	const receiptsMap = new Map<string, number>();
 	for (const receipt of receiptsData) {
-		if (isDateBefore(receipt.month, cashflowStartDate)) {
-			pendingDistributionsTotal += receipt.assetData.netIncome || 0;
+		if (receipt.assetData?.revenue !== undefined) {
+			receiptsMap.set(receipt.month, receipt.assetData.revenue);
+		}
+	}
+
+	// Sum all pending distributions from before cashflowStartDate
+	// For months with receipts, use actual revenue
+	// For months without receipts but with projections, estimate as production * adjustedOilPrice
+	for (const projection of projections) {
+		if (isDateBefore(projection.month, cashflowStartDate)) {
+			if (receiptsMap.has(projection.month)) {
+				// Use actual revenue from receipts
+				pendingDistributionsTotal += receiptsMap.get(projection.month) || 0;
+			} else {
+				// Estimate using production projection * adjusted oil price
+				const estimatedRevenue = projection.production * adjustedOilPrice;
+				pendingDistributionsTotal += estimatedRevenue;
+			}
 		}
 	}
 
@@ -99,8 +140,8 @@ export function calculateMonthlyTokenCashflows(
 	const pendingDistributionsEndDate = addMonths(cashflowStartDate, 12);
 
 	for (const projection of projections) {
-		// Step 1 & 2: Production * oil price to get cash flow
-		let monthlyCashflow = projection.production * oilPrice;
+		// Step 1 & 2: Production * adjusted oil price (with benchmark premium and transport costs) to get cash flow
+		let monthlyCashflow = projection.production * adjustedOilPrice;
 
 		// Step 4: Add pending distributions for the first 12 months from cashflowStartDate
 		// These will be sliced later to only include remaining months
@@ -147,6 +188,206 @@ export function calculateMonthlyTokenCashflows(
 	finalCashflows.unshift({ month: currentYearMonth, cashflow: -1 });
 
 	return finalCashflows;
+}
+
+/**
+ * Get lifetime cashflows - includes all months from cashflow start date without slicing or pro-rating
+ * @param token Token metadata with asset data
+ * @param oilPrice Oil price assumption in USD per barrel
+ * @param mintedSupply Number of tokens minted (for normalizing per-token cashflows)
+ * @returns Array of cashflows starting with -$1 investment
+ */
+export function getLifetimeCashflows(
+	token: TokenMetadata,
+	oilPrice: number,
+	mintedSupply: number = 1
+): number[] {
+	if (!token.asset?.plannedProduction?.projections || token.asset.plannedProduction.projections.length === 0) {
+		return [];
+	}
+
+	const asset = token.asset;
+	const { projections } = asset.plannedProduction;
+
+	// Get pricing adjustments from asset technical data
+	const benchmarkPremiumStr = asset.technical?.pricing?.benchmarkPremium;
+	const transportCostsStr = asset.technical?.pricing?.transportCosts;
+
+	const benchmarkPremium = benchmarkPremiumStr
+		? (parseFloat(String(benchmarkPremiumStr).replace(/[^-\d.]/g, '')) || 0)
+		: 0;
+	const transportCosts = transportCostsStr
+		? (parseFloat(String(transportCostsStr).replace(/[^-\d.]/g, '')) || 0)
+		: 0;
+
+	// Calculate adjusted oil price
+	const adjustedOilPrice = oilPrice + benchmarkPremium - transportCosts;
+
+	// Use token.firstPaymentDate as the cashflow start date
+	// TEMPORARY HARDCODED FIX: Override for specific token
+	let cashflowStartDate = token.firstPaymentDate || projections[0]?.month;
+	if (token.contractAddress?.toLowerCase() === '0xf836a500910453a397084ade41321ee20a5aade1') {
+		cashflowStartDate = '2025-08';
+	}
+
+	const receiptsData = asset.receiptsData || [];
+
+	// Calculate pending distributions (same as main function)
+	let pendingDistributionsTotal = 0;
+	const receiptsMap = new Map<string, number>();
+	for (const receipt of receiptsData) {
+		if (receipt.assetData?.revenue !== undefined) {
+			receiptsMap.set(receipt.month, receipt.assetData.revenue);
+		}
+	}
+
+	for (const projection of projections) {
+		if (isDateBefore(projection.month, cashflowStartDate)) {
+			if (receiptsMap.has(projection.month)) {
+				pendingDistributionsTotal += receiptsMap.get(projection.month) || 0;
+			} else {
+				const estimatedRevenue = projection.production * adjustedOilPrice;
+				pendingDistributionsTotal += estimatedRevenue;
+			}
+		}
+	}
+
+	const monthlyPendingDistribution = pendingDistributionsTotal / 12;
+	const monthlyDataMap = new Map<string, number>();
+	const pendingDistributionsEndDate = addMonths(cashflowStartDate, 12);
+
+	// Build cashflows including ALL months from cashflowStartDate (no slicing, no pro-rating)
+	for (const projection of projections) {
+		// Only include months from cashflowStartDate onwards
+		if (!isDateBefore(projection.month, cashflowStartDate)) {
+			let monthlyCashflow = projection.production * adjustedOilPrice;
+
+			// Add pending distributions for the first 12 months
+			if (isDateBefore(projection.month, pendingDistributionsEndDate)) {
+				monthlyCashflow += monthlyPendingDistribution;
+			}
+
+			monthlyDataMap.set(projection.month, monthlyCashflow);
+		}
+	}
+
+	// Convert to array and apply share percentage and token supply
+	const sharePercentage = token.sharePercentage || 100;
+	const shareMultiplier = sharePercentage / 100;
+	const normalizer = mintedSupply > 0 ? mintedSupply : 1;
+
+	const cashflows: number[] = [-1]; // Initial investment
+	for (const [month, cashflow] of monthlyDataMap.entries()) {
+		cashflows.push((cashflow * shareMultiplier) / normalizer);
+	}
+
+	return cashflows;
+}
+
+/**
+ * Calculate lifetime IRR - includes all months from cashflow start date without slicing or pro-rating
+ * @param token Token metadata with asset data
+ * @param oilPrice Oil price assumption in USD per barrel
+ * @param mintedSupply Number of tokens minted (for normalizing per-token cashflows)
+ * @returns Annualized IRR as percentage
+ */
+export function calculateLifetimeIRR(
+	token: TokenMetadata,
+	oilPrice: number,
+	mintedSupply: number = 1
+): number {
+	if (!token.asset?.plannedProduction?.projections || token.asset.plannedProduction.projections.length === 0) {
+		return 0;
+	}
+
+	const asset = token.asset;
+	const { projections } = asset.plannedProduction;
+
+	// Get pricing adjustments from asset technical data
+	const benchmarkPremiumStr = asset.technical?.pricing?.benchmarkPremium;
+	const transportCostsStr = asset.technical?.pricing?.transportCosts;
+
+	const benchmarkPremium = benchmarkPremiumStr
+		? (parseFloat(String(benchmarkPremiumStr).replace(/[^-\d.]/g, '')) || 0)
+		: 0;
+	const transportCosts = transportCostsStr
+		? (parseFloat(String(transportCostsStr).replace(/[^-\d.]/g, '')) || 0)
+		: 0;
+
+	// Calculate adjusted oil price
+	const adjustedOilPrice = oilPrice + benchmarkPremium - transportCosts;
+
+	// Use token.firstPaymentDate as the cashflow start date
+	// TEMPORARY HARDCODED FIX: Override for specific token
+	let cashflowStartDate = token.firstPaymentDate || projections[0]?.month;
+	if (token.contractAddress?.toLowerCase() === '0xf836a500910453a397084ade41321ee20a5aade1') {
+		cashflowStartDate = '2025-08';
+	}
+
+	const receiptsData = asset.receiptsData || [];
+
+	// Calculate pending distributions (same as main function)
+	let pendingDistributionsTotal = 0;
+	const receiptsMap = new Map<string, number>();
+	for (const receipt of receiptsData) {
+		if (receipt.assetData?.revenue !== undefined) {
+			receiptsMap.set(receipt.month, receipt.assetData.revenue);
+		}
+	}
+
+	for (const projection of projections) {
+		if (isDateBefore(projection.month, cashflowStartDate)) {
+			if (receiptsMap.has(projection.month)) {
+				pendingDistributionsTotal += receiptsMap.get(projection.month) || 0;
+			} else {
+				const estimatedRevenue = projection.production * adjustedOilPrice;
+				pendingDistributionsTotal += estimatedRevenue;
+			}
+		}
+	}
+
+	const monthlyPendingDistribution = pendingDistributionsTotal / 12;
+	const monthlyDataMap = new Map<string, number>();
+	const pendingDistributionsEndDate = addMonths(cashflowStartDate, 12);
+
+	// Build cashflows including ALL months from cashflowStartDate (no slicing, no pro-rating)
+	for (const projection of projections) {
+		// Only include months from cashflowStartDate onwards
+		if (!isDateBefore(projection.month, cashflowStartDate)) {
+			let monthlyCashflow = projection.production * adjustedOilPrice;
+
+			// Add pending distributions for the first 12 months
+			if (isDateBefore(projection.month, pendingDistributionsEndDate)) {
+				monthlyCashflow += monthlyPendingDistribution;
+			}
+
+			monthlyDataMap.set(projection.month, monthlyCashflow);
+		}
+	}
+
+	// Convert to array and apply share percentage and token supply
+	const sharePercentage = token.sharePercentage || 100;
+	const shareMultiplier = sharePercentage / 100;
+	const normalizer = mintedSupply > 0 ? mintedSupply : 1;
+
+	const cashflows: number[] = [-1]; // Initial investment
+	for (const [month, cashflow] of monthlyDataMap.entries()) {
+		cashflows.push((cashflow * shareMultiplier) / normalizer);
+	}
+
+	if (cashflows.length <= 1) {
+		return 0;
+	}
+
+	// Calculate IRR
+	const monthlyIRR = calculateIRR(cashflows);
+
+	// Annualize and convert to percentage
+	if (monthlyIRR <= -0.99) {
+		return -99;
+	}
+
+	return (Math.pow(1 + monthlyIRR, 12) - 1) * 100;
 }
 
 /**
@@ -274,8 +515,24 @@ export function calculateMonthlyAssetCashflows(
 		return [];
 	}
 
-	const { projections } = token.asset.plannedProduction;
-	const receiptsData = token.asset.receiptsData || [];
+	const asset = token.asset;
+	const { projections } = asset.plannedProduction;
+
+	// Get pricing adjustments from asset technical data
+	const benchmarkPremiumStr = asset.technical?.pricing?.benchmarkPremium;
+	const transportCostsStr = asset.technical?.pricing?.transportCosts;
+
+	const benchmarkPremium = benchmarkPremiumStr
+		? (parseFloat(String(benchmarkPremiumStr).replace(/[^-\d.]/g, '')) || 0)
+		: 0;
+	const transportCosts = transportCostsStr
+		? (parseFloat(String(transportCostsStr).replace(/[^-\d.]/g, '')) || 0)
+		: 0;
+
+	// Calculate adjusted oil price
+	const adjustedOilPrice = oilPrice + benchmarkPremium - transportCosts;
+
+	const receiptsData = asset.receiptsData || [];
 
 	// Create a map of receipts data by month for easy lookup
 	const receiptsMap = new Map<string, number>();
@@ -289,7 +546,7 @@ export function calculateMonthlyAssetCashflows(
 	const monthlyData: Array<{ month: string; projected: number; actual: number }> = [];
 
 	for (const projection of projections) {
-		const projected = projection.production * oilPrice;
+		const projected = projection.production * adjustedOilPrice;
 		const actual = receiptsMap.get(projection.month) || 0;
 
 		monthlyData.push({
