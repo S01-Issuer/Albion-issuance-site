@@ -19,6 +19,7 @@
 	import AssetOverviewTab from '$lib/components/patterns/assets/AssetOverviewTab.svelte';
 	import ReturnsCalculatorModal from '$lib/components/patterns/ReturnsCalculatorModal.svelte';
 import { calculateTokenReturns, getTokenPayoutHistory, getTokenSupply } from '$lib/utils/returnCalculations';
+import { calculateLifetimeIRR, calculateMonthlyTokenCashflows, calculateIRR } from '$lib/utils/returnsCalculatorHelpers';
 import { PINATA_GATEWAY } from '$lib/network';
 import { catalogService } from '$lib/services';
 import { getTokenTermsPath } from '$lib/utils/tokenTerms';
@@ -1218,58 +1219,38 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 								</div>
 
 								<div class="p-8 pt-0 border-t border-light-gray">
-									<h5 class="text-sm font-extrabold text-black uppercase tracking-wider mb-4 pt-6 flex items-center gap-1 relative">
-										<span>Estimated IRR</span>
-										<span
-											class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100"
-											on:mouseenter={() => showTooltipWithDelay('irr')}
-											on:mouseleave={hideTooltip}
-											role="button"
-											tabindex="0"
-										>
-											ⓘ
-										</span>
-										{#if showTooltip === 'irr'}
-											<div class="absolute top-full left-0 mt-1 bg-black text-white p-2 rounded text-xs max-w-xs z-[1000]">
-												IRR is a standard oil and gas industry and project finance returns metric that gives the rate of return that would set the NPV of cashflows to 0. It accounts for early repayment of invested capital.
+									{#if token}
+										{@const lifetimeIRR = calculateLifetimeIRR(token, 65, supply?.mintedSupply ?? 0, 1)}
+										{@const monthlyCashflows = calculateMonthlyTokenCashflows(token, 65, supply?.mintedSupply ?? 0, 1)}
+										{@const cashflows = monthlyCashflows.map(m => m.cashflow)}
+										{@const monthlyIRR = calculateIRR(cashflows)}
+										{@const remainingIRR = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99}
+
+										<h5 class="text-sm font-extrabold text-black uppercase tracking-wider mb-4 pt-6">
+											Returns (1 Token @ Default Assumptions)
+										</h5>
+										<div class="grid grid-cols-3 gap-2 sm:gap-3 mb-4">
+											<div class="text-center p-3 bg-white">
+												<span class="text-xs font-medium text-black opacity-70 block mb-1">Lifetime Returns</span>
+												<span class="text-xl font-extrabold text-primary">{formatSmartReturn(lifetimeIRR)}</span>
 											</div>
-										{/if}
-									</h5>
-									<div class="grid grid-cols-3 gap-3">
-										<div class="text-center p-3 bg-white">
-											<span class="text-xs font-medium text-black opacity-70 block mb-1 relative">Base IRR <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100" on:mouseenter={() => showTooltipWithDelay('base')} on:mouseleave={hideTooltip} role="button" tabindex="0">ⓘ</span></span>
-											<span class="text-xl font-extrabold text-primary">{
-												calculatedReturns?.baseReturn !== undefined
-													? formatSmartReturn(calculatedReturns.baseReturn)
-													: 'TBD'
-											}</span>
-											{#if showTooltip === 'base'}<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">IRR assuming max supply</div>{/if}
+											<div class="text-center p-3 bg-white">
+												<span class="text-xs font-medium text-black opacity-70 block mb-1">Remaining Returns</span>
+												<span class="text-xl font-extrabold text-primary">{formatSmartReturn(remainingIRR)}</span>
+											</div>
+											<button
+												class="w-full px-3 py-2 bg-primary text-white font-extrabold text-sm rounded-none hover:opacity-90 transition-opacity"
+												on:click={() => openReturnsCalculator(token, supply?.mintedSupply ?? 0, supply?.availableSupply ?? 0)}
+											>
+												<span class="hidden sm:inline">Returns Estimator →</span>
+												<span class="sm:hidden">Estimator →</span>
+											</button>
 										</div>
-										<div class="text-center p-3 bg-white">
-											<span class="text-xs font-medium text-black opacity-70 block mb-1 relative">Bonus IRR <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100" on:mouseenter={() => showTooltipWithDelay('bonus')} on:mouseleave={hideTooltip} role="button" tabindex="0">ⓘ</span></span>
-											<span class="text-xl font-extrabold text-primary">{
-												calculatedReturns?.bonusReturn !== undefined
-													? (() => {
-														const formatted = formatSmartReturn(calculatedReturns.bonusReturn);
-														return formatted.startsWith('>') ? formatted : `+${formatted}`;
-													})()
-													: 'TBD'
-											}</span>
-											{#if showTooltip === 'bonus'}<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">Additional IRR where supply is lower than max supply</div>{/if}
-										</div>
-										<div class="text-center p-3 bg-white hidden sm:block">
-											<span class="text-xs font-medium text-black opacity-70 block mb-1 relative">Total Expected</span>
-										<span class="text-xl font-extrabold text-primary">{
-											calculatedReturns?.baseReturn !== undefined && calculatedReturns?.bonusReturn !== undefined
-												? formatSmartReturn(calculatedReturns.baseReturn + calculatedReturns.bonusReturn)
-												: 'TBD'
-										}</span>
-										</div>
-									</div>
+									{/if}
 								</div>
 
 								<div class="px-4 sm:px-8 pb-6 sm:pb-8">
-									<div class="grid grid-cols-3 gap-2 sm:gap-3">
+									<div class="grid grid-cols-2 gap-2 sm:gap-3">
 										{#if hasAvailableSupply}
 											<PrimaryButton
 												fullWidth
@@ -1291,14 +1272,6 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 										>
 											<span class="hidden sm:inline">Distributions</span>
 											<span class="sm:hidden">History</span>
-										</SecondaryButton>
-										<SecondaryButton
-											fullWidth
-											size="small"
-											on:click={() => openReturnsCalculator(token, supply?.mintedSupply ?? 0, supply?.availableSupply ?? 0)}
-										>
-											<span class="hidden sm:inline">Returns</span>
-											<span class="sm:hidden">Returns</span>
 										</SecondaryButton>
 									</div>
 								</div>
@@ -1330,19 +1303,17 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 
 						{#if historyPayouts.length > 0}
 								<div class="space-y-4">
-									<div class="grid grid-cols-[1.2fr,1fr,1fr,1.6fr,1.6fr] gap-6 text-xs font-bold text-black uppercase tracking-wider border-b border-light-gray pb-2">
+									<div class="grid grid-cols-[1.2fr,1fr,1.6fr,1.6fr] gap-6 text-xs font-bold text-black uppercase tracking-wider border-b border-light-gray pb-2">
 										<div class="text-left">Month</div>
 										<div class="text-center">Total Payments</div>
-										<div class="text-right">Per Token</div>
 										<div class="text-left">Claims Vault</div>
 										<div class="text-left">Payout Transaction</div>
 									</div>
 										<div class="space-y-2 max-h-[400px] overflow-y-auto pr-1">
 											{#each historyPayouts as payout (payout.orderHash ?? payout.txHash ?? payout.month)}
-												<div class="grid grid-cols-[1.2fr,1fr,1fr,1.6fr,1.6fr] gap-6 text-sm items-center">
+												<div class="grid grid-cols-[1.2fr,1fr,1.6fr,1.6fr] gap-6 text-sm items-center">
 												<div class="text-left font-medium text-black">{formatReportMonth(payout.month)}</div>
 												<div class="text-center font-semibold text-black">{formatCurrency(payout.totalPayout)}</div>
-												<div class="text-right font-semibold text-black">US${payout.payoutPerToken.toFixed(5)}</div>
 												<div class="text-left font-semibold text-secondary">
 													{#if payout.orderHash}
 														<a
@@ -1380,10 +1351,9 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 											</div>
 										{/each}
 									</div>
-										<div class="border-t border-light-gray pt-4 grid grid-cols-[1.2fr,1fr,1fr,1.6fr,1.6fr] gap-6 text-sm font-extrabold items-center">
+										<div class="border-t border-light-gray pt-4 grid grid-cols-[1.2fr,1fr,1.6fr,1.6fr] gap-6 text-sm font-extrabold items-center">
 										<div class="text-left text-black">Total</div>
 										<div class="text-center text-black">{formatCurrency(historyPayouts.reduce((sum, p) => sum + p.totalPayout, 0))}</div>
-										<div class="text-right text-black">US${historyPayouts.reduce((sum, p) => sum + p.payoutPerToken, 0).toFixed(5)}</div>
 										<div class="text-left text-black opacity-50">—</div>
 										<div class="text-left text-black opacity-50">—</div>
 									</div>
