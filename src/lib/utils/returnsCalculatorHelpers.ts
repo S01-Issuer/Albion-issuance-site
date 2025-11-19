@@ -44,7 +44,7 @@ function getCurrentMonthProration(): number {
 /**
  * Add months to a date string (YYYY-MM format)
  */
-function addMonths(dateStr: string, months: number): string {
+export function addMonths(dateStr: string, months: number): string {
 	const [year, month] = dateStr.split('-').map(Number);
 	const date = new Date(year, month - 1, 1);
 	date.setMonth(date.getMonth() + months);
@@ -58,6 +58,72 @@ function addMonths(dateStr: string, months: number): string {
  */
 function isDateBefore(dateA: string, dateB: string): boolean {
 	return dateA < dateB;
+}
+
+/**
+ * Get the cashflow start date for a token, with hardcoded override for specific token
+ */
+function getCashflowStartDate(token: TokenMetadata, projections: Array<{ month: string }>): string {
+	let cashflowStartDate = token.firstPaymentDate || projections[0]?.month;
+	// TEMPORARY HARDCODED FIX: Override for specific token
+	if (token.contractAddress?.toLowerCase() === '0xf836a500910453a397084ade41321ee20a5aade1') {
+		cashflowStartDate = '2025-08';
+	}
+	return cashflowStartDate;
+}
+
+/**
+ * Calculate pending distributions from receipts and projections
+ * Returns the total pending distributions for months before cashflowStartDate
+ */
+function calculatePendingDistributionsTotal(
+	receiptsData: ReceiptsData[],
+	projections: Array<{ month: string; production: number }>,
+	cashflowStartDate: string,
+	adjustedOilPrice: number
+): number {
+	let pendingDistributionsTotal = 0;
+
+	// Create a map of receipts by month for quick lookup
+	const receiptsMap = new Map<string, number>();
+	for (const receipt of receiptsData) {
+		if (receipt.assetData?.revenue !== undefined) {
+			receiptsMap.set(receipt.month, receipt.assetData.revenue);
+		}
+	}
+
+	// Sum all pending distributions from before cashflowStartDate
+	for (const projection of projections) {
+		if (isDateBefore(projection.month, cashflowStartDate)) {
+			if (receiptsMap.has(projection.month)) {
+				// Use actual revenue from receipts
+				pendingDistributionsTotal += receiptsMap.get(projection.month) || 0;
+			} else {
+				// Estimate using production projection * adjusted oil price
+				const estimatedRevenue = projection.production * adjustedOilPrice;
+				pendingDistributionsTotal += estimatedRevenue;
+			}
+		}
+	}
+
+	return pendingDistributionsTotal;
+}
+
+/**
+ * Get pricing adjustments from token asset data
+ */
+function getPricingAdjustments(asset: TokenMetadata['asset']): { benchmarkPremium: number; transportCosts: number } {
+	const benchmarkPremiumStr = asset?.technical?.pricing?.benchmarkPremium;
+	const transportCostsStr = asset?.technical?.pricing?.transportCosts;
+
+	const benchmarkPremium = benchmarkPremiumStr
+		? (parseFloat(String(benchmarkPremiumStr).replace(/[^-\d.]/g, '')) || 0)
+		: 0;
+	const transportCosts = transportCostsStr
+		? (parseFloat(String(transportCostsStr).replace(/[^-\d.]/g, '')) || 0)
+		: 0;
+
+	return { benchmarkPremium, transportCosts };
 }
 
 /**
@@ -81,56 +147,22 @@ export function calculateMonthlyTokenCashflows(
 	const asset = token.asset;
 	const { projections } = asset.plannedProduction;
 
-	// Get pricing adjustments from asset technical data
-	const benchmarkPremiumStr = asset.technical?.pricing?.benchmarkPremium;
-	const transportCostsStr = asset.technical?.pricing?.transportCosts;
-
-	const benchmarkPremium = benchmarkPremiumStr
-		? (parseFloat(String(benchmarkPremiumStr).replace(/[^-\d.]/g, '')) || 0)
-		: 0;
-	const transportCosts = transportCostsStr
-		? (parseFloat(String(transportCostsStr).replace(/[^-\d.]/g, '')) || 0)
-		: 0;
-
-	// Calculate adjusted oil price
+	// Get pricing adjustments and calculate adjusted oil price
+	const { benchmarkPremium, transportCosts } = getPricingAdjustments(asset);
 	const adjustedOilPrice = oilPrice + benchmarkPremium - transportCosts;
 
-	// Use token.firstPaymentDate as the cashflow start date
-	// TEMPORARY HARDCODED FIX: Override for specific token
-	let cashflowStartDate = token.firstPaymentDate || projections[0]?.month;
-	if (token.contractAddress?.toLowerCase() === '0xf836a500910453a397084ade41321ee20a5aade1') {
-		cashflowStartDate = '2025-08';
-	}
+	// Get cashflow start date (with hardcoded override if needed)
+	const cashflowStartDate = getCashflowStartDate(token, projections);
 
 	const receiptsData = asset.receiptsData || [];
 
-	// Step 3: Sum revenue from receipts data for months before cashflowStartDate (pending distributions)
-	// If receipts are missing for months between last receipt and cashflowStartDate, estimate using projections
-	let pendingDistributionsTotal = 0;
-
-	// Create a map of receipts by month for quick lookup
-	const receiptsMap = new Map<string, number>();
-	for (const receipt of receiptsData) {
-		if (receipt.assetData?.revenue !== undefined) {
-			receiptsMap.set(receipt.month, receipt.assetData.revenue);
-		}
-	}
-
-	// Sum all pending distributions from before cashflowStartDate
-	// For months with receipts, use actual revenue
-	// For months without receipts but with projections, estimate as production * adjustedOilPrice
-	for (const projection of projections) {
-		if (isDateBefore(projection.month, cashflowStartDate)) {
-			if (receiptsMap.has(projection.month)) {
-				// Use actual revenue from receipts
-				pendingDistributionsTotal += receiptsMap.get(projection.month) || 0;
-			} else {
-				// Estimate using production projection * adjusted oil price
-				const estimatedRevenue = projection.production * adjustedOilPrice;
-				pendingDistributionsTotal += estimatedRevenue;
-			}
-		}
-	}
+	// Calculate pending distributions
+	const pendingDistributionsTotal = calculatePendingDistributionsTotal(
+		receiptsData,
+		projections,
+		cashflowStartDate,
+		adjustedOilPrice
+	);
 
 	// Step 4: Divide pending distributions total by 12 to get monthly pending distribution amount
 	const monthlyPendingDistribution = pendingDistributionsTotal / 12;
@@ -214,48 +246,22 @@ export function getLifetimeCashflows(
 	const asset = token.asset;
 	const { projections } = asset.plannedProduction;
 
-	// Get pricing adjustments from asset technical data
-	const benchmarkPremiumStr = asset.technical?.pricing?.benchmarkPremium;
-	const transportCostsStr = asset.technical?.pricing?.transportCosts;
-
-	const benchmarkPremium = benchmarkPremiumStr
-		? (parseFloat(String(benchmarkPremiumStr).replace(/[^-\d.]/g, '')) || 0)
-		: 0;
-	const transportCosts = transportCostsStr
-		? (parseFloat(String(transportCostsStr).replace(/[^-\d.]/g, '')) || 0)
-		: 0;
-
-	// Calculate adjusted oil price
+	// Get pricing adjustments and calculate adjusted oil price
+	const { benchmarkPremium, transportCosts } = getPricingAdjustments(asset);
 	const adjustedOilPrice = oilPrice + benchmarkPremium - transportCosts;
 
-	// Use token.firstPaymentDate as the cashflow start date
-	// TEMPORARY HARDCODED FIX: Override for specific token
-	let cashflowStartDate = token.firstPaymentDate || projections[0]?.month;
-	if (token.contractAddress?.toLowerCase() === '0xf836a500910453a397084ade41321ee20a5aade1') {
-		cashflowStartDate = '2025-08';
-	}
+	// Get cashflow start date (with hardcoded override if needed)
+	const cashflowStartDate = getCashflowStartDate(token, projections);
 
 	const receiptsData = asset.receiptsData || [];
 
-	// Calculate pending distributions (same as main function)
-	let pendingDistributionsTotal = 0;
-	const receiptsMap = new Map<string, number>();
-	for (const receipt of receiptsData) {
-		if (receipt.assetData?.revenue !== undefined) {
-			receiptsMap.set(receipt.month, receipt.assetData.revenue);
-		}
-	}
-
-	for (const projection of projections) {
-		if (isDateBefore(projection.month, cashflowStartDate)) {
-			if (receiptsMap.has(projection.month)) {
-				pendingDistributionsTotal += receiptsMap.get(projection.month) || 0;
-			} else {
-				const estimatedRevenue = projection.production * adjustedOilPrice;
-				pendingDistributionsTotal += estimatedRevenue;
-			}
-		}
-	}
+	// Calculate pending distributions
+	const pendingDistributionsTotal = calculatePendingDistributionsTotal(
+		receiptsData,
+		projections,
+		cashflowStartDate,
+		adjustedOilPrice
+	);
 
 	const monthlyPendingDistribution = pendingDistributionsTotal / 12;
 	const monthlyDataMap = new Map<string, number>();
@@ -310,48 +316,22 @@ export function calculateLifetimeIRR(
 	const asset = token.asset;
 	const { projections } = asset.plannedProduction;
 
-	// Get pricing adjustments from asset technical data
-	const benchmarkPremiumStr = asset.technical?.pricing?.benchmarkPremium;
-	const transportCostsStr = asset.technical?.pricing?.transportCosts;
-
-	const benchmarkPremium = benchmarkPremiumStr
-		? (parseFloat(String(benchmarkPremiumStr).replace(/[^-\d.]/g, '')) || 0)
-		: 0;
-	const transportCosts = transportCostsStr
-		? (parseFloat(String(transportCostsStr).replace(/[^-\d.]/g, '')) || 0)
-		: 0;
-
-	// Calculate adjusted oil price
+	// Get pricing adjustments and calculate adjusted oil price
+	const { benchmarkPremium, transportCosts } = getPricingAdjustments(asset);
 	const adjustedOilPrice = oilPrice + benchmarkPremium - transportCosts;
 
-	// Use token.firstPaymentDate as the cashflow start date
-	// TEMPORARY HARDCODED FIX: Override for specific token
-	let cashflowStartDate = token.firstPaymentDate || projections[0]?.month;
-	if (token.contractAddress?.toLowerCase() === '0xf836a500910453a397084ade41321ee20a5aade1') {
-		cashflowStartDate = '2025-08';
-	}
+	// Get cashflow start date (with hardcoded override if needed)
+	const cashflowStartDate = getCashflowStartDate(token, projections);
 
 	const receiptsData = asset.receiptsData || [];
 
-	// Calculate pending distributions (same as main function)
-	let pendingDistributionsTotal = 0;
-	const receiptsMap = new Map<string, number>();
-	for (const receipt of receiptsData) {
-		if (receipt.assetData?.revenue !== undefined) {
-			receiptsMap.set(receipt.month, receipt.assetData.revenue);
-		}
-	}
-
-	for (const projection of projections) {
-		if (isDateBefore(projection.month, cashflowStartDate)) {
-			if (receiptsMap.has(projection.month)) {
-				pendingDistributionsTotal += receiptsMap.get(projection.month) || 0;
-			} else {
-				const estimatedRevenue = projection.production * adjustedOilPrice;
-				pendingDistributionsTotal += estimatedRevenue;
-			}
-		}
-	}
+	// Calculate pending distributions
+	const pendingDistributionsTotal = calculatePendingDistributionsTotal(
+		receiptsData,
+		projections,
+		cashflowStartDate,
+		adjustedOilPrice
+	);
 
 	const monthlyPendingDistribution = pendingDistributionsTotal / 12;
 	const monthlyDataMap = new Map<string, number>();
@@ -496,12 +476,6 @@ export function calculatePaybackPeriod(cashflows: number[]): number {
 	return Infinity;
 }
 
-/**
- * Get a standardized month key from a date string
- */
-export function getMonthKey(dateStr: string): string {
-	return dateStr;
-}
 
 /**
  * Calculate monthly asset cashflows for asset mode
@@ -525,18 +499,8 @@ export function calculateMonthlyAssetCashflows(
 	const asset = token.asset;
 	const { projections } = asset.plannedProduction;
 
-	// Get pricing adjustments from asset technical data
-	const benchmarkPremiumStr = asset.technical?.pricing?.benchmarkPremium;
-	const transportCostsStr = asset.technical?.pricing?.transportCosts;
-
-	const benchmarkPremium = benchmarkPremiumStr
-		? (parseFloat(String(benchmarkPremiumStr).replace(/[^-\d.]/g, '')) || 0)
-		: 0;
-	const transportCosts = transportCostsStr
-		? (parseFloat(String(transportCostsStr).replace(/[^-\d.]/g, '')) || 0)
-		: 0;
-
-	// Calculate adjusted oil price
+	// Get pricing adjustments and calculate adjusted oil price
+	const { benchmarkPremium, transportCosts } = getPricingAdjustments(asset);
 	const adjustedOilPrice = oilPrice + benchmarkPremium - transportCosts;
 
 	const receiptsData = asset.receiptsData || [];

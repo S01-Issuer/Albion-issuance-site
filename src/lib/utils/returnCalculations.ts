@@ -6,6 +6,7 @@
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
 import type { Asset } from "$lib/types/uiTypes";
 import type { OffchainAssetReceiptVault } from "$lib/types/graphql";
+import { calculateIRR, addMonths } from "./returnsCalculatorHelpers";
 
 export interface TokenReturns {
   baseReturn: number; // Annual percentage
@@ -27,61 +28,6 @@ interface TokenPayoutSummary {
   payoutPerToken: number;
   orderHash: string;
   txHash: string;
-}
-
-/**
- * Calculate IRR (Internal Rate of Return) using Newton's method
- * @param cashFlows Array of cash flows where index 0 is the initial investment (negative)
- * @returns IRR as a decimal (e.g., 0.12 for 12%)
- */
-function calculateIRR(cashFlows: number[]): number {
-  const maxIterations = 100;
-  const tolerance = 1e-7;
-  let rate = 0.1; // Initial guess of 10%
-
-  // Check if the investment can ever be recovered
-  const totalInflows = cashFlows.slice(1).reduce((sum, cf) => sum + cf, 0);
-  const initialOutflow = Math.abs(cashFlows[0]);
-
-  if (totalInflows < initialOutflow * 0.01) {
-    // Total inflows are less than 1% of initial investment
-    // This is essentially a total loss
-    return -0.99; // -99% monthly return
-  }
-
-  for (let i = 0; i < maxIterations; i++) {
-    let npv = 0;
-    let dnpv = 0;
-
-    for (let j = 0; j < cashFlows.length; j++) {
-      const factor = Math.pow(1 + rate, j);
-      npv += cashFlows[j] / factor;
-      dnpv -= (j * cashFlows[j]) / Math.pow(1 + rate, j + 1);
-    }
-
-    // Protect against division by zero or infinity
-    if (!isFinite(dnpv) || Math.abs(dnpv) < 1e-10) {
-      return -0.99; // Return maximum loss if derivative is invalid
-    }
-
-    const newRate = rate - npv / dnpv;
-
-    // Bound the rate to prevent divergence
-    if (!isFinite(newRate) || newRate < -0.99) {
-      return -0.99; // Maximum loss
-    }
-    if (newRate > 100) {
-      return 100; // Cap at 10,000% monthly (unrealistic but prevents infinity)
-    }
-
-    if (Math.abs(newRate - rate) < tolerance) {
-      return newRate;
-    }
-
-    rate = newRate;
-  }
-
-  return rate;
 }
 
 /**
@@ -196,16 +142,6 @@ export function calculateTokenReturns(
   }
 
   const monthlyPendingDistribution = pendingDistributionsTotal / 12;
-
-  // Helper function to add months
-  function addMonths(dateStr: string, months: number): string {
-    const [year, month] = dateStr.split('-').map(Number);
-    const date = new Date(year, month - 1, 1);
-    date.setMonth(date.getMonth() + months);
-    const newYear = date.getFullYear();
-    const newMonth = String(date.getMonth() + 1).padStart(2, '0');
-    return `${newYear}-${newMonth}`;
-  }
 
   // Build cash flows for IRR calculation
   // Start with initial investment of -$1 at month 0

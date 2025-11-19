@@ -1,18 +1,15 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
-	import { onMount, afterUpdate } from 'svelte';
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
-	import { PrimaryButton, SecondaryButton } from '$lib/components/components';
+	import { SecondaryButton } from '$lib/components/components';
 	import {
 		calculateMonthlyTokenCashflows,
-		calculateMonthlyAssetCashflows,
 		calculateNPV,
 		calculateIRR,
 		calculatePaybackPeriod,
 		calculateLifetimeIRR,
 		getLifetimeCashflows,
 	} from '$lib/utils/returnsCalculatorHelpers';
-	import FormattedNumber from '$lib/components/components/FormattedNumber.svelte';
 	import { Chart, registerables } from 'chart.js';
 
 	Chart.register(...registerables);
@@ -20,7 +17,6 @@
 	// Props
 	export let isOpen = false;
 	export let token: TokenMetadata | null = null;
-	export let mode: 'token' | 'asset' = 'token';
 	export let onClose: () => void = () => {};
 	export let mintedSupply: number = 0; // Minted supply for normalizing cashflows per token
 	export let availableSupply: number = 0; // Available supply (already calculated)
@@ -32,13 +28,12 @@
 	let oilPrice = 65;
 	let discountRate = 10;
 	let numberOfTokens = 1;
-	let showAssetData = false; // Toggle between token and asset mode data view
 
-	// availableSupply is passed as a prop - no need to recalculate
-
-	// Set default numberOfTokens when token changes
-	$: if (token && availableSupply < 1) {
-		numberOfTokens = parseFloat(availableSupply.toFixed(3));
+	// Reset assumptions when modal opens
+	$: if (isOpen && token) {
+		oilPrice = 65;
+		discountRate = 10;
+		numberOfTokens = availableSupply < 1 ? parseFloat(availableSupply.toFixed(3)) : 1;
 	}
 
 	// Validation error for numberOfTokens
@@ -58,25 +53,18 @@
 	let lifetimePayback = Infinity;
 	let lifetimeAPR = 0;
 
-	// Asset Mode Calculated values
-	let monthlyAssetCashflows: Array<{ month: string; projected: number; actual: number }> = [];
-	let totalProjectedAsset = 0;
-	let totalActualAsset = 0;
-
-	// Chart.js instances
+	// Chart.js instance
 	let tokenChart: Chart | null = null;
-	let assetChart: Chart | null = null;
 	let tokenChartCanvas: HTMLCanvasElement;
-	let assetChartCanvas: HTMLCanvasElement;
 
 	// Reactive calculations
 	$: if (token && isOpen) {
 		updateCalculations();
 	}
 
-	// Update when user changes inputs or mode - trigger on any input change
+	// Update when user changes inputs - trigger on any input change
 	$: if (token) {
-		oilPrice, discountRate, numberOfTokens, mode;
+		oilPrice, discountRate, numberOfTokens;
 		updateCalculations();
 	}
 
@@ -87,71 +75,59 @@
 		if (tokensError) return;
 
 		try {
-			if (mode === 'token') {
-				// Token Mode Calculations - Remaining cashflows
-				monthlyTokenCashflows = calculateMonthlyTokenCashflows(token, oilPrice, mintedSupply, numberOfTokens);
+			// Remaining cashflows
+			monthlyTokenCashflows = calculateMonthlyTokenCashflows(token, oilPrice, mintedSupply, numberOfTokens);
 
-				if (monthlyTokenCashflows.length > 0) {
-					const cashflows = monthlyTokenCashflows.map((m) => m.cashflow);
+			if (monthlyTokenCashflows.length > 0) {
+				const cashflows = monthlyTokenCashflows.map((m) => m.cashflow);
 
-					// Calculate remaining NPV using monthly discount rate
-					const monthlyDiscountRate = Math.pow(1 + discountRate / 100, 1 / 12) - 1;
-					remainingNPV = calculateNPV(cashflows, monthlyDiscountRate);
+				// Calculate remaining NPV using monthly discount rate
+				const monthlyDiscountRate = Math.pow(1 + discountRate / 100, 1 / 12) - 1;
+				remainingNPV = calculateNPV(cashflows, monthlyDiscountRate);
 
-					// Calculate remaining IRR (returns monthly rate as decimal)
-					const monthlyIRR = calculateIRR(cashflows);
-					// Annualize: (1 + monthlyRate)^12 - 1, then convert to percentage
-					remainingIRR = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99;
+				// Calculate remaining IRR (returns monthly rate as decimal)
+				const monthlyIRR = calculateIRR(cashflows);
+				// Annualize: (1 + monthlyRate)^12 - 1, then convert to percentage
+				remainingIRR = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99;
 
-					// Calculate remaining payback period in months
-					remainingPayback = calculatePaybackPeriod(cashflows);
+				// Calculate remaining payback period in months
+				remainingPayback = calculatePaybackPeriod(cashflows);
 
-					// Calculate remaining APR: ((total_returns / initial_investment)^(12/count_periods) - 1) * 100
-					// total_returns = sumAllCashflows + totalMintCost (which cancels out the negative initial investment)
-					const totalMintCost = mintPrice * numberOfTokens;
-					const sumAllCashflows = cashflows.reduce((sum, cf) => sum + cf, 0);
-					const totalReturns = sumAllCashflows + totalMintCost;
-					const countPeriods = cashflows.length - 1; // Number of periods (excluding initial investment)
-					if (countPeriods > 0 && totalReturns > 0 && totalMintCost > 0) {
-						remainingAPR = (Math.pow(totalReturns / totalMintCost, 12 / countPeriods) - 1) * 100;
-					} else {
-						remainingAPR = -99;
-					}
+				// Calculate remaining APR: ((total_returns / initial_investment)^(12/count_periods) - 1) * 100
+				const totalMintCost = mintPrice * numberOfTokens;
+				const sumAllCashflows = cashflows.reduce((sum, cf) => sum + cf, 0);
+				const totalReturns = sumAllCashflows + totalMintCost;
+				const countPeriods = cashflows.length - 1; // Number of periods (excluding initial investment)
+				if (countPeriods > 0 && totalReturns > 0 && totalMintCost > 0) {
+					remainingAPR = (Math.pow(totalReturns / totalMintCost, 12 / countPeriods) - 1) * 100;
+				} else {
+					remainingAPR = -99;
 				}
+			}
 
-				// Lifetime calculations
-				lifetimeIRR = calculateLifetimeIRR(token, oilPrice, mintedSupply, numberOfTokens);
+			// Lifetime calculations
+			lifetimeIRR = calculateLifetimeIRR(token, oilPrice, mintedSupply, numberOfTokens);
 
-				// Calculate lifetime cashflows for NPV, Payback, and APR
-				const lifetimeCashflows = getLifetimeCashflows(token, oilPrice, mintedSupply, numberOfTokens);
+			// Calculate lifetime cashflows for NPV, Payback, and APR
+			const lifetimeCashflows = getLifetimeCashflows(token, oilPrice, mintedSupply, numberOfTokens);
 
-				if (lifetimeCashflows.length > 0) {
-					// Calculate lifetime NPV using monthly discount rate
-					const monthlyDiscountRate = Math.pow(1 + discountRate / 100, 1 / 12) - 1;
-					lifetimeNPV = calculateNPV(lifetimeCashflows, monthlyDiscountRate);
+			if (lifetimeCashflows.length > 0) {
+				// Calculate lifetime NPV using monthly discount rate
+				const monthlyDiscountRate = Math.pow(1 + discountRate / 100, 1 / 12) - 1;
+				lifetimeNPV = calculateNPV(lifetimeCashflows, monthlyDiscountRate);
 
-					// Calculate lifetime payback period
-					lifetimePayback = calculatePaybackPeriod(lifetimeCashflows);
+				// Calculate lifetime payback period
+				lifetimePayback = calculatePaybackPeriod(lifetimeCashflows);
 
-					// Calculate lifetime APR: ((total_returns / initial_investment)^(12/count_periods) - 1) * 100
-					// total_returns = sumAllCashflows + totalMintCost (which cancels out the negative initial investment)
-					const totalMintCost = mintPrice * numberOfTokens;
-					const sumAllCashflows = lifetimeCashflows.reduce((sum, cf) => sum + cf, 0);
-					const totalReturns = sumAllCashflows + totalMintCost;
-					const countPeriods = lifetimeCashflows.length - 1; // Number of periods (excluding initial investment)
-					if (countPeriods > 0 && totalReturns > 0 && totalMintCost > 0) {
-						lifetimeAPR = (Math.pow(totalReturns / totalMintCost, 12 / countPeriods) - 1) * 100;
-					} else {
-						lifetimeAPR = -99;
-					}
-				}
-			} else {
-				// Asset Mode Calculations
-				monthlyAssetCashflows = calculateMonthlyAssetCashflows(token, oilPrice);
-
-				if (monthlyAssetCashflows.length > 0) {
-					totalProjectedAsset = monthlyAssetCashflows.reduce((sum, m) => sum + m.projected, 0);
-					totalActualAsset = monthlyAssetCashflows.reduce((sum, m) => sum + m.actual, 0);
+				// Calculate lifetime APR: ((total_returns / initial_investment)^(12/count_periods) - 1) * 100
+				const totalMintCost = mintPrice * numberOfTokens;
+				const sumAllCashflows = lifetimeCashflows.reduce((sum, cf) => sum + cf, 0);
+				const totalReturns = sumAllCashflows + totalMintCost;
+				const countPeriods = lifetimeCashflows.length - 1; // Number of periods (excluding initial investment)
+				if (countPeriods > 0 && totalReturns > 0 && totalMintCost > 0) {
+					lifetimeAPR = (Math.pow(totalReturns / totalMintCost, 12 / countPeriods) - 1) * 100;
+				} else {
+					lifetimeAPR = -99;
 				}
 			}
 		} catch (error) {
@@ -167,7 +143,7 @@
 			tokenChart.destroy();
 		}
 
-		const displayData = monthlyTokenCashflows.slice(0, 24);
+		const displayData = monthlyTokenCashflows;
 
 		// Calculate cumulative returns
 		let cumulative = 0;
@@ -248,73 +224,13 @@
 		});
 	}
 
-	function createAssetChart() {
-		if (!assetChartCanvas || monthlyAssetCashflows.length === 0) return;
-
-		// Destroy existing chart
-		if (assetChart) {
-			assetChart.destroy();
-		}
-
-		const displayData = monthlyAssetCashflows.slice(0, 24);
-		const ctx = assetChartCanvas.getContext('2d');
-		if (!ctx) return;
-
-		assetChart = new Chart(ctx, {
-			type: 'bar',
-			data: {
-				labels: displayData.map(d => d.month),
-				datasets: [
-					{
-						label: 'Projected (USDC)',
-						data: displayData.map(d => d.projected),
-						backgroundColor: '#08bccc',
-						borderColor: '#08bccc',
-						borderWidth: 0,
-					},
-					{
-						label: 'Received To Date (USDC)',
-						data: displayData.map(d => d.actual),
-						backgroundColor: '#283c84',
-						borderColor: '#283c84',
-						borderWidth: 0,
-					}
-				]
-			},
-			options: {
-				responsive: true,
-				maintainAspectRatio: false,
-				plugins: {
-					legend: {
-						display: true,
-						position: 'bottom',
-					}
-				},
-				scales: {
-					y: {
-						beginAtZero: true,
-						ticks: {
-							callback: function(value) {
-								return 'US$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-							}
-						}
-					}
-				}
-			}
-		});
-	}
-
 	function handleClose() {
 		onClose();
 	}
 
-	// Update charts when data changes
-	$: if (monthlyTokenCashflows && tokenChartCanvas && mode === 'token' && isOpen) {
+	// Update chart when data changes
+	$: if (monthlyTokenCashflows && tokenChartCanvas && isOpen) {
 		createTokenChart();
-	}
-
-	$: if (monthlyAssetCashflows && assetChartCanvas && mode === 'asset' && isOpen) {
-		createAssetChart();
 	}
 
 	const displayClasses = 'fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-50';
