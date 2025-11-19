@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
+	import { onMount, afterUpdate } from 'svelte';
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import { PrimaryButton, SecondaryButton } from '$lib/components/components';
 	import {
@@ -12,6 +13,9 @@
 		getLifetimeCashflows,
 	} from '$lib/utils/returnsCalculatorHelpers';
 	import FormattedNumber from '$lib/components/components/FormattedNumber.svelte';
+	import { Chart, registerables } from 'chart.js';
+
+	Chart.register(...registerables);
 
 	// Props
 	export let isOpen = false;
@@ -46,12 +50,11 @@
 	let totalProjectedAsset = 0;
 	let totalActualAsset = 0;
 
-	// Chart dimensions
-	const chartWidth = 900;
-	const chartHeight = 400;
-	const margin = { top: 20, right: 20, bottom: 60, left: 60 };
-	const innerWidth = chartWidth - margin.left - margin.right;
-	const innerHeight = chartHeight - margin.top - margin.bottom;
+	// Chart.js instances
+	let tokenChart: Chart | null = null;
+	let assetChart: Chart | null = null;
+	let tokenChartCanvas: HTMLCanvasElement;
+	let assetChartCanvas: HTMLCanvasElement;
 
 	// Reactive calculations
 	$: if (token && isOpen) {
@@ -136,56 +139,148 @@
 		}
 	}
 
-	function getTokenChartData() {
-		if (monthlyTokenCashflows.length === 0) return [];
+	function createTokenChart() {
+		if (!tokenChartCanvas || monthlyTokenCashflows.length === 0) return;
+
+		// Destroy existing chart
+		if (tokenChart) {
+			tokenChart.destroy();
+		}
 
 		const displayData = monthlyTokenCashflows.slice(0, 24);
-		const minCashflow = Math.min(...displayData.map((m) => m.cashflow), 0);
-		const maxCashflow = Math.max(...displayData.map((m) => m.cashflow), 0);
-		const range = Math.max(Math.abs(minCashflow), Math.abs(maxCashflow));
-		const chartCenter = innerHeight / 2;
 
-		return displayData.map((item, index) => ({
-			month: item.month,
-			cashflow: item.cashflow,
-			x: margin.left + (index / Math.max(displayData.length - 1, 1)) * innerWidth,
-			y: range > 0
-				? margin.top + chartCenter - (item.cashflow / range) * (chartCenter - 10)
-				: margin.top + chartCenter,
-			height: range > 0 ? Math.abs((item.cashflow / range) * (chartCenter - 10)) : 0,
-			color: item.cashflow >= 0 ? '#08bccc' : '#ff6b6b',
-		}));
+		// Calculate cumulative returns
+		let cumulative = 0;
+		const cumulativeData = displayData.map(d => {
+			cumulative += d.cashflow;
+			return cumulative;
+		});
+
+		const ctx = tokenChartCanvas.getContext('2d');
+		if (!ctx) return;
+
+		tokenChart = new Chart(ctx, {
+			type: 'bar',
+			data: {
+				labels: displayData.map((d, i) => i === 0 ? 'Today' : d.month),
+				datasets: [
+					{
+						type: 'bar',
+						label: 'Monthly Cashflow (USDC)',
+						data: displayData.map(d => d.cashflow),
+						backgroundColor: '#08bccc',
+						borderColor: '#08bccc',
+						borderWidth: 0,
+						yAxisID: 'y',
+					},
+					{
+						type: 'line',
+						label: 'Cumulative Return (USDC)',
+						data: cumulativeData,
+						borderColor: '#283c84',
+						backgroundColor: '#283c84',
+						borderWidth: 2,
+						pointRadius: 3,
+						pointHoverRadius: 5,
+						fill: false,
+						yAxisID: 'y',
+					}
+				]
+			},
+			options: {
+				responsive: true,
+				maintainAspectRatio: false,
+				interaction: {
+					mode: 'index',
+					intersect: false,
+				},
+				plugins: {
+					legend: {
+						display: true,
+						position: 'bottom',
+					},
+					tooltip: {
+						callbacks: {
+							label: function(context) {
+								let label = context.dataset.label || '';
+								if (label) {
+									label += ': ';
+								}
+								if (context.parsed.y !== null) {
+									label += 'US$' + context.parsed.y.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+								}
+								return label;
+							}
+						}
+					}
+				},
+				scales: {
+					y: {
+						beginAtZero: true,
+						ticks: {
+							callback: function(value) {
+								return 'US$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+							}
+						}
+					}
+				}
+			}
+		});
 	}
 
-	function getAssetChartData() {
-		if (monthlyAssetCashflows.length === 0) return [];
+	function createAssetChart() {
+		if (!assetChartCanvas || monthlyAssetCashflows.length === 0) return;
+
+		// Destroy existing chart
+		if (assetChart) {
+			assetChart.destroy();
+		}
 
 		const displayData = monthlyAssetCashflows.slice(0, 24);
-		const allValues = displayData.flatMap((m) => [m.projected, m.actual]);
-		const maxValue = Math.max(...allValues, 0);
-		const chartCenter = innerHeight / 2;
+		const ctx = assetChartCanvas.getContext('2d');
+		if (!ctx) return;
 
-		return displayData.map((item, index) => {
-			const barWidth = 6;
-			const spacing = 4;
-			const groupX = margin.left + (index / Math.max(displayData.length - 1, 1)) * innerWidth;
-
-			return {
-				month: item.month,
-				projected: item.projected,
-				actual: item.actual,
-				projectedX: groupX - spacing - barWidth / 2,
-				projectedY: maxValue > 0
-					? margin.top + chartCenter - (item.projected / maxValue) * (chartCenter - 10)
-					: margin.top + chartCenter,
-				projectedHeight: maxValue > 0 ? (item.projected / maxValue) * (chartCenter - 10) : 0,
-				actualX: groupX + spacing + barWidth / 2,
-				actualY: maxValue > 0
-					? margin.top + chartCenter - (item.actual / maxValue) * (chartCenter - 10)
-					: margin.top + chartCenter,
-				actualHeight: maxValue > 0 ? (item.actual / maxValue) * (chartCenter - 10) : 0,
-				barWidth,
-			};
+		assetChart = new Chart(ctx, {
+			type: 'bar',
+			data: {
+				labels: displayData.map(d => d.month),
+				datasets: [
+					{
+						label: 'Projected (USDC)',
+						data: displayData.map(d => d.projected),
+						backgroundColor: '#08bccc',
+						borderColor: '#08bccc',
+						borderWidth: 0,
+					},
+					{
+						label: 'Received To Date (USDC)',
+						data: displayData.map(d => d.actual),
+						backgroundColor: '#283c84',
+						borderColor: '#283c84',
+						borderWidth: 0,
+					}
+				]
+			},
+			options: {
+				responsive: true,
+				maintainAspectRatio: false,
+				plugins: {
+					legend: {
+						display: true,
+						position: 'bottom',
+					}
+				},
+				scales: {
+					y: {
+						beginAtZero: true,
+						ticks: {
+							callback: function(value) {
+								return 'US$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+							}
+						}
+					}
+				}
+			}
 		});
 	}
 
@@ -193,10 +288,16 @@
 		onClose();
 	}
 
-	$: tokenChartData = getTokenChartData();
-	$: assetChartData = getAssetChartData();
+	// Update charts when data changes
+	$: if (monthlyTokenCashflows && tokenChartCanvas && mode === 'token' && isOpen) {
+		createTokenChart();
+	}
 
-	const displayClasses = 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50';
+	$: if (monthlyAssetCashflows && assetChartCanvas && mode === 'asset' && isOpen) {
+		createAssetChart();
+	}
+
+	const displayClasses = 'fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-50';
 	const modalClasses = 'bg-white rounded-lg shadow-2xl max-w-5xl w-full mx-4 max-h-[90vh] overflow-y-auto';
 	const headerClasses = 'sticky top-0 bg-white border-b border-light-gray p-6';
 	const contentClasses = 'p-6 space-y-8';
@@ -222,112 +323,74 @@
 		<div class={modalClasses} on:click|stopPropagation>
 			<!-- Header -->
 			<div class={headerClasses}>
-				<h2 class={titleClasses}>Returns Calculator</h2>
-				<p class={subtitleClasses}>
-					{#if token}
-						{token.releaseName} • {mode === 'token' ? 'Token' : 'Asset'} Mode
-					{:else}
-						Load a token to calculate returns
-					{/if}
-				</p>
+				<div class="flex items-start justify-between">
+					<div class="flex-1">
+						<h2 class={titleClasses}>Returns Calculator</h2>
+						<p class={subtitleClasses}>
+							{#if token}
+								{token.releaseName}
+							{:else}
+								Load a token to calculate returns
+							{/if}
+						</p>
+					</div>
+				</div>
 			</div>
 
 			<!-- Content -->
 			<div class={contentClasses}>
 				{#if token}
-					<!-- Data Toggle - Show in both modes -->
-					<div class={sectionClasses}>
-							<h3 class={sectionTitleClasses}>Monthly Returns Data</h3>
-							<div class="flex gap-4 mb-4">
-								<button
-									on:click={() => {
-										showAssetData = false;
-										mode = 'token';
-									}}
-									class={`px-4 py-2 rounded font-semibold transition-colors ${
-										!showAssetData
-											? 'bg-primary text-white'
-											: 'bg-light-gray text-black hover:bg-gray-300'
-									}`}
-								>
-									Token Mode
-								</button>
-								<button
-									on:click={() => {
-										showAssetData = true;
-										mode = 'asset';
-									}}
-									class={`px-4 py-2 rounded font-semibold transition-colors ${
-										showAssetData
-											? 'bg-primary text-white'
-											: 'bg-light-gray text-black hover:bg-gray-300'
-									}`}
-								>
-									Asset Mode
-								</button>
+					<!-- Assumptions - Show in both modes -->
+					<div class="flex justify-center">
+						<div class="bg-blue-50 border border-primary rounded px-3 py-1.5 inline-flex gap-4 items-center text-xs">
+							<span class="font-semibold text-black uppercase">Assumptions:</span>
+							<div class="flex items-center gap-2">
+								<label class="text-xs font-medium text-black" for="oil-price">Oil Price (USD/bbl)</label>
+								<input
+									id="oil-price"
+									type="number"
+									bind:value={oilPrice}
+									min="0"
+									step="1"
+									class="px-2 py-1 border border-light-gray rounded text-xs w-20 focus:outline-none focus:ring-1 focus:ring-primary"
+								/>
 							</div>
-
-							<!-- Token Mode Data Table -->
-							{#if !showAssetData}
-								<div class="overflow-x-auto bg-light-gray p-4 rounded-lg">
-									<table class="w-full text-sm border-collapse">
-										<thead>
-											<tr class="border-b border-gray-300">
-												<th class="text-left p-2 font-semibold text-black">Month</th>
-												<th class="text-right p-2 font-semibold text-black">Cashflow (USDC)</th>
-											</tr>
-										</thead>
-										<tbody>
-											{#each monthlyTokenCashflows.slice(0, 24) as row, index}
-												<tr class={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-													<td class="p-2 text-black">{row.month}</td>
-													<td class="text-right p-2 text-black font-mono">US${row.cashflow.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-												</tr>
-											{/each}
-										</tbody>
-									</table>
-									{#if monthlyTokenCashflows.length === 0}
-										<p class="text-center text-gray-600 p-4">No token cashflows calculated</p>
-									{/if}
-								</div>
-							{:else}
-								<!-- Asset Mode Data Table -->
-								<div class="overflow-x-auto bg-light-gray p-4 rounded-lg">
-									<table class="w-full text-sm border-collapse">
-										<thead>
-											<tr class="border-b border-gray-300">
-												<th class="text-left p-2 font-semibold text-black">Month</th>
-												<th class="text-right p-2 font-semibold text-black">Projected (USDC)</th>
-												<th class="text-right p-2 font-semibold text-black">Actual (USDC)</th>
-											</tr>
-										</thead>
-										<tbody>
-											{#each monthlyAssetCashflows.slice(0, 24) as row, index}
-												<tr class={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-													<td class="p-2 text-black">{row.month}</td>
-													<td class="text-right p-2 text-black font-mono">US${row.projected.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-													<td class="text-right p-2 text-black font-mono">US${row.actual.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-												</tr>
-											{/each}
-										</tbody>
-									</table>
-									{#if monthlyAssetCashflows.length === 0}
-										<p class="text-center text-gray-600 p-4">No asset cashflows calculated</p>
-									{/if}
-								</div>
-							{/if}
+							<div class="flex items-center gap-2">
+								<label class="text-xs font-medium text-black" for="discount-rate">Discount Rate (%)</label>
+								<input
+									id="discount-rate"
+									type="number"
+									bind:value={discountRate}
+									min="0"
+									max="50"
+									step="0.1"
+									class="px-2 py-1 border border-light-gray rounded text-xs w-20 focus:outline-none focus:ring-1 focus:ring-primary"
+								/>
+							</div>
+						</div>
 					</div>
 
-					<!-- Mode-specific sections -->
-					{#if mode === 'token'}
-						<!-- TOKEN MODE -->
-						<!-- Financial Metrics (Token Mode Only) -->
-						{#if !showAssetData}
-							<div class={sectionClasses}>
-								<h3 class={sectionTitleClasses}>Financial Metrics</h3>
+					<!-- Charts Section -->
+					<div class={sectionClasses}>
+						<h3 class={sectionTitleClasses}>Returns On Minting Today</h3>
 
-								<!-- Remaining Metrics Row -->
-								<div class="mb-6">
+						<!-- Token Mode Column Chart -->
+					<div class="bg-light-gray p-4 rounded-lg">
+						{#if monthlyTokenCashflows.length > 0}
+							<div style="height: 400px;">
+								<canvas bind:this={tokenChartCanvas}></canvas>
+							</div>
+						{:else}
+							<p class="text-center text-gray-600 p-4">No token cashflows calculated</p>
+						{/if}
+					</div>
+					</div>
+
+						<div class={sectionClasses}>
+							<h3 class={sectionTitleClasses}>Financial Metrics</h3>
+
+							<!-- Remaining Metrics Row -->
+							<div class="mb-6">
 								<h4 class="text-sm font-semibold text-gray-600 uppercase mb-3">Remaining (From Today)</h4>
 								<div class={metricGridClasses}>
 									<div class={metricCardClasses}>
@@ -388,89 +451,6 @@
 								</div>
 							</div>
 						</div>
-						{/if}
-
-						<!-- User Inputs -->
-						<div class={sectionClasses}>
-							<h3 class={sectionTitleClasses}>Model Inputs</h3>
-							<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-								<div class={inputGroupClasses}>
-									<label class={labelClasses} for="oil-price">Oil Price (USD/bbl)</label>
-									<input
-										id="oil-price"
-										type="number"
-										bind:value={oilPrice}
-										min="0"
-										step="1"
-										class={inputClasses}
-									/>
-									<span class="text-xs text-gray-500">Default: $65/bbl</span>
-								</div>
-								<div class={inputGroupClasses}>
-									<label class={labelClasses} for="discount-rate">Discount Rate (%)</label>
-									<input
-										id="discount-rate"
-										type="number"
-										bind:value={discountRate}
-										min="0"
-										max="50"
-										step="0.1"
-										class={inputClasses}
-									/>
-									<span class="text-xs text-gray-500">Default: 10% annual</span>
-								</div>
-							</div>
-						</div>
-
-						<!-- Data Info -->
-						<div class="bg-blue-50 border border-primary rounded-lg p-4">
-							<p class="text-sm text-black">
-								<strong>Token Share:</strong> {token.sharePercentage}% of asset
-								<br />
-								<strong>Pending Distributions:</strong> Applied to first 12 months from cashflow start date (only remaining months shown)
-								<br />
-								<strong>Production Data:</strong> {token.asset.plannedProduction?.projections.length ?? 0} months
-							</p>
-						</div>
-					{:else}
-						<!-- ASSET MODE -->
-						<!-- Summary Metrics -->
-						<div class={sectionClasses}>
-							<h3 class={sectionTitleClasses}>Revenue Summary</h3>
-							<div class="grid grid-cols-2 gap-4">
-								<div class={metricCardClasses}>
-									<div class={metricValueClasses}>
-										${totalProjectedAsset.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-									</div>
-									<div class={metricLabelClasses}>Total Projected</div>
-								</div>
-								<div class={metricCardClasses}>
-									<div class={metricValueClasses}>
-										${totalActualAsset.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-									</div>
-									<div class={metricLabelClasses}>Received To Date</div>
-								</div>
-							</div>
-						</div>
-
-						<!-- User Input -->
-						<div class={sectionClasses}>
-							<h3 class={sectionTitleClasses}>Model Input</h3>
-							<div class="flex flex-col gap-2">
-								<label class={labelClasses} for="asset-oil-price">Oil Price (USD/bbl)</label>
-								<input
-									id="asset-oil-price"
-									type="number"
-									bind:value={oilPrice}
-									min="0"
-									step="1"
-									class={inputClasses}
-								/>
-								<span class="text-xs text-gray-500">Default: $65/bbl</span>
-							</div>
-						</div>
-
-					{/if}
 				{:else}
 					<div class="text-center py-12">
 						<p class="text-gray-600">No token data available. Please select a token to calculate returns.</p>
