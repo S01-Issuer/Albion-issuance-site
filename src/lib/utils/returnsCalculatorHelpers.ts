@@ -64,13 +64,15 @@ function isDateBefore(dateA: string, dateB: string): boolean {
  * Calculate monthly token cashflows based on the specified algorithm
  * @param token Token metadata with asset data
  * @param oilPrice Oil price assumption in USD per barrel
- * @param mintedSupply Number of tokens minted (for normalizing per-token cashflows)
+ * @param mintedSupply Number of tokens currently minted
+ * @param numberOfTokens Number of tokens to purchase
  * @returns Array of monthly cashflows starting from today
  */
 export function calculateMonthlyTokenCashflows(
 	token: TokenMetadata,
 	oilPrice: number,
-	mintedSupply: number = 1
+	mintedSupply: number = 1,
+	numberOfTokens: number = 1
 ): Array<{ month: string; cashflow: number }> {
 	if (!token.asset?.plannedProduction?.projections || token.asset.plannedProduction.projections.length === 0) {
 		return [];
@@ -173,19 +175,20 @@ export function calculateMonthlyTokenCashflows(
 		return [];
 	}
 
-	// Step 7: Divide entire array by current token supply and apply share percentage
-	// First apply the token's share percentage, then divide by number of tokens minted
+	// Step 7: Divide entire array by adjusted token supply and apply share percentage
+	// First apply the token's share percentage, then divide by (current supply + new tokens)
+	// Then multiply by numberOfTokens to get total for all purchased tokens
 	const sharePercentage = token.sharePercentage || 100; // Default to 100% if not specified
 	const shareMultiplier = sharePercentage / 100;
-	const normalizer = mintedSupply > 0 ? mintedSupply : 1;
+	const normalizer = (mintedSupply + numberOfTokens) > 0 ? (mintedSupply + numberOfTokens) : 1;
 
 	const finalCashflows: Array<{ month: string; cashflow: number }> = resultMonths.map((item) => ({
 		month: item.month,
-		cashflow: (item.cashflow * shareMultiplier) / normalizer,
+		cashflow: ((item.cashflow * shareMultiplier) / normalizer) * numberOfTokens,
 	}));
 
-	// Step 8: Prepend -$1 cost to the beginning
-	finalCashflows.unshift({ month: currentYearMonth, cashflow: -1 });
+	// Step 8: Prepend initial cost (number of tokens * $1 per token)
+	finalCashflows.unshift({ month: currentYearMonth, cashflow: -numberOfTokens });
 
 	return finalCashflows;
 }
@@ -194,13 +197,15 @@ export function calculateMonthlyTokenCashflows(
  * Get lifetime cashflows - includes all months from cashflow start date without slicing or pro-rating
  * @param token Token metadata with asset data
  * @param oilPrice Oil price assumption in USD per barrel
- * @param mintedSupply Number of tokens minted (for normalizing per-token cashflows)
- * @returns Array of cashflows starting with -$1 investment
+ * @param mintedSupply Number of tokens currently minted
+ * @param numberOfTokens Number of tokens to purchase
+ * @returns Array of cashflows starting with initial investment
  */
 export function getLifetimeCashflows(
 	token: TokenMetadata,
 	oilPrice: number,
-	mintedSupply: number = 1
+	mintedSupply: number = 1,
+	numberOfTokens: number = 1
 ): number[] {
 	if (!token.asset?.plannedProduction?.projections || token.asset.plannedProduction.projections.length === 0) {
 		return [];
@@ -271,14 +276,14 @@ export function getLifetimeCashflows(
 		}
 	}
 
-	// Convert to array and apply share percentage and token supply
+	// Convert to array and apply share percentage and adjusted token supply
 	const sharePercentage = token.sharePercentage || 100;
 	const shareMultiplier = sharePercentage / 100;
-	const normalizer = mintedSupply > 0 ? mintedSupply : 1;
+	const normalizer = (mintedSupply + numberOfTokens) > 0 ? (mintedSupply + numberOfTokens) : 1;
 
-	const cashflows: number[] = [-1]; // Initial investment
+	const cashflows: number[] = [-numberOfTokens]; // Initial investment
 	for (const [month, cashflow] of monthlyDataMap.entries()) {
-		cashflows.push((cashflow * shareMultiplier) / normalizer);
+		cashflows.push(((cashflow * shareMultiplier) / normalizer) * numberOfTokens);
 	}
 
 	return cashflows;
@@ -288,13 +293,15 @@ export function getLifetimeCashflows(
  * Calculate lifetime IRR - includes all months from cashflow start date without slicing or pro-rating
  * @param token Token metadata with asset data
  * @param oilPrice Oil price assumption in USD per barrel
- * @param mintedSupply Number of tokens minted (for normalizing per-token cashflows)
+ * @param mintedSupply Number of tokens currently minted
+ * @param numberOfTokens Number of tokens to purchase
  * @returns Annualized IRR as percentage
  */
 export function calculateLifetimeIRR(
 	token: TokenMetadata,
 	oilPrice: number,
-	mintedSupply: number = 1
+	mintedSupply: number = 1,
+	numberOfTokens: number = 1
 ): number {
 	if (!token.asset?.plannedProduction?.projections || token.asset.plannedProduction.projections.length === 0) {
 		return 0;
@@ -365,14 +372,14 @@ export function calculateLifetimeIRR(
 		}
 	}
 
-	// Convert to array and apply share percentage and token supply
+	// Convert to array and apply share percentage and adjusted token supply
 	const sharePercentage = token.sharePercentage || 100;
 	const shareMultiplier = sharePercentage / 100;
-	const normalizer = mintedSupply > 0 ? mintedSupply : 1;
+	const normalizer = (mintedSupply + numberOfTokens) > 0 ? (mintedSupply + numberOfTokens) : 1;
 
-	const cashflows: number[] = [-1]; // Initial investment
+	const cashflows: number[] = [-numberOfTokens]; // Initial investment
 	for (const [month, cashflow] of monthlyDataMap.entries()) {
-		cashflows.push((cashflow * shareMultiplier) / normalizer);
+		cashflows.push(((cashflow * shareMultiplier) / normalizer) * numberOfTokens);
 	}
 
 	if (cashflows.length <= 1) {

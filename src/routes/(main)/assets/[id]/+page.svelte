@@ -477,10 +477,12 @@ $: if (!historyModalOpen && historyModalToken) {
 let returnsCalculatorOpen = false;
 let selectedReturnsToken: TokenMetadata | null = null;
 let selectedReturnsTokenMintedSupply: number = 0;
+let selectedReturnsTokenAvailableSupply: number = 0;
 
-function openReturnsCalculator(token: TokenMetadata, mintedSupply: number) {
+function openReturnsCalculator(token: TokenMetadata, mintedSupply: number, availableSupply: number) {
 	selectedReturnsToken = token;
 	selectedReturnsTokenMintedSupply = mintedSupply;
+	selectedReturnsTokenAvailableSupply = availableSupply;
 	returnsCalculatorOpen = true;
 }
 
@@ -488,6 +490,7 @@ function closeReturnsCalculator() {
 	returnsCalculatorOpen = false;
 	selectedReturnsToken = null;
 	selectedReturnsTokenMintedSupply = 0;
+	selectedReturnsTokenAvailableSupply = 0;
 }
 
 // Tooltip state
@@ -1292,7 +1295,7 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 										<SecondaryButton
 											fullWidth
 											size="small"
-											on:click={() => openReturnsCalculator(token, supply?.mintedSupply ?? 0)}
+											on:click={() => openReturnsCalculator(token, supply?.mintedSupply ?? 0, supply?.availableSupply ?? 0)}
 										>
 											<span class="hidden sm:inline">Returns</span>
 											<span class="sm:hidden">Returns</span>
@@ -1407,6 +1410,7 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 				token={selectedReturnsToken}
 				mode="token"
 				mintedSupply={selectedReturnsTokenMintedSupply}
+				availableSupply={selectedReturnsTokenAvailableSupply}
 				onClose={closeReturnsCalculator}
 			/>
 

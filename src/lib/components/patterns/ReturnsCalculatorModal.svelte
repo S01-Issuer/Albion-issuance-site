@@ -23,6 +23,7 @@
 	export let mode: 'token' | 'asset' = 'token';
 	export let onClose: () => void = () => {};
 	export let mintedSupply: number = 0; // Minted supply for normalizing cashflows per token
+	export let availableSupply: number = 0; // Available supply (already calculated)
 
 	// Constants
 	const mintPrice = 1; // Price per token in USD (may be configurable in future)
@@ -30,7 +31,19 @@
 	// User inputs
 	let oilPrice = 65;
 	let discountRate = 10;
+	let numberOfTokens = 1;
 	let showAssetData = false; // Toggle between token and asset mode data view
+
+	// availableSupply is passed as a prop - no need to recalculate
+
+	// Set default numberOfTokens when token changes
+	$: if (token && availableSupply < 1) {
+		numberOfTokens = parseFloat(availableSupply.toFixed(3));
+	}
+
+	// Validation error for numberOfTokens
+	// Use a small epsilon to handle floating point precision issues
+	$: tokensError = (numberOfTokens - availableSupply) > 0.0001 ? `Only ${availableSupply.toFixed(3)} tokens available` : '';
 
 	// Token Mode Calculated values - Remaining (from current month)
 	let monthlyTokenCashflows: Array<{ month: string; cashflow: number }> = [];
@@ -63,17 +76,20 @@
 
 	// Update when user changes inputs or mode - trigger on any input change
 	$: if (token) {
-		oilPrice, discountRate, mode;
+		oilPrice, discountRate, numberOfTokens, mode;
 		updateCalculations();
 	}
 
 	function updateCalculations() {
 		if (!token) return;
 
+		// Don't calculate if there's a validation error
+		if (tokensError) return;
+
 		try {
 			if (mode === 'token') {
 				// Token Mode Calculations - Remaining cashflows
-				monthlyTokenCashflows = calculateMonthlyTokenCashflows(token, oilPrice, mintedSupply);
+				monthlyTokenCashflows = calculateMonthlyTokenCashflows(token, oilPrice, mintedSupply, numberOfTokens);
 
 				if (monthlyTokenCashflows.length > 0) {
 					const cashflows = monthlyTokenCashflows.map((m) => m.cashflow);
@@ -90,22 +106,24 @@
 					// Calculate remaining payback period in months
 					remainingPayback = calculatePaybackPeriod(cashflows);
 
-					// Calculate remaining APR: (Sum_all_cashflows + mintPrice)^(12/count_periods) - 1
-					// Include the initial -mintPrice investment in the sum
+					// Calculate remaining APR: ((total_returns / initial_investment)^(12/count_periods) - 1) * 100
+					// total_returns = sumAllCashflows + totalMintCost (which cancels out the negative initial investment)
+					const totalMintCost = mintPrice * numberOfTokens;
 					const sumAllCashflows = cashflows.reduce((sum, cf) => sum + cf, 0);
+					const totalReturns = sumAllCashflows + totalMintCost;
 					const countPeriods = cashflows.length - 1; // Number of periods (excluding initial investment)
-					if (countPeriods > 0 && sumAllCashflows > -mintPrice) {
-						remainingAPR = (Math.pow(sumAllCashflows + mintPrice, 12 / countPeriods) - 1) * 100;
+					if (countPeriods > 0 && totalReturns > 0 && totalMintCost > 0) {
+						remainingAPR = (Math.pow(totalReturns / totalMintCost, 12 / countPeriods) - 1) * 100;
 					} else {
 						remainingAPR = -99;
 					}
 				}
 
 				// Lifetime calculations
-				lifetimeIRR = calculateLifetimeIRR(token, oilPrice, mintedSupply);
+				lifetimeIRR = calculateLifetimeIRR(token, oilPrice, mintedSupply, numberOfTokens);
 
 				// Calculate lifetime cashflows for NPV, Payback, and APR
-				const lifetimeCashflows = getLifetimeCashflows(token, oilPrice, mintedSupply);
+				const lifetimeCashflows = getLifetimeCashflows(token, oilPrice, mintedSupply, numberOfTokens);
 
 				if (lifetimeCashflows.length > 0) {
 					// Calculate lifetime NPV using monthly discount rate
@@ -115,12 +133,14 @@
 					// Calculate lifetime payback period
 					lifetimePayback = calculatePaybackPeriod(lifetimeCashflows);
 
-					// Calculate lifetime APR: (Sum_all_cashflows + mintPrice)^(12/count_periods) - 1
-					// Include the initial -mintPrice investment in the sum
+					// Calculate lifetime APR: ((total_returns / initial_investment)^(12/count_periods) - 1) * 100
+					// total_returns = sumAllCashflows + totalMintCost (which cancels out the negative initial investment)
+					const totalMintCost = mintPrice * numberOfTokens;
 					const sumAllCashflows = lifetimeCashflows.reduce((sum, cf) => sum + cf, 0);
+					const totalReturns = sumAllCashflows + totalMintCost;
 					const countPeriods = lifetimeCashflows.length - 1; // Number of periods (excluding initial investment)
-					if (countPeriods > 0 && sumAllCashflows > -mintPrice) {
-						lifetimeAPR = (Math.pow(sumAllCashflows + mintPrice, 12 / countPeriods) - 1) * 100;
+					if (countPeriods > 0 && totalReturns > 0 && totalMintCost > 0) {
+						lifetimeAPR = (Math.pow(totalReturns / totalMintCost, 12 / countPeriods) - 1) * 100;
 					} else {
 						lifetimeAPR = -99;
 					}
@@ -367,6 +387,23 @@
 									class="px-2 py-1 border border-light-gray rounded text-xs w-20 focus:outline-none focus:ring-1 focus:ring-primary"
 								/>
 							</div>
+							<div class="flex flex-col gap-1">
+								<div class="flex items-center gap-2">
+									<label class="text-xs font-medium text-black" for="number-of-tokens">Number of Tokens</label>
+									<input
+										id="number-of-tokens"
+										type="number"
+										bind:value={numberOfTokens}
+										min="0"
+										max={availableSupply}
+										step={availableSupply < 1 ? "0.001" : "1"}
+										class="px-2 py-1 border {tokensError ? 'border-red-500' : 'border-light-gray'} rounded text-xs w-20 focus:outline-none focus:ring-1 focus:ring-primary"
+									/>
+								</div>
+								{#if tokensError}
+									<span class="text-xs text-red-500 ml-auto">{tokensError}</span>
+								{/if}
+							</div>
 						</div>
 					</div>
 
@@ -465,3 +502,17 @@
 		</div>
 	</div>
 {/if}
+
+<style>
+	/* Hide number input spinners/arrows for all number inputs in the calculator */
+	input[type='number']::-webkit-outer-spin-button,
+	input[type='number']::-webkit-inner-spin-button {
+		-webkit-appearance: none;
+		margin: 0;
+	}
+
+	input[type='number'] {
+		-moz-appearance: textfield;
+		appearance: textfield;
+	}
+</style>
