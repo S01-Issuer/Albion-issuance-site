@@ -556,24 +556,6 @@ export function calculateMonthlyAssetCashflows(
 		});
 	}
 
-	// Slice off months before current month and pro-rate current month
-	const currentYearMonth = getCurrentYearMonth();
-	const proration = getCurrentMonthProration();
-	const result: Array<{ month: string; projected: number; actual: number }> = [];
-
-	for (const item of monthlyData) {
-		if (item.month === currentYearMonth) {
-			// Pro-rate current month
-			result.push({
-				month: item.month,
-				projected: item.projected * proration,
-				actual: item.actual * proration,
-			});
-		} else if (item.month > currentYearMonth) {
-			// Include future months
-			result.push(item);
-		}
-	}
-
-	return result;
+	// Return ALL months (no slicing) so we can compare projected vs actual historically
+	return monthlyData;
 }

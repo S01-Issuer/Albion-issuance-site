@@ -58,9 +58,9 @@
 		updateCalculations();
 	}
 
-	// Update when user changes inputs - trigger on any input change
+	// Update when user changes inputs or mode - trigger on any input change
 	$: if (token) {
-		oilPrice, discountRate;
+		oilPrice, discountRate, mode;
 		updateCalculations();
 	}
 
@@ -235,14 +235,15 @@
 			<!-- Content -->
 			<div class={contentClasses}>
 				{#if token}
-					{#if mode === 'token'}
-						<!-- TOKEN MODE -->
-						<!-- Data Toggle -->
-						<div class={sectionClasses}>
+					<!-- Data Toggle - Show in both modes -->
+					<div class={sectionClasses}>
 							<h3 class={sectionTitleClasses}>Monthly Returns Data</h3>
 							<div class="flex gap-4 mb-4">
 								<button
-									on:click={() => (showAssetData = false)}
+									on:click={() => {
+										showAssetData = false;
+										mode = 'token';
+									}}
 									class={`px-4 py-2 rounded font-semibold transition-colors ${
 										!showAssetData
 											? 'bg-primary text-white'
@@ -252,7 +253,10 @@
 									Token Mode
 								</button>
 								<button
-									on:click={() => (showAssetData = true)}
+									on:click={() => {
+										showAssetData = true;
+										mode = 'asset';
+									}}
 									class={`px-4 py-2 rounded font-semibold transition-colors ${
 										showAssetData
 											? 'bg-primary text-white'
@@ -277,7 +281,7 @@
 											{#each monthlyTokenCashflows.slice(0, 24) as row, index}
 												<tr class={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
 													<td class="p-2 text-black">{row.month}</td>
-													<td class="text-right p-2 text-black font-mono">${row.cashflow.toFixed(6)}</td>
+													<td class="text-right p-2 text-black font-mono">US${row.cashflow.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
 												</tr>
 											{/each}
 										</tbody>
@@ -301,8 +305,8 @@
 											{#each monthlyAssetCashflows.slice(0, 24) as row, index}
 												<tr class={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
 													<td class="p-2 text-black">{row.month}</td>
-													<td class="text-right p-2 text-black font-mono">${row.projected.toFixed(6)}</td>
-													<td class="text-right p-2 text-black font-mono">${row.actual.toFixed(6)}</td>
+													<td class="text-right p-2 text-black font-mono">US${row.projected.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+													<td class="text-right p-2 text-black font-mono">US${row.actual.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
 												</tr>
 											{/each}
 										</tbody>
@@ -312,14 +316,18 @@
 									{/if}
 								</div>
 							{/if}
-						</div>
+					</div>
 
-						<!-- Financial Metrics -->
-						<div class={sectionClasses}>
-							<h3 class={sectionTitleClasses}>Financial Metrics</h3>
+					<!-- Mode-specific sections -->
+					{#if mode === 'token'}
+						<!-- TOKEN MODE -->
+						<!-- Financial Metrics (Token Mode Only) -->
+						{#if !showAssetData}
+							<div class={sectionClasses}>
+								<h3 class={sectionTitleClasses}>Financial Metrics</h3>
 
-							<!-- Remaining Metrics Row -->
-							<div class="mb-6">
+								<!-- Remaining Metrics Row -->
+								<div class="mb-6">
 								<h4 class="text-sm font-semibold text-gray-600 uppercase mb-3">Remaining (From Today)</h4>
 								<div class={metricGridClasses}>
 									<div class={metricCardClasses}>
@@ -380,6 +388,7 @@
 								</div>
 							</div>
 						</div>
+						{/if}
 
 						<!-- User Inputs -->
 						<div class={sectionClasses}>
@@ -425,61 +434,6 @@
 						</div>
 					{:else}
 						<!-- ASSET MODE -->
-						<!-- Chart Section -->
-						<div class={sectionClasses}>
-							<h3 class={sectionTitleClasses}>Projected vs Actual Revenue</h3>
-							<div class="flex justify-center overflow-x-auto bg-light-gray p-6 rounded-lg">
-								<svg {chartWidth} {chartHeight} viewBox="0 0 {chartWidth} {chartHeight}" class="min-w-full">
-									<!-- Y-axis -->
-									<line x1={margin.left} y1={margin.top} x2={margin.left} y2={chartHeight - margin.bottom} stroke="#d0d0d0" stroke-width="2" />
-									<!-- X-axis -->
-									<line x1={margin.left} y1={chartHeight - margin.bottom} x2={chartWidth - margin.right} y2={chartHeight - margin.bottom} stroke="#d0d0d0" stroke-width="2" />
-									<!-- Y label -->
-									<text x="20" y={margin.top + innerHeight / 2} text-anchor="middle" font-size="12" fill="#666" transform="rotate(-90 20 {margin.top + innerHeight / 2})">
-										Revenue ($)
-									</text>
-									<!-- Bars -->
-									{#each assetChartData as bar, index}
-										<!-- Projected -->
-										<rect
-											x={bar.projectedX - bar.barWidth / 2}
-											y={bar.projectedY}
-											width={bar.barWidth}
-											height={bar.projectedHeight}
-											fill="#08bccc"
-											opacity="0.6"
-										/>
-										<!-- Actual -->
-										<rect
-											x={bar.actualX - bar.barWidth / 2}
-											y={bar.actualY}
-											width={bar.barWidth}
-											height={bar.actualHeight}
-											fill="#08bccc"
-											opacity="1"
-										/>
-										{#if index % 3 === 0}
-											<text x={margin.left + (index / Math.max(assetChartData.length - 1, 1)) * innerWidth} y={chartHeight - 20} text-anchor="middle" font-size="11" fill="#666">
-												{bar.month}
-											</text>
-										{/if}
-									{/each}
-								</svg>
-							</div>
-
-							<!-- Legend -->
-							<div class="flex gap-6 mt-4 justify-center text-sm">
-								<div class="flex items-center gap-2">
-									<div class="w-3 h-3 rounded" style="background-color: #08bccc; opacity: 0.6;"></div>
-									<span class="text-black">Projected</span>
-								</div>
-								<div class="flex items-center gap-2">
-									<div class="w-3 h-3 rounded" style="background-color: #08bccc;"></div>
-									<span class="text-black">Actual</span>
-								</div>
-							</div>
-						</div>
-
 						<!-- Summary Metrics -->
 						<div class={sectionClasses}>
 							<h3 class={sectionTitleClasses}>Revenue Summary</h3>
@@ -494,7 +448,7 @@
 									<div class={metricValueClasses}>
 										${totalActualAsset.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
 									</div>
-									<div class={metricLabelClasses}>Total Actual</div>
+									<div class={metricLabelClasses}>Received To Date</div>
 								</div>
 							</div>
 						</div>
@@ -516,12 +470,6 @@
 							</div>
 						</div>
 
-						<!-- Data Info -->
-						<div class="bg-blue-50 border border-primary rounded-lg p-4">
-							<p class="text-sm text-black">
-								<strong>Note:</strong> Chart shows {assetChartData.length} months: {assetChartData.filter((m) => m.actual > 0).length} months actual, {assetChartData.filter((m) => m.actual === 0).length} months projected.
-							</p>
-						</div>
 					{/if}
 				{:else}
 					<div class="text-center py-12">
