@@ -70,14 +70,10 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 
 	// Use tokens array directly
 	$: tokensArray = token;
-	$: primaryToken = tokensArray.length > 0 ? tokensArray[0] : null;
-	
+
 	// Check if any tokens are available
 	$: hasAvailableTokens = tokensArray.some(t => hasAvailableSupplySync(t));
 
-	// Extract token data with fallbacks
-	$: shareOfAsset = primaryToken?.sharePercentage ? `${primaryToken.sharePercentage}%` : 'TBD';
-	
 	function handleBuyTokens(tokenAddress?: string) {
 		// If a specific token address is provided, use it; otherwise use the first available token
 		const targetTokenAddress = tokenAddress || (tokensArray.length > 0 ? tokensArray[0].contractAddress : null);
@@ -107,16 +103,8 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 	const tokensListScrollableClasses = 'flex flex-col gap-2 lg:gap-3 max-h-[10rem] lg:max-h-[13rem] overflow-y-auto pr-1 lg:pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400';
 	const tokenButtonClasses = 'flex flex-col sm:flex-row justify-between items-start sm:items-center w-full p-3 lg:p-4 bg-white rounded-none text-left relative border border-light-gray gap-2 sm:gap-0 transition-all duration-200 hover:bg-light-gray hover:shadow-md';
 	const tokenButtonLeftClasses = 'flex flex-col gap-1 flex-1';
-	const tokenButtonRightClasses = 'flex flex-row sm:flex-col w-full sm:w-auto justify-between sm:justify-end items-center sm:items-end gap-2';
 	const tokenSymbolClasses = 'font-extrabold text-sm lg:text-base text-black font-figtree';
 	const tokenNameClasses = 'text-xs lg:text-sm text-gray-500 leading-tight font-figtree';
-	const tokenPaymentDateClasses = 'text-xs text-secondary font-medium mt-1 hidden lg:block';
-	const returnsDisplayClasses = 'flex items-center gap-1 lg:gap-2';
-	const returnItemClasses = 'flex flex-col items-center text-center';
-	const returnLabelClasses = 'text-[0.6rem] lg:text-xs text-gray-500 font-medium whitespace-nowrap';
-	const returnValueClasses = 'text-sm lg:text-lg text-primary font-extrabold font-figtree';
-	const returnDividerClasses = 'text-xs lg:text-sm text-gray-500 font-medium mx-1';
-	const buyCtaClasses = 'text-sm lg:text-base font-extrabold text-black font-figtree';
 
 </script>
 
