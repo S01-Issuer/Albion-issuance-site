@@ -156,8 +156,8 @@
 					<NetworkSelector />
 
 					<!-- Wallet button (responsive for both desktop and mobile) -->
-					<button 
-						class="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 text-xs sm:text-sm bg-white border border-light-gray rounded hover:bg-light-gray hover:border-secondary transition-all duration-200"
+					<button
+						class="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 text-xs sm:text-sm bg-white border border-light-gray rounded-none hover:bg-light-gray hover:border-secondary transition-all duration-200"
 						on:click={connectWallet}
 						disabled={$loading}
 					>

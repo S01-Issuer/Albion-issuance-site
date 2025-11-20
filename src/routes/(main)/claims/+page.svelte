@@ -424,7 +424,7 @@
 			{/if}
 
 			{#if claimSuccess}
-				<div class="text-center mt-4 p-4 bg-green-100 text-green-800 rounded-lg max-w-md mx-auto">
+				<div class="text-center mt-4 p-4 bg-green-100 text-green-800 rounded-none max-w-md mx-auto">
 					✅ Claim successful! Tokens have been sent to your wallet.
 				</div>
 			{/if}
@@ -534,7 +534,7 @@
 						<p class="text-black opacity-70">No claim history available yet.</p>
 					</div>
 				{:else}
-					<div class="bg-white border border-light-gray overflow-hidden rounded-lg">
+					<div class="bg-white border border-light-gray overflow-hidden rounded-none">
 						<div class="overflow-x-auto">
 							<table class="w-full">
 								<thead>

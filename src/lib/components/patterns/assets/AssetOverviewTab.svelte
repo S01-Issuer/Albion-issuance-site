@@ -99,18 +99,19 @@ export let primaryToken: TokenMetadata | null | undefined = undefined;
 					<span class="font-semibold text-black">Interest Type</span>
 					<span class="text-black">{asset?.terms?.interestType}</span>
 				</div>
-				<div class="flex justify-between pb-3 border-b border-light-gray text-base last:border-b-0 last:pb-0">
-					<span class="font-semibold text-black relative">
+				<div class="flex justify-between pb-3 border-b border-light-gray text-base last:border-b-0 last:pb-0 overflow-visible">
+					<span class="font-semibold text-black relative flex items-center gap-1">
 						Amount
-						<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100"
+						<span class="inline-flex items-center justify-center w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold cursor-help hover:bg-gray-400 transition-colors"
 							on:mouseenter={() => showTooltipWithDelay('amount')}
 							on:mouseleave={hideTooltip}
+							on:focus={() => showTooltipWithDelay('amount')}
+							on:blur={hideTooltip}
 							role="button"
-							tabindex="0">ⓘ</span>
+							tabindex="0">?</span>
 						{#if $showTooltip === 'amount'}
 							<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">
 								All numbers shown have already been adjusted for the royalty percentage and represent the net amounts payable to token holders
-								<div class="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-[5px] border-r-[5px] border-t-[5px] border-l-transparent border-r-transparent border-t-black"></div>
 							</div>
 						{/if}
 					</span>
@@ -120,18 +121,19 @@ export let primaryToken: TokenMetadata | null | undefined = undefined;
 					<span class="font-semibold text-black">Payment Frequency</span>
 					<span class="text-black">Monthly</span>
 				</div>
-				<div class="flex justify-between pb-3 border-b border-light-gray text-base last:border-b-0 last:pb-0">
-					<span class="font-semibold text-black relative">
+				<div class="flex justify-between pb-3 border-b border-light-gray text-base last:border-b-0 last:pb-0 overflow-visible">
+					<span class="font-semibold text-black relative flex items-center gap-1">
 						Cash flow Start
-						<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100"
+						<span class="inline-flex items-center justify-center w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold cursor-help hover:bg-gray-400 transition-colors"
 							on:mouseenter={() => showTooltipWithDelay('cashflowStart')}
 							on:mouseleave={hideTooltip}
+							on:focus={() => showTooltipWithDelay('cashflowStart')}
+							on:blur={hideTooltip}
 							role="button"
-							tabindex="0">ⓘ</span>
+							tabindex="0">?</span>
 						{#if $showTooltip === 'cashflowStart'}
 							<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">
 								Tokens have a claim on cash flows from this month. Cash flows received before the token first payment date will be accrued and distributed after first payment date
-								<div class="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-[5px] border-r-[5px] border-t-[5px] border-l-transparent border-r-transparent border-t-black"></div>
 							</div>
 						{/if}
 					</span>

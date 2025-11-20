@@ -66,13 +66,13 @@ export let tabs: TabDefinition[] = [];
 		},
 		minimal: {
 			container: 'bg-transparent',
-			tab: 'rounded hover:bg-light-gray',
+			tab: 'rounded-none hover:bg-light-gray',
 			active: 'bg-black text-white',
 			inactive: 'text-black opacity-70 hover:opacity-100'
 		},
 		pills: {
-			container: 'bg-light-gray rounded-lg p-1',
-			tab: 'rounded-md hover:bg-white',
+			container: 'bg-light-gray rounded-none p-1',
+			tab: 'rounded-none hover:bg-white',
 			active: 'bg-white text-black shadow-sm',
 			inactive: 'text-black opacity-70 hover:opacity-100'
 		}

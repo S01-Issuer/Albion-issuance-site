@@ -34,7 +34,7 @@
 
 <div class="relative">
 	<button
-		class="flex items-center gap-2 px-2 sm:px-3 py-2 text-xs sm:text-sm bg-white border border-light-gray rounded hover:bg-light-gray hover:border-secondary transition-all duration-200 flex-shrink-0"
+		class="flex items-center gap-2 px-2 sm:px-3 py-2 text-xs sm:text-sm bg-white border border-light-gray rounded-none hover:bg-light-gray hover:border-secondary transition-all duration-200 flex-shrink-0"
 		on:click={toggleDropdown}
 		aria-label="Select network"
 		aria-haspopup="true"
@@ -43,7 +43,7 @@
 		<img
 			src={currentNetwork.logo}
 			alt={currentNetwork.name}
-			class="w-4 h-4 sm:w-5 sm:h-5 rounded"
+			class="w-4 h-4 sm:w-5 sm:h-5 rounded-none"
 		/>
 		<span class="hidden sm:inline font-medium">{currentNetwork.name}</span>
 		<svg
@@ -59,7 +59,7 @@
 
 	{#if isOpen}
 		<div
-			class="absolute top-full left-0 mt-2 bg-white border border-light-gray rounded shadow-lg z-50 min-w-max"
+			class="absolute top-full left-0 mt-2 bg-white border border-light-gray rounded-none shadow-lg z-50 min-w-max"
 			on:click={closeDropdown}
 			on:keydown={(e) => e.key === 'Escape' && closeDropdown()}
 			role="menu"
@@ -68,7 +68,7 @@
 			{#each networks as network (network.id)}
 				<button
 					type="button"
-					class="w-full flex items-center gap-3 px-4 py-3 text-left text-sm hover:bg-light-gray transition-colors duration-200 first:rounded-t last:rounded-b border-b border-light-gray last:border-b-0"
+					class="w-full flex items-center gap-3 px-4 py-3 text-left text-sm hover:bg-light-gray transition-colors duration-200 border-b border-light-gray last:border-b-0"
 					class:font-semibold={network.id === currentNetwork.id}
 					on:click={() => selectNetwork(network)}
 					role="menuitem"
@@ -76,7 +76,7 @@
 					<img
 						src={network.logo}
 						alt={network.name}
-						class="w-5 h-5 rounded"
+						class="w-5 h-5 rounded-none"
 					/>
 					<span>{network.name}</span>
 					{#if network.id === currentNetwork.id}

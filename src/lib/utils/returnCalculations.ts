@@ -6,11 +6,8 @@
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
 import type { Asset } from "$lib/types/uiTypes";
 import type { OffchainAssetReceiptVault } from "$lib/types/graphql";
-import { calculateIRR, addMonths } from "./returnsCalculatorHelpers";
 
 export interface TokenReturns {
-  baseReturn: number; // Annual percentage
-  bonusReturn: number; // Annual percentage
   impliedBarrelsPerToken: number; // Barrels per $1 token
   breakEvenOilPrice: number; // USD per barrel
 }
@@ -31,75 +28,46 @@ interface TokenPayoutSummary {
 }
 
 /**
- * Calculate token returns based on planned production and token metrics
- * Using IRR methodology as specified
+ * Calculate token metrics based on planned production and token supply
  * @param asset Asset data containing planned production
  * @param token Token data containing supply and share percentage
- * @param onChainMintedSupply Optional on-chain minted supply (in wei) to use for bonus calculation
- * @returns Calculated returns and metrics
+ * @param onChainMintedSupply Optional on-chain minted supply (in wei)
+ * @returns Calculated metrics
  */
 export function calculateTokenReturns(
   asset: Asset,
   token: TokenMetadata,
   onChainMintedSupply?: string,
-  maxSupply?: string,
+  _maxSupply?: string,
 ): TokenReturns {
   if (!asset.plannedProduction || !token.sharePercentage) {
     console.warn(
       `[Returns] Missing data for ${token.symbol}: plannedProduction=${!!asset.plannedProduction}, sharePercentage=${token.sharePercentage}`,
     );
     return {
-      baseReturn: 0,
-      bonusReturn: 0,
       impliedBarrelsPerToken: 0,
       breakEvenOilPrice: 0,
     };
   }
 
   const { plannedProduction } = asset;
-  const { projections, oilPriceAssumption } = plannedProduction;
+  const { projections } = plannedProduction;
   const sharePercentage = token.sharePercentage / 100; // Convert to decimal
 
-  console.warn(
-    `[Returns] Token ${token.symbol}: projections length = ${projections?.length}, oilPriceAssumption = ${oilPriceAssumption}`,
-  );
   if (!projections || projections.length === 0) {
     console.warn(`[Returns] No projections for ${token.symbol}`);
     return {
-      baseReturn: 0,
-      bonusReturn: 0,
       impliedBarrelsPerToken: 0,
       breakEvenOilPrice: 0,
     };
   }
 
-  // Get pricing adjustments from asset technical data
-  const benchmarkPremium = asset.technical?.pricing?.benchmarkPremium
-    ? parseFloat(
-        asset.technical.pricing.benchmarkPremium.replace(/[^-\d.]/g, ""),
-      )
-    : token.asset?.technical?.pricing?.benchmarkPremium || 0;
-  const transportCosts = asset.technical?.pricing?.transportCosts
-    ? parseFloat(asset.technical.pricing.transportCosts.replace(/[^-\d.]/g, ""))
-    : token.asset?.technical?.pricing?.transportCosts || 0;
-
-  // Calculate adjusted oil price
-  const adjustedOilPrice =
-    oilPriceAssumption + benchmarkPremium - transportCosts;
-
-  // Convert supply to numbers using provided maxSupply parameter
-  const maxSupplyNum = maxSupply
-    ? Number(BigInt(maxSupply) / BigInt(10 ** 18))
-    : 0;
-
-  // ALWAYS use on-chain minted supply for accurate bonus calculation
+  // ALWAYS use on-chain minted supply for accurate calculation
   // Never trust IPFS metadata for minted supply as it's not updated in real-time
   let mintedSupply: number;
   if (onChainMintedSupply) {
     // On-chain value is in wei, convert to token units
-    // If it's "0" or any falsy value, this will correctly evaluate to 0
     try {
-      // TokenMetadata no longer has decimals field - using default of 18
       mintedSupply = Number(BigInt(onChainMintedSupply) / BigInt(10 ** 18));
     } catch {
       // If BigInt conversion fails, default to 0
@@ -107,114 +75,17 @@ export function calculateTokenReturns(
     }
   } else {
     // No on-chain data provided, default to 0
-    // This ensures we never use stale IPFS data
     mintedSupply = 0;
   }
 
-  // Get pending distributions (from receiptsData before firstPaymentDate)
-  const receiptsData = token.asset?.receiptsData || [];
-
-  // Use token.firstPaymentDate as cashflow start, with hardcoded override for specific token
-  let cashflowStartDate = token.firstPaymentDate || projections[0]?.month;
-  if (
-    token.contractAddress?.toLowerCase() ===
-    "0xf836a500910453a397084ade41321ee20a5aade1"
-  ) {
-    cashflowStartDate = "2025-08";
-  }
-
-  // Calculate pending distributions
-  let pendingDistributionsTotal = 0;
-  const receiptsMap = new Map<string, number>();
-  for (const receipt of receiptsData) {
-    if (receipt.assetData?.revenue !== undefined) {
-      receiptsMap.set(receipt.month, receipt.assetData.revenue);
-    }
-  }
-
-  // Sum pending distributions from months before cashflowStartDate
-  for (const projection of projections) {
-    if (projection.month < cashflowStartDate) {
-      if (receiptsMap.has(projection.month)) {
-        pendingDistributionsTotal += receiptsMap.get(projection.month) || 0;
-      } else {
-        // Estimate using production * oil price
-        pendingDistributionsTotal += projection.production * adjustedOilPrice;
-      }
-    }
-  }
-
-  const monthlyPendingDistribution = pendingDistributionsTotal / 12;
-
-  // Build cash flows for IRR calculation
-  // Start with initial investment of -$1 at month 0
-  const baseCashFlows = [-1]; // Month 0: pay $1 per token
-  const mintedCashFlows = [-1]; // Month 0: pay $1 per token
-
+  // Calculate total production
   let totalProduction = 0;
-  const pendingDistributionsEndDate = addMonths(cashflowStartDate, 12);
-
   for (const projection of projections) {
-    // Step 1 & 2: Production * adjusted oil price (with benchmark premium and transport costs)
-    let monthlyRevenue = projection.production * adjustedOilPrice;
-
-    // Add pending distributions for first 12 months from cashflowStartDate
-    if (
-      projection.month >= cashflowStartDate &&
-      projection.month < pendingDistributionsEndDate
-    ) {
-      monthlyRevenue += monthlyPendingDistribution;
-    }
-
-    // Step 3: Apply token's share of asset
-    const tokenShareRevenue = monthlyRevenue * sharePercentage;
-
-    // Step 4a: Revenue per token using max supply (base case)
-    const revenuePerTokenBase = tokenShareRevenue / maxSupplyNum;
-    baseCashFlows.push(revenuePerTokenBase);
-
-    // Step 4b: Revenue per token using minted supply (bonus case)
-    const revenuePerTokenMinted =
-      mintedSupply > 0 ? tokenShareRevenue / mintedSupply : 0;
-    mintedCashFlows.push(revenuePerTokenMinted);
-
     totalProduction += projection.production;
-  }
-
-  // Calculate returns
-  let baseReturn: number;
-  let bonusReturn: number;
-
-  // Calculate base return (using max supply)
-  const monthlyIRRBase = calculateIRR(baseCashFlows);
-
-  // Handle edge cases in IRR calculation
-  if (monthlyIRRBase <= -0.99) {
-    // IRR is -99% or worse monthly (total loss)
-    baseReturn = 0; // Base return should never be negative - represents minimum return
-  } else if (monthlyIRRBase > 10) {
-    // IRR is unrealistically high (>1000% monthly), cap at very high value
-    baseReturn = 99999999999;
-  } else {
-    // Normal calculation
-    baseReturn = Math.max(0, (Math.pow(1 + monthlyIRRBase, 12) - 1) * 100);
-  }
-
-  // Calculate bonus return
-  if (mintedSupply === 0) {
-    // When no tokens are minted, the return is effectively infinite
-    // Use a very large number that will be displayed as ">10x" in the UI
-    bonusReturn = 99999999999;
-  } else {
-    // Normal calculation for non-zero minted supply
-    const monthlyIRRMinted = calculateIRR(mintedCashFlows);
-    const totalReturn = (Math.pow(1 + monthlyIRRMinted, 12) - 1) * 100;
-    bonusReturn = totalReturn - baseReturn;
   }
 
   // Calculate implied barrels per $1 token
   // This represents how many barrels of oil each $1 investment in the token represents
-  // ONLY uses on-chain minted supply - no fallbacks
   // When no tokens are minted, the implied barrels is infinite
   const impliedBarrelsPerToken =
     mintedSupply > 0
@@ -230,8 +101,6 @@ export function calculateTokenReturns(
       : 0;
 
   return {
-    baseReturn: baseReturn, // Always >= 0, represents minimum guaranteed return
-    bonusReturn: bonusReturn, // Can be negative if bonus is less than base
     impliedBarrelsPerToken,
     breakEvenOilPrice,
   };

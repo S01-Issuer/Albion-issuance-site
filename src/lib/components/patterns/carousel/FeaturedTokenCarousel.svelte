@@ -11,8 +11,8 @@
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 	import { getAddressUrl } from '$lib/utils/explorer';
-	import { calculateLifetimeIRR, calculateMonthlyTokenCashflows, calculateIRR } from '$lib/utils/returnsCalculatorHelpers';
-	import ReturnsCalculatorModal from '$lib/components/patterns/ReturnsCalculatorModal.svelte';
+	import { calculateLifetimeIRR, calculateMonthlyTokenCashflows, calculateIRR } from '$lib/utils/returnsEstimatorHelpers';
+	import ReturnsEstimatorModal from '$lib/components/patterns/ReturnsEstimatorModal.svelte';
 
 	export let autoPlay = true;
 	export let autoPlayInterval = 5000;
@@ -34,11 +34,11 @@
 	let touchStartX = 0;
 	let touchEndX = 0;
 
-	// Returns calculator modal state
-	let showReturnsCalculator = false;
-	let calculatorToken: TokenMetadata | null = null;
-	let calculatorMintedSupply = 0;
-	let calculatorAvailableSupply = 0;
+	// Returns estimator modal state
+	let showReturnsEstimator = false;
+	let estimatorToken: TokenMetadata | null = null;
+	let estimatorMintedSupply = 0;
+	let estimatorAvailableSupply = 0;
 
 	// Calculate supply values for a token
 	function getTokenSupplyValues(token: TokenMetadata) {
@@ -222,18 +222,18 @@
 
 	// Enhanced Tailwind class mappings with better mobile responsiveness - FIXED
 	const containerClasses = 'relative w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8';
-	const loadingStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-lg';
-	const errorStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-lg';
-	const emptyStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-lg';
+	const loadingStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-none';
+	const errorStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-none';
+	const emptyStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-none';
 	const spinnerClasses = 'w-8 h-8 border-4 border-light-gray border-t-primary animate-spin mb-4';
-	const retryButtonClasses = 'mt-4 px-6 py-3 bg-primary text-white border-none cursor-pointer font-semibold transition-colors duration-200 hover:bg-secondary touch-target rounded';
-	const carouselWrapperClasses = 'relative overflow-hidden rounded-lg outline-none focus:ring-4 focus:ring-primary/50 touch-pan-y';
+	const retryButtonClasses = 'mt-4 px-6 py-3 bg-primary text-white border-none cursor-pointer font-semibold transition-colors duration-200 hover:bg-secondary touch-target rounded-none';
+	const carouselWrapperClasses = 'relative overflow-hidden rounded-none outline-none focus:ring-4 focus:ring-primary/50 touch-pan-y';
 	const carouselTrackClasses = 'flex w-full transition-transform duration-500 ease-in-out will-change-transform';
 	const carouselSlideClasses = 'flex-shrink-0 w-full relative';
 	const activeSlideClasses = 'opacity-100';
 	const inactiveSlideClasses = 'opacity-100';
 	const bannerCardClasses = 'grid grid-cols-1 lg:grid-cols-2 bg-white border border-light-gray overflow-hidden';
-	const tokenSectionClasses = 'p-4 sm:p-6 lg:p-8 bg-white border-b lg:border-b-0 lg:border-r border-light-gray flex flex-col justify-between min-h-[300px] sm:min-h-[350px] lg:min-h-[400px]';
+	const tokenSectionClasses = 'p-4 sm:p-6 lg:p-8 bg-white border-b lg:border-b-0 lg:border-r border-light-gray flex flex-col justify-between items-start min-h-[300px] sm:min-h-[350px] lg:min-h-[400px]';
 	const assetSectionClasses = 'p-4 sm:p-6 lg:p-8 bg-light-gray flex flex-col justify-between min-h-[300px] sm:min-h-[350px] lg:min-h-[400px] hidden lg:flex';
 	const tokenHeaderClasses = 'mb-3 sm:mb-4 lg:mb-6';
 	const tokenNameClasses = 'text-lg sm:text-xl lg:text-2xl font-bold text-black tracking-wider mb-2 leading-tight text-left';
@@ -276,12 +276,12 @@
 		}
 	}
 
-	// Open returns calculator modal
-	function openReturnsCalculator(token: TokenMetadata, mintedSupply: number, availableSupply: number) {
-		calculatorToken = token;
-		calculatorMintedSupply = mintedSupply;
-		calculatorAvailableSupply = availableSupply;
-		showReturnsCalculator = true;
+	// Open returns estimator modal
+	function openReturnsEstimator(token: TokenMetadata, mintedSupply: number, availableSupply: number) {
+		estimatorToken = token;
+		estimatorMintedSupply = mintedSupply;
+		estimatorAvailableSupply = availableSupply;
+		showReturnsEstimator = true;
 	}
 </script>
 
@@ -339,11 +339,8 @@
 					{@const maxSupply = catalogService.getTokenMaxSupply(item.token.contractAddress) ?? undefined}
 					{@const _calculatedReturns = calculateTokenReturns(item.asset, item.token, sft?.totalShares, maxSupply)}
 					{@const supplyValues = getTokenSupplyValues(item.token)}
-					{@const lifetimeIRR = calculateLifetimeIRR(item.token, 65, supplyValues.mintedSupply, 1)}
-					{@const monthlyCashflows = calculateMonthlyTokenCashflows(item.token, 65, supplyValues.mintedSupply, 1)}
-					{@const cashflows = monthlyCashflows.map(m => m.cashflow)}
-					{@const monthlyIRR = calculateIRR(cashflows)}
-					{@const remainingIRR = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99}
+					{@const currentReturns = calculateLifetimeIRR(item.token, 65, supplyValues.mintedSupply, 1)}
+					{@const fullyDilutedReturns = calculateLifetimeIRR(item.token, 65, supplyValues.maxSupply, 1)}
 					<div class={`${carouselSlideClasses} ${index === currentIndex ? activeSlideClasses : inactiveSlideClasses}`}>
 						<div class={bannerCardClasses}>
 							<!-- Token Section -->
@@ -368,7 +365,7 @@
 										href={getAddressUrl(item.token.contractAddress, $chainId)}
 										target="_blank"
 										rel="noopener noreferrer"
-										class={tokenContractClasses + " no-underline hover:text-primary transition-colors"}
+										class={tokenContractClasses + " no-underline hover:text-primary transition-colors text-left"}
 										on:click|stopPropagation
 									>
 										{item.token.contractAddress}
@@ -398,27 +395,32 @@
 						</div>
 					</div>
 
-		<!-- Lifetime Returns -->
-		<div class={statItemClasses}>
-			<div class={statLabelClasses}>Lifetime Returns</div>
-			<div class={statValueClasses + ' text-primary'}>
-				<FormattedReturn value={lifetimeIRR} />
-			</div>
-			<button
-				class="text-xs font-semibold text-primary hover:text-secondary transition-colors cursor-pointer bg-transparent border-none p-0 mt-1 text-left"
-				on:click={() => openReturnsCalculator(item.token, supplyValues.mintedSupply, supplyValues.availableSupply)}
-			>
-				View returns estimator →
-			</button>
-		</div>
+					<!-- Current Returns -->
+					<div class={statItemClasses}>
+						<div class={statLabelClasses}>Current Returns</div>
+						<div class={statValueClasses + ' text-primary'}>
+							<FormattedReturn value={currentReturns} />
+						</div>
+						<button
+							class="text-base font-semibold text-secondary hover:text-primary transition-colors cursor-pointer bg-transparent border-none p-0 mt-1 text-left"
+							on:click={() => openReturnsEstimator(item.token, supplyValues.mintedSupply, supplyValues.availableSupply)}
+						>
+							View returns estimator →
+						</button>
+					</div>
 
-		<!-- Remaining Returns -->
-		<div class={statItemClasses}>
-			<div class={statLabelClasses}>Remaining Returns</div>
-			<div class={statValueClasses + ' text-primary'}>
-				<FormattedReturn value={remainingIRR} />
-			</div>
-		</div>
+					<!-- Fully Diluted Returns -->
+					<div class={statItemClasses}>
+						<div class={statLabelClasses}>Fully Diluted Returns</div>
+						<div class={statValueClasses + ' text-primary'}>
+							<FormattedReturn value={fullyDilutedReturns} />
+						</div>
+					</div>
+				</div>
+
+				<!-- Disclaimer -->
+				<div class="text-xs text-black opacity-60 font-figtree italic mb-4">
+					Returns value early principal repayments by assuming re-investment in similar assets
 				</div>
 
 												<div class={tokenActionsClasses + " sm:flex-col flex-row gap-2 sm:gap-4"}>
@@ -502,12 +504,12 @@
 	{/if}
 </div>
 
-<!-- Returns Calculator Modal -->
-{#if calculatorToken}
-	<ReturnsCalculatorModal
-		bind:isOpen={showReturnsCalculator}
-		token={calculatorToken}
-		mintedSupply={calculatorMintedSupply}
-		availableSupply={calculatorAvailableSupply}
+<!-- Returns Estimator Modal -->
+{#if estimatorToken}
+	<ReturnsEstimatorModal
+		bind:isOpen={showReturnsEstimator}
+		token={estimatorToken}
+		mintedSupply={estimatorMintedSupply}
+		availableSupply={estimatorAvailableSupply}
 	/>
 {/if}

@@ -5,7 +5,7 @@
 
 export { useAssetDetailData } from "./useAssetDetailData";
 export { useDataExport } from "./useDataExport";
-export { useTooltip, tooltipContent } from "./useTooltip";
+export { useTooltip } from "./useTooltip";
 export { useCardFlip } from "./useCardFlip";
 export { useEmailNotification, emailTemplates } from "./useEmailNotification";
 
