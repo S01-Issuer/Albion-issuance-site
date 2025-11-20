@@ -106,42 +106,6 @@ export function calculateTokenReturns(
   };
 }
 
-/**
- * Get calculated returns for a token, with caching
- */
-const returnCache = new Map<string, TokenReturns>();
-
-export function getTokenReturns(
-  asset: Asset,
-  token: TokenMetadata,
-  onChainMintedSupply?: string,
-  maxSupply?: string,
-): TokenReturns {
-  const cacheKey = `${asset.id}-${token.contractAddress}-${onChainMintedSupply || "ipfs"}-${maxSupply || "unknown"}`;
-
-  const cached = returnCache.get(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
-  const returns = calculateTokenReturns(
-    asset,
-    token,
-    onChainMintedSupply,
-    maxSupply,
-  );
-  returnCache.set(cacheKey, returns);
-
-  return returns;
-}
-
-/**
- * Clear the returns cache (useful when data changes)
- */
-export function clearReturnsCache(): void {
-  returnCache.clear();
-}
-
 export function getTokenSupply(
   token: TokenMetadata,
   sft?: Pick<OffchainAssetReceiptVault, "totalShares">,

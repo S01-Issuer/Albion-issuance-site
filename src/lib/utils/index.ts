@@ -18,7 +18,7 @@ export { arrayUtils } from "./arrayHelpers";
 export { dateUtils } from "./dateHelpers";
 
 // Re-export specific calculators
-export { getTokenReturns, calculateTokenReturns } from "./returnCalculations";
+export { calculateTokenReturns } from "./returnCalculations";
 
 // Sharing utilities
 export {

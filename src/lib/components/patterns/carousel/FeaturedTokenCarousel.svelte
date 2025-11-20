@@ -7,7 +7,6 @@
 	import { chainId } from 'svelte-wagmi';
 	import { formatSmartNumber } from '$lib/utils/formatters';
 	import { formatSupplyDisplay } from '$lib/utils/supplyHelpers';
-	import { calculateTokenReturns } from '$lib/utils';
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 	import { getAddressUrl } from '$lib/utils/explorer';
@@ -337,7 +336,6 @@
 				{#each featuredTokensWithAssets as item, index (item.token.contractAddress)}
 					{@const sft = $sfts?.find(s => s.id.toLowerCase() === item.token.contractAddress.toLowerCase())}
 					{@const maxSupply = catalogService.getTokenMaxSupply(item.token.contractAddress) ?? undefined}
-					{@const _calculatedReturns = calculateTokenReturns(item.asset, item.token, sft?.totalShares, maxSupply)}
 					{@const supplyValues = getTokenSupplyValues(item.token)}
 					{@const currentReturns = calculateLifetimeIRR(item.token, 65, supplyValues.mintedSupply, 1)}
 					{@const fullyDilutedReturns = calculateLifetimeIRR(item.token, 65, supplyValues.maxSupply, 1)}
