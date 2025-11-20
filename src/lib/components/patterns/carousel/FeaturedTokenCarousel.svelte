@@ -250,7 +250,7 @@
 	const statItemClasses = 'text-left';
 	const statLabelClasses = 'text-xs font-medium text-gray-500 mb-1 font-figtree uppercase tracking-wide';
 	const statValueClasses = 'text-sm sm:text-base lg:text-lg font-bold text-black';
-	const tokenActionsClasses = 'flex flex-col gap-2 sm:gap-3 mt-auto';
+	const tokenActionsClasses = 'flex flex-row gap-2 sm:gap-3 mt-auto';
 	const assetMetaClasses = 'flex flex-col gap-2 mt-auto';
 	const assetMetaItemClasses = 'flex gap-2';
 	const assetMetaLabelClasses = 'text-xs font-medium text-gray-500 font-figtree';
@@ -399,12 +399,6 @@
 						<div class={statValueClasses + ' text-primary'}>
 							<FormattedReturn value={currentReturns} />
 						</div>
-						<button
-							class="text-base font-semibold text-secondary hover:text-primary transition-colors cursor-pointer bg-transparent border-none p-0 mt-1 text-left"
-							on:click={() => openReturnsEstimator(item.token, supplyValues.mintedSupply, supplyValues.availableSupply)}
-						>
-							View returns estimator →
-						</button>
 					</div>
 
 					<!-- Fully Diluted Returns -->
@@ -416,12 +410,21 @@
 					</div>
 				</div>
 
-				<!-- Disclaimer -->
-				<div class="text-xs text-black opacity-60 font-figtree italic mb-4">
-					Returns value early principal repayments by assuming re-investment in similar assets
-				</div>
 
-												<div class={tokenActionsClasses + " sm:flex-col flex-row gap-2 sm:gap-4"}>
+			<!-- Disclaimer - full width -->
+			<div class="text-xs text-black opacity-60 font-figtree italic mb-3 text-left">
+				Returns value early principal repayments by assuming re-investment in similar assets
+			</div>
+
+			<!-- View returns estimator button - full width -->
+			<button
+				class="text-base font-semibold text-secondary hover:text-primary transition-colors cursor-pointer bg-transparent border-none p-0 mb-4 text-left"
+				on:click={() => openReturnsEstimator(item.token, supplyValues.mintedSupply, supplyValues.availableSupply)}
+			>
+				View returns estimator →
+			</button>
+
+												<div class={tokenActionsClasses}>
 					<PrimaryButton on:click={() => handleBuyTokens(item.token.contractAddress)}>
 						Buy Tokens
 					</PrimaryButton>
