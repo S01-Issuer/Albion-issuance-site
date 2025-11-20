@@ -26,7 +26,7 @@
 	import { goto } from '$app/navigation';
 	import { useTooltip } from '$lib/composables';
 	import { getImageUrl } from '$lib/utils/imagePath';
-import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
+	import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
 import type { ClaimsResult, ClaimsHoldingsGroup } from '$lib/services/ClaimsService';
 import type { ClaimHistory as ClaimsHistoryItem } from '$lib/utils/claims';
 import type { PinnedMetadata } from '$lib/types/PinnedMetadata';
@@ -908,16 +908,23 @@ function percentageDisplay(value: number): string {
 						</Card>
 					{:else}
 						{#each holdings as holding (holding.id)}
+							{@const imageUrl = holding.asset?.coverImage
+								? getImageUrl(holding.asset.coverImage)
+								: holding.asset?.galleryImages?.[0]?.url
+								? getImageUrl(holding.asset.galleryImages[0].url)
+								: null}
 								<div class="mb-3">
 									<Card hoverable={false} showBorder>
 									<CardContent paddingClass="p-6 lg:p-9 h-full flex flex-col justify-between">
 												<div class="flex justify-between items-start mb-4 lg:mb-7">
 													<div class="flex items-start gap-3 lg:gap-4">
 														<div class="w-12 h-12 lg:w-14 lg:h-14 bg-light-gray rounded-lg overflow-hidden flex items-center justify-center flex-shrink-0">
-															{#if holding.asset?.coverImage}
-																<img src={getImageUrl(holding.asset.coverImage)} 
-																	alt={holding.name} 
-																	class="w-full h-full object-cover" />
+															{#if imageUrl}
+																<img src={imageUrl}
+																	alt={holding.name}
+																	class="w-full h-full object-cover"
+																					on:error={(e) => { const target = e.currentTarget as HTMLImageElement; target.style.display = 'none'; target.nextElementSibling?.classList.remove('hidden'); }} />
+																<div class="text-xl lg:text-2xl opacity-50 hidden">🛢️</div>
 															{:else}
 																<div class="text-xl lg:text-2xl opacity-50">🛢️</div>
 															{/if}

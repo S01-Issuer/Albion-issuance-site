@@ -1,11 +1,11 @@
-import { base, sepolia } from '@wagmi/core/chains';
+import { base, sepolia } from "@wagmi/core/chains";
 
 /**
  * Map of chain IDs to their block explorer base URLs
  */
 const explorerUrls: Record<number, string> = {
-	[base.id]: 'https://basescan.org',
-	[sepolia.id]: 'https://sepolia.etherscan.io',
+  [base.id]: "https://basescan.org",
+  [sepolia.id]: "https://sepolia.etherscan.io",
 };
 
 /**
@@ -14,7 +14,7 @@ const explorerUrls: Record<number, string> = {
  * @returns The base URL of the block explorer for the chain
  */
 export function getExplorerUrl(chainId: number = base.id): string {
-	return explorerUrls[chainId] || explorerUrls[base.id];
+  return explorerUrls[chainId] || explorerUrls[base.id];
 }
 
 /**
@@ -23,8 +23,8 @@ export function getExplorerUrl(chainId: number = base.id): string {
  * @param chainId - The chain ID (defaults to Base mainnet)
  * @returns The full transaction URL on the block explorer
  */
-export function getTxUrl(txHash: string, chainId: number = base.id): string {
-	return `${getExplorerUrl(chainId)}/tx/${txHash}`;
+export function getTxUrl(txHash: string, chainId?: number | null): string {
+  return `${getExplorerUrl(chainId ?? base.id)}/tx/${txHash}`;
 }
 
 /**
@@ -33,6 +33,9 @@ export function getTxUrl(txHash: string, chainId: number = base.id): string {
  * @param chainId - The chain ID (defaults to Base mainnet)
  * @returns The full address URL on the block explorer
  */
-export function getAddressUrl(address: string, chainId: number = base.id): string {
-	return `${getExplorerUrl(chainId)}/address/${address}`;
+export function getAddressUrl(
+  address: string,
+  chainId?: number | null,
+): string {
+  return `${getExplorerUrl(chainId ?? base.id)}/address/${address}`;
 }

@@ -24,6 +24,10 @@ import { PINATA_GATEWAY } from '$lib/network';
 import { catalogService } from '$lib/services';
 import { getTokenTermsPath } from '$lib/utils/tokenTerms';
 import { getTxUrl, getAddressUrl } from '$lib/utils/explorer';
+import { Chart as ChartJS, registerables } from 'chart.js';
+import { onDestroy } from 'svelte';
+
+ChartJS.register(...registerables);
 
 const isDev = import.meta.env.DEV;
 const logDev = (...messages: unknown[]) => {
@@ -189,6 +193,8 @@ let revenueReportsWithIncome: RevenueReport[] = [];
 let revenueChartData: Array<{ label: string; value: number }> = [];
 let latestRevenueReport: RevenueReport | null = null;
 let revenueAverage = 0;
+let revenueChart: ChartJS | null = null;
+let revenueChartCanvas: HTMLCanvasElement;
 let revenueTotal = 0;
 let revenueHasData = false;
 let productionReports: Array<MonthlyReport | ProductionHistoryRecord> = [];
@@ -312,6 +318,11 @@ $: {
 	}
 }
 
+// Create/update revenue chart when data changes
+$: if (revenueChartCanvas && revenueReports.length > 0 && primaryToken) {
+	createRevenueChart();
+}
+
 $: {
 	if (assetTokens && assetTokens.length > 0) {
 		const newPayoutSignature = JSON.stringify(
@@ -392,6 +403,102 @@ async function checkFutureReleases(currentAssetId: string) {
 	}
 	showTooltip = '';
 }
+
+function createRevenueChart() {
+	if (!revenueChartCanvas || !primaryToken) return;
+
+	// Destroy existing chart
+	if (revenueChart) {
+		revenueChart.destroy();
+	}
+
+	// Get months from actual revenue reports
+	const months = revenueReports.map(r => r.month);
+
+	// Get projections data
+	const projections = primaryToken.asset?.plannedProduction?.projections || [];
+
+	// Calculate projected revenue for months where we have actuals
+	const projectedRevenue = months.map(month => {
+		const projection = projections.find(p => p.month === month);
+		if (!projection) return 0;
+
+		// Get oil price from asset technical data or use default
+		const benchmarkPremiumStr = primaryToken.asset?.technical?.pricing?.benchmarkPremium;
+		const transportCostsStr = primaryToken.asset?.technical?.pricing?.transportCosts;
+		const benchmarkPremium = benchmarkPremiumStr ? (parseFloat(String(benchmarkPremiumStr).replace(/[^-\d.]/g, '')) || 0) : 0;
+		const transportCosts = transportCostsStr ? (parseFloat(String(transportCostsStr).replace(/[^-\d.]/g, '')) || 0) : 0;
+		const defaultOilPrice = 65; // Default assumption
+		const adjustedOilPrice = defaultOilPrice + benchmarkPremium - transportCosts;
+
+		return projection.production * adjustedOilPrice;
+	});
+
+	// Get actual revenue
+	const actualRevenue = revenueReports.map(r => r.revenue);
+
+	// Create labels
+	const labels = months.map(month => formatReportMonth(month));
+
+	const ctx = revenueChartCanvas.getContext('2d');
+	if (!ctx) return;
+
+	revenueChart = new ChartJS(ctx, {
+		type: 'bar',
+		data: {
+			labels,
+			datasets: [
+				{
+					label: 'Actual Revenue',
+					data: actualRevenue,
+					backgroundColor: '#08bccc',
+					borderColor: '#08bccc',
+					borderWidth: 0,
+				},
+				{
+					label: 'Projected Revenue',
+					data: projectedRevenue,
+					backgroundColor: '#283c84',
+					borderColor: '#283c84',
+					borderWidth: 0,
+				}
+			]
+		},
+		options: {
+			responsive: true,
+			maintainAspectRatio: false,
+			plugins: {
+				legend: {
+					display: true,
+					position: 'bottom',
+				},
+				tooltip: {
+					callbacks: {
+						label: function(context) {
+							return context.dataset.label + ': $' + (context.parsed.y ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+						}
+					}
+				}
+			},
+			scales: {
+				y: {
+					beginAtZero: true,
+					ticks: {
+						callback: function(value) {
+							return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+						}
+					}
+				}
+			}
+		}
+	});
+}
+
+onDestroy(() => {
+	if (revenueChart) {
+		revenueChart.destroy();
+	}
+});
 
 $: productionReports =
 	(assetData?.productionHistory ?? assetData?.monthlyReports ?? []) as Array<
@@ -997,16 +1104,8 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 										📊 Export Data
 									</SecondaryButton>
 								</div>
-								<div class="w-full relative">
-									<Chart
-										data={revenueChartData}
-										width={700}
-										height={350}
-										valuePrefix="$"
-										barColor="#08bccc"
-										animate={true}
-										showGrid={true}
-									/>
+								<div class="w-full relative" style="height: 350px;">
+									<canvas bind:this={revenueChartCanvas}></canvas>
 									{#if !revenueHasData}
 										<div class="absolute inset-0 bg-gray-100 bg-opacity-90 flex items-center justify-center rounded">
 											<div class="text-center">
@@ -1378,7 +1477,6 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 			<ReturnsCalculatorModal
 				isOpen={returnsCalculatorOpen}
 				token={selectedReturnsToken}
-				mode="token"
 				mintedSupply={selectedReturnsTokenMintedSupply}
 				availableSupply={selectedReturnsTokenAvailableSupply}
 				onClose={closeReturnsCalculator}

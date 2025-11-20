@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { chainId } from 'svelte-wagmi';
-	import { base, sepolia } from '@wagmi/core/chains';
+	import { base } from '@wagmi/core/chains';
 
 	let isOpen = false;
 
@@ -26,7 +25,7 @@
 		isOpen = false;
 	}
 
-	function selectNetwork(network: typeof networks[0]) {
+	function selectNetwork(_network: typeof networks[0]) {
 		// Network switching can be implemented here when needed
 		// For now, just close the dropdown as Base is the only supported network
 		closeDropdown();
@@ -62,7 +61,9 @@
 		<div
 			class="absolute top-full left-0 mt-2 bg-white border border-light-gray rounded shadow-lg z-50 min-w-max"
 			on:click={closeDropdown}
+			on:keydown={(e) => e.key === 'Escape' && closeDropdown()}
 			role="menu"
+			tabindex="-1"
 		>
 			{#each networks as network (network.id)}
 				<button

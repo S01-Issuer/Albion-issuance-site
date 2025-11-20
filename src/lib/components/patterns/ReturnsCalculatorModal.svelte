@@ -57,6 +57,95 @@
 	let tokenChart: Chart | null = null;
 	let tokenChartCanvas: HTMLCanvasElement;
 
+	// Tooltip state
+	let tooltipId = '';
+	let tooltipTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function showTooltipWithDelay(id: string, delay = 300) {
+		tooltipTimer = setTimeout(() => {
+			tooltipId = id;
+		}, delay);
+	}
+
+	function hideTooltip() {
+		if (tooltipTimer) {
+			clearTimeout(tooltipTimer);
+			tooltipTimer = null;
+		}
+		tooltipId = '';
+	}
+
+	// Tooltip configuration (static)
+	const tooltips = {
+		irr: 'A standard project finance measure of return, IRR is used to account for the early repayment of principal in project finance, rapidly reducing remaining investment exposure. IRR is calculated as the discount rate where NPV = 0 and the project is breakeven.',
+		npv: 'The profit or loss on this investment after adjusting all cashflows for the time value of money. It recognises that money now is worth more than money in the future due to inflation and opportunity cost.',
+		payback: 'The number of months before you\'ve recouped your investment, in nominal amounts.',
+		apr: 'Annual Percentage Rate is the annualised rate of return without accounting for time value of money. E.g. a single lump sum at the end of the year has the same value as one at the beginning. It is the most conservative measure and is calculated as the total return divided by number of years.'
+	};
+
+	// Reactive metrics arrays - these re-run when values change, maintaining Svelte reactivity
+	$: remainingMetrics = [
+		{
+			key: 'irr',
+			label: 'Annualized IRR',
+			value: remainingIRR,
+			formatted: `${isFinite(remainingIRR) ? remainingIRR.toFixed(2) : '—'}%`,
+			tooltip: tooltips.irr
+		},
+		{
+			key: 'npv',
+			label: `NPV @ ${discountRate}%`,
+			value: remainingNPV,
+			formatted: `$${remainingNPV.toFixed(6)}`,
+			tooltip: tooltips.npv
+		},
+		{
+			key: 'payback',
+			label: 'Payback Period',
+			value: remainingPayback,
+			formatted: `${isFinite(remainingPayback) ? remainingPayback.toFixed(1) : '—'} mo`,
+			tooltip: tooltips.payback
+		},
+		{
+			key: 'apr',
+			label: 'APR',
+			value: remainingAPR,
+			formatted: `${isFinite(remainingAPR) ? remainingAPR.toFixed(2) : '—'}%`,
+			tooltip: tooltips.apr
+		}
+	];
+
+	$: lifetimeMetrics = [
+		{
+			key: 'irr',
+			label: 'Annualized IRR',
+			value: lifetimeIRR,
+			formatted: `${isFinite(lifetimeIRR) ? lifetimeIRR.toFixed(2) : '—'}%`,
+			tooltip: tooltips.irr
+		},
+		{
+			key: 'npv',
+			label: `NPV @ ${discountRate}%`,
+			value: lifetimeNPV,
+			formatted: `$${lifetimeNPV.toFixed(6)}`,
+			tooltip: tooltips.npv
+		},
+		{
+			key: 'payback',
+			label: 'Payback Period',
+			value: lifetimePayback,
+			formatted: `${isFinite(lifetimePayback) ? lifetimePayback.toFixed(1) : '—'} mo`,
+			tooltip: tooltips.payback
+		},
+		{
+			key: 'apr',
+			label: 'APR',
+			value: lifetimeAPR,
+			formatted: `${isFinite(lifetimeAPR) ? lifetimeAPR.toFixed(2) : '—'}%`,
+			tooltip: tooltips.apr
+		}
+	];
+
 	// Reactive calculations
 	$: if (token && isOpen) {
 		updateCalculations();
@@ -64,7 +153,7 @@
 
 	// Update when user changes inputs - trigger on any input change
 	$: if (token) {
-		oilPrice, discountRate, numberOfTokens;
+		void(oilPrice); void(discountRate); void(numberOfTokens);
 		updateCalculations();
 	}
 
@@ -237,26 +326,23 @@
 	const modalClasses = 'bg-white rounded-lg shadow-2xl max-w-5xl w-full mx-4 max-h-[90vh] overflow-y-auto';
 	const headerClasses = 'sticky top-0 bg-white border-b border-light-gray p-6';
 	const contentClasses = 'p-6 space-y-8';
-	const titleClasses = 'text-2xl font-bold text-black';
-	const subtitleClasses = 'text-sm text-gray-600 mt-1';
+	const titleClasses = 'text-2xl font-bold text-black text-left';
+	const subtitleClasses = 'text-sm text-gray-600 mt-1 text-left';
 	const sectionClasses = 'space-y-4';
-	const sectionTitleClasses = 'text-lg font-semibold text-black uppercase';
-	const inputGroupClasses = 'flex flex-col gap-2';
-	const labelClasses = 'text-sm font-medium text-black';
-	const inputClasses = 'px-4 py-2 border border-light-gray rounded-lg focus:outline-none focus:ring-2 focus:ring-primary';
+	const sectionTitleClasses = 'text-lg font-semibold text-black uppercase text-left';
 	const metricGridClasses = 'grid grid-cols-1 md:grid-cols-4 gap-4';
 	const metricCardClasses = 'bg-light-gray p-4 rounded-lg';
 	const metricValueClasses = 'text-2xl font-bold text-primary';
-	const metricLabelClasses = 'text-xs font-semibold text-gray-600 uppercase mt-2';
+	const metricLabelClasses = 'text-xs text-gray-600 mt-2';
+	const metricLabelTextClasses = 'font-semibold uppercase';
 	const footerClasses = 'sticky bottom-0 bg-white border-t border-light-gray p-6 flex gap-3 justify-end';
-	const inputsGridClasses = 'grid grid-cols-1 md:grid-cols-3 gap-6';
 </script>
 
 <!-- Modal Backdrop -->
 {#if isOpen}
-	<div class={displayClasses} on:click={handleClose} on:keydown={(e) => e.key === 'Escape' && handleClose()} role="dialog" aria-modal="true" transition:fade={{ duration: 200 }}>
+	<div class={displayClasses} on:click={handleClose} on:keydown={(e) => e.key === 'Escape' && handleClose()} role="dialog" aria-modal="true" tabindex="-1" transition:fade={{ duration: 200 }}>
 		<!-- Modal Content -->
-		<div class={modalClasses} on:click|stopPropagation>
+		<div class={modalClasses} on:click|stopPropagation role="document" tabindex="-1">
 			<!-- Header -->
 			<div class={headerClasses}>
 				<div class="flex items-start justify-between">
@@ -270,6 +356,16 @@
 							{/if}
 						</p>
 					</div>
+					<button
+						type="button"
+						on:click={handleClose}
+						class="text-gray-400 hover:text-gray-600 transition-colors ml-4"
+						aria-label="Close modal"
+					>
+						<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
 				</div>
 			</div>
 
@@ -277,11 +373,13 @@
 			<div class={contentClasses}>
 				{#if token}
 					<!-- Assumptions - Show in both modes -->
+					{@const crudeBenchmark = token.asset?.technical?.crudeBenchmark || ''}
+					{@const oilPriceLabel = crudeBenchmark ? `${crudeBenchmark} Oil Price (USD/bbl)` : 'Oil Price (USD/bbl)'}
 					<div class="flex justify-center">
 						<div class="bg-blue-50 border border-primary rounded px-3 py-1.5 inline-flex gap-4 items-center text-xs">
 							<span class="font-semibold text-black uppercase">Assumptions:</span>
 							<div class="flex items-center gap-2">
-								<label class="text-xs font-medium text-black" for="oil-price">Oil Price (USD/bbl)</label>
+								<label class="text-xs font-medium text-black" for="oil-price">{oilPriceLabel}</label>
 								<input
 									id="oil-price"
 									type="number"
@@ -339,71 +437,43 @@
 					</div>
 					</div>
 
-						<div class={sectionClasses}>
-							<h3 class={sectionTitleClasses}>Financial Metrics</h3>
+					<div class={sectionClasses}>
+						<h3 class={sectionTitleClasses}>Financial Metrics</h3>
 
-							<!-- Remaining Metrics Row -->
-							<div class="mb-6">
-								<h4 class="text-sm font-semibold text-gray-600 uppercase mb-3">Remaining (From Today)</h4>
+						{#each [{title: 'Remaining (From Today)', metrics: remainingMetrics, suffix: 'remaining'}, {title: 'Lifetime (From Start)', metrics: lifetimeMetrics, suffix: 'lifetime'}] as section (section.suffix)}
+							<div class={section.suffix === 'remaining' ? 'mb-6' : ''}>
+								<h4 class="text-sm font-semibold text-gray-600 uppercase mb-3 text-left">{section.title}</h4>
 								<div class={metricGridClasses}>
-									<div class={metricCardClasses}>
-										<div class={metricValueClasses}>
-											{isFinite(remainingIRR) ? remainingIRR.toFixed(2) : '—'}%
+									{#each section.metrics as metric (metric.key)}
+										<div class={metricCardClasses}>
+											<div class={metricValueClasses}>
+												{metric.formatted}
+											</div>
+											<div class={`${metricLabelClasses} relative flex items-center justify-center gap-1`}>
+												<span class={metricLabelTextClasses}>{metric.label}</span>
+												<span
+													class="inline-flex items-center justify-center w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold cursor-help hover:bg-gray-400 transition-colors"
+													on:mouseenter={() => showTooltipWithDelay(`${metric.key}-tooltip-${section.suffix}`)}
+													on:mouseleave={hideTooltip}
+													on:focus={() => showTooltipWithDelay(`${metric.key}-tooltip-${section.suffix}`, 0)}
+													on:blur={hideTooltip}
+													tabindex="0"
+													role="button"
+												>
+													?
+												</span>
+												{#if tooltipId === `${metric.key}-tooltip-${section.suffix}`}
+													<div class="absolute left-full bottom-0 ml-1 bg-black text-white p-4 rounded text-sm w-96 z-[1000] shadow-2xl">
+														{metric.tooltip}
+													</div>
+												{/if}
+											</div>
 										</div>
-										<div class={metricLabelClasses}>Annualized IRR</div>
-									</div>
-									<div class={metricCardClasses}>
-										<div class={metricValueClasses}>
-											${remainingNPV.toFixed(6)}
-										</div>
-										<div class={metricLabelClasses}>NPV @ {discountRate}%</div>
-									</div>
-									<div class={metricCardClasses}>
-										<div class={metricValueClasses}>
-											{isFinite(remainingPayback) ? remainingPayback.toFixed(1) : '—'} mo
-										</div>
-										<div class={metricLabelClasses}>Payback Period</div>
-									</div>
-									<div class={metricCardClasses}>
-										<div class={metricValueClasses}>
-											{isFinite(remainingAPR) ? remainingAPR.toFixed(2) : '—'}%
-										</div>
-										<div class={metricLabelClasses}>APR</div>
-									</div>
+									{/each}
 								</div>
 							</div>
-
-							<!-- Lifetime Metrics Row -->
-							<div>
-								<h4 class="text-sm font-semibold text-gray-600 uppercase mb-3">Lifetime (From Start)</h4>
-								<div class={metricGridClasses}>
-									<div class={metricCardClasses}>
-										<div class={metricValueClasses}>
-											{isFinite(lifetimeIRR) ? lifetimeIRR.toFixed(2) : '—'}%
-										</div>
-										<div class={metricLabelClasses}>Annualized IRR</div>
-									</div>
-									<div class={metricCardClasses}>
-										<div class={metricValueClasses}>
-											${lifetimeNPV.toFixed(6)}
-										</div>
-										<div class={metricLabelClasses}>NPV @ {discountRate}%</div>
-									</div>
-									<div class={metricCardClasses}>
-										<div class={metricValueClasses}>
-											{isFinite(lifetimePayback) ? lifetimePayback.toFixed(1) : '—'} mo
-										</div>
-										<div class={metricLabelClasses}>Payback Period</div>
-									</div>
-									<div class={metricCardClasses}>
-										<div class={metricValueClasses}>
-											{isFinite(lifetimeAPR) ? lifetimeAPR.toFixed(2) : '—'}%
-										</div>
-										<div class={metricLabelClasses}>APR</div>
-									</div>
-								</div>
-							</div>
-						</div>
+						{/each}
+					</div>
 				{:else}
 					<div class="text-center py-12">
 						<p class="text-gray-600">No token data available. Please select a token to calculate returns.</p>

@@ -156,23 +156,43 @@ export function installHttpMocks(cfg: HttpMockConfig) {
               receiptsData: [
                 {
                   month: "2025-05",
-                  assetData: { production: 347.76, revenue: 30992, expenses: 0, netIncome: 30992 },
-                  realisedPrice: { oilPrice: 89.13, gasPrice: 0 }
+                  assetData: {
+                    production: 347.76,
+                    revenue: 30992,
+                    expenses: 0,
+                    netIncome: 30992,
+                  },
+                  realisedPrice: { oilPrice: 89.13, gasPrice: 0 },
                 },
                 {
                   month: "2025-06",
-                  assetData: { production: 330.885, revenue: 25040, expenses: 0, netIncome: 25040 },
-                  realisedPrice: { oilPrice: 75.67, gasPrice: 0 }
+                  assetData: {
+                    production: 330.885,
+                    revenue: 25040,
+                    expenses: 0,
+                    netIncome: 25040,
+                  },
+                  realisedPrice: { oilPrice: 75.67, gasPrice: 0 },
                 },
                 {
                   month: "2025-07",
-                  assetData: { production: 336.24, revenue: 23614.71, expenses: 0, netIncome: 23614.71 },
-                  realisedPrice: { oilPrice: 70.24, gasPrice: 0 }
+                  assetData: {
+                    production: 336.24,
+                    revenue: 23614.71,
+                    expenses: 0,
+                    netIncome: 23614.71,
+                  },
+                  realisedPrice: { oilPrice: 70.24, gasPrice: 0 },
                 },
                 {
                   month: "2025-08",
-                  assetData: { production: 330.615, revenue: 21490.98, expenses: 0, netIncome: 21490.98 },
-                  realisedPrice: { oilPrice: 65.00, gasPrice: 0 }
+                  assetData: {
+                    production: 330.615,
+                    revenue: 21490.98,
+                    expenses: 0,
+                    netIncome: 21490.98,
+                  },
+                  realisedPrice: { oilPrice: 65.0, gasPrice: 0 },
                 },
                 // Note: 2025-09 and 2025-10 are missing - will be estimated from projections
               ],
@@ -219,23 +239,43 @@ export function installHttpMocks(cfg: HttpMockConfig) {
               receiptsData: [
                 {
                   month: "2025-05",
-                  assetData: { production: 347.76, revenue: 30992, expenses: 0, netIncome: 30992 },
-                  realisedPrice: { oilPrice: 89.13, gasPrice: 0 }
+                  assetData: {
+                    production: 347.76,
+                    revenue: 30992,
+                    expenses: 0,
+                    netIncome: 30992,
+                  },
+                  realisedPrice: { oilPrice: 89.13, gasPrice: 0 },
                 },
                 {
                   month: "2025-06",
-                  assetData: { production: 330.885, revenue: 25040, expenses: 0, netIncome: 25040 },
-                  realisedPrice: { oilPrice: 75.67, gasPrice: 0 }
+                  assetData: {
+                    production: 330.885,
+                    revenue: 25040,
+                    expenses: 0,
+                    netIncome: 25040,
+                  },
+                  realisedPrice: { oilPrice: 75.67, gasPrice: 0 },
                 },
                 {
                   month: "2025-07",
-                  assetData: { production: 336.24, revenue: 23614.71, expenses: 0, netIncome: 23614.71 },
-                  realisedPrice: { oilPrice: 70.24, gasPrice: 0 }
+                  assetData: {
+                    production: 336.24,
+                    revenue: 23614.71,
+                    expenses: 0,
+                    netIncome: 23614.71,
+                  },
+                  realisedPrice: { oilPrice: 70.24, gasPrice: 0 },
                 },
                 {
                   month: "2025-08",
-                  assetData: { production: 330.615, revenue: 21490.98, expenses: 0, netIncome: 21490.98 },
-                  realisedPrice: { oilPrice: 65.00, gasPrice: 0 }
+                  assetData: {
+                    production: 330.615,
+                    revenue: 21490.98,
+                    expenses: 0,
+                    netIncome: 21490.98,
+                  },
+                  realisedPrice: { oilPrice: 65.0, gasPrice: 0 },
                 },
               ],
               plannedProduction: {

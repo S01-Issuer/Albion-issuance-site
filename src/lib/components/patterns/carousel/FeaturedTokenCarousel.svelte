@@ -11,6 +11,8 @@
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 	import { getAddressUrl } from '$lib/utils/explorer';
+	import { calculateLifetimeIRR, calculateMonthlyTokenCashflows, calculateIRR } from '$lib/utils/returnsCalculatorHelpers';
+	import ReturnsCalculatorModal from '$lib/components/patterns/ReturnsCalculatorModal.svelte';
 
 	export let autoPlay = true;
 	export let autoPlayInterval = 5000;
@@ -31,6 +33,12 @@
 	let isTransitioning = false;
 	let touchStartX = 0;
 	let touchEndX = 0;
+
+	// Returns calculator modal state
+	let showReturnsCalculator = false;
+	let calculatorToken: TokenMetadata | null = null;
+	let calculatorMintedSupply = 0;
+	let calculatorAvailableSupply = 0;
 
 	// Calculate supply values for a token
 	function getTokenSupplyValues(token: TokenMetadata) {
@@ -131,15 +139,9 @@
 		}
 	}
 
-	let tooltipId = '';
-	let tooltipTimer: ReturnType<typeof setTimeout> | null = null;
-
 	onDestroy(() => {
 		if (autoPlayTimer) {
 			clearInterval(autoPlayTimer);
-		}
-		if (tooltipTimer) {
-			clearTimeout(tooltipTimer);
 		}
 	});
 
@@ -161,7 +163,7 @@
 		}, 600);
 	}
 
-	function goToSlide(index: number) {
+	function _goToSlide(index: number) {
 		if (index >= 0 && index < featuredTokensWithAssets.length && !isTransitioning) {
 			isTransitioning = true;
 			currentIndex = index;
@@ -189,26 +191,6 @@
 
 	function handleMouseLeave() {
 		if (autoPlay && featuredTokensWithAssets.length > 1) startAutoPlay();
-	}
-
-	function showTooltipWithDelay(id: string, delay = 300) {
-		if (tooltipTimer) {
-			clearTimeout(tooltipTimer);
-		}
-
-		tooltipTimer = setTimeout(() => {
-			tooltipId = id;
-			tooltipTimer = null;
-		}, delay);
-	}
-
-	function hideTooltip() {
-		if (tooltipTimer) {
-			clearTimeout(tooltipTimer);
-			tooltipTimer = null;
-		}
-
-		tooltipId = '';
 	}
 
 	function handleTouchStart(event: TouchEvent) {
@@ -293,6 +275,14 @@
 				return statusIndicatorClasses;
 		}
 	}
+
+	// Open returns calculator modal
+	function openReturnsCalculator(token: TokenMetadata, mintedSupply: number, availableSupply: number) {
+		calculatorToken = token;
+		calculatorMintedSupply = mintedSupply;
+		calculatorAvailableSupply = availableSupply;
+		showReturnsCalculator = true;
+	}
 </script>
 
 <div class={containerClasses} bind:this={carouselContainer}>
@@ -330,12 +320,14 @@
 			</button>
 		{/if}
 
-		<div 
+		<div
 			class={carouselWrapperClasses}
 			on:mouseenter={handleMouseEnter}
 			on:mouseleave={handleMouseLeave}
 			on:touchstart={handleTouchStart}
 			on:touchend={handleTouchEnd}
+			role="region"
+			aria-label="Featured tokens carousel"
 		>
 			<!-- Carousel track -->
 			<div 
@@ -345,8 +337,13 @@
 				{#each featuredTokensWithAssets as item, index (item.token.contractAddress)}
 					{@const sft = $sfts?.find(s => s.id.toLowerCase() === item.token.contractAddress.toLowerCase())}
 					{@const maxSupply = catalogService.getTokenMaxSupply(item.token.contractAddress) ?? undefined}
-					{@const calculatedReturns = calculateTokenReturns(item.asset, item.token, sft?.totalShares, maxSupply)}
+					{@const _calculatedReturns = calculateTokenReturns(item.asset, item.token, sft?.totalShares, maxSupply)}
 					{@const supplyValues = getTokenSupplyValues(item.token)}
+					{@const lifetimeIRR = calculateLifetimeIRR(item.token, 65, supplyValues.mintedSupply, 1)}
+					{@const monthlyCashflows = calculateMonthlyTokenCashflows(item.token, 65, supplyValues.mintedSupply, 1)}
+					{@const cashflows = monthlyCashflows.map(m => m.cashflow)}
+					{@const monthlyIRR = calculateIRR(cashflows)}
+					{@const remainingIRR = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99}
 					<div class={`${carouselSlideClasses} ${index === currentIndex ? activeSlideClasses : inactiveSlideClasses}`}>
 						<div class={bannerCardClasses}>
 							<!-- Token Section -->
@@ -401,53 +398,27 @@
 						</div>
 					</div>
 
-		<!-- Returns - responsive label and format -->
+		<!-- Lifetime Returns -->
 		<div class={statItemClasses}>
-			<div class={`${statLabelClasses} relative flex items-center gap-1`}>
-				<span class="hidden sm:inline">Base IRR</span>
-				<span class="sm:hidden">Est. IRR</span>
-				<span
-					class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100"
-					on:mouseenter={() => showTooltipWithDelay('irr-info')}
-					on:mouseleave={hideTooltip}
-					on:focus={() => showTooltipWithDelay('irr-info', 0)}
-					on:blur={hideTooltip}
-					tabindex="0"
-					role="button"
-				>
-					ⓘ
-				</span>
-				{#if tooltipId === 'irr-info'}
-					<div class="absolute top-full left-0 mt-1 bg-black text-white p-2 rounded text-xs max-w-xs z-[1000]">
-						IRR is a standard oil and gas industry and project finance returns metric that gives the rate of return that would set the NPV of cashflows to 0. It accounts for early repayment of invested capital.
-					</div>
-				{/if}
-			</div>
+			<div class={statLabelClasses}>Lifetime Returns</div>
 			<div class={statValueClasses + ' text-primary'}>
-				<span class="hidden sm:inline">
-					<FormattedReturn value={calculatedReturns?.baseReturn} />
-				</span>
-							<span class="sm:hidden flex items-center gap-1">
-								{#if calculatedReturns?.baseReturn !== undefined && calculatedReturns?.bonusReturn !== undefined}
-									<span class="flex items-center gap-1 text-xs">
-										<FormattedReturn value={calculatedReturns.baseReturn} />
-										<span>+</span>
-										<FormattedReturn value={calculatedReturns.bonusReturn} />
-									</span>
-								{:else}
-									TBD
-								{/if}
-							</span>
-						</div>
-					</div>
+				<FormattedReturn value={lifetimeIRR} />
+			</div>
+			<button
+				class="text-xs font-semibold text-primary hover:text-secondary transition-colors cursor-pointer bg-transparent border-none p-0 mt-1 text-left"
+				on:click={() => openReturnsCalculator(item.token, supplyValues.mintedSupply, supplyValues.availableSupply)}
+			>
+				View returns estimator →
+			</button>
+		</div>
 
-		<!-- Bonus IRR - hidden on mobile -->
-		<div class={`${statItemClasses} hidden sm:block`}>
-			<div class={statLabelClasses}>Bonus IRR</div>
-						<div class={statValueClasses + ' text-primary'}>
-							<FormattedReturn value={calculatedReturns?.bonusReturn} showPlus={true} />
-						</div>
-					</div>
+		<!-- Remaining Returns -->
+		<div class={statItemClasses}>
+			<div class={statLabelClasses}>Remaining Returns</div>
+			<div class={statValueClasses + ' text-primary'}>
+				<FormattedReturn value={remainingIRR} />
+			</div>
+		</div>
 				</div>
 
 												<div class={tokenActionsClasses + " sm:flex-col flex-row gap-2 sm:gap-4"}>
@@ -522,7 +493,7 @@
 		{#if featuredTokensWithAssets.length > 1}
 			<div class="flex justify-center gap-1 mt-2 z-10">
 				{#each featuredTokensWithAssets as indicatorItem, index (indicatorItem.token.contractAddress)}
-					<div 
+					<div
 						class={index === currentIndex ? 'w-2 h-2 bg-gray-800 rounded-full' : 'w-2 h-2 bg-gray-300 rounded-full'}
 					></div>
 				{/each}
@@ -530,3 +501,13 @@
 		{/if}
 	{/if}
 </div>
+
+<!-- Returns Calculator Modal -->
+{#if calculatorToken}
+	<ReturnsCalculatorModal
+		bind:isOpen={showReturnsCalculator}
+		token={calculatorToken}
+		mintedSupply={calculatorMintedSupply}
+		availableSupply={calculatorAvailableSupply}
+	/>
+{/if}

@@ -11,7 +11,6 @@
 	import { signerAddress, wagmiConfig, chainId } from 'svelte-wagmi';
 	import { formatEther, formatUnits, parseUnits, type Hex } from 'viem';
 	import { erc20Abi } from 'viem';
-	import { onMount } from 'svelte';
 	import { PrimaryButton, SecondaryButton, FormattedNumber } from '$lib/components/components';
 	import { sftMetadata, sfts } from '$lib/stores';
 	import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
@@ -351,8 +350,6 @@
 	const usdcBadgeClasses = 'flex items-center gap-2 text-lg font-medium text-black opacity-80';
 	const usdcIconClasses = 'h-5 w-5';
 	const amountInputClasses = 'p-4 border-2 border-light-gray text-lg text-left transition-colors duration-200 focus:outline-none focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed';
-	const availableTokensClasses = 'mt-2 text-sm text-secondary font-medium';
-	const soldOutClasses = 'text-red-600';
 	const warningNoteClasses = 'text-sm text-orange-600 bg-orange-50 p-2 mt-2';
 	const orderSummaryClasses = 'border border-light-gray p-6';
 	const termsCheckboxClasses = 'flex items-start gap-3 text-sm leading-relaxed cursor-pointer';

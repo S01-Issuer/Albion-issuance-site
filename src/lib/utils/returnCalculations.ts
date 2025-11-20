@@ -116,8 +116,11 @@ export function calculateTokenReturns(
 
   // Use token.firstPaymentDate as cashflow start, with hardcoded override for specific token
   let cashflowStartDate = token.firstPaymentDate || projections[0]?.month;
-  if (token.contractAddress?.toLowerCase() === '0xf836a500910453a397084ade41321ee20a5aade1') {
-    cashflowStartDate = '2025-08';
+  if (
+    token.contractAddress?.toLowerCase() ===
+    "0xf836a500910453a397084ade41321ee20a5aade1"
+  ) {
+    cashflowStartDate = "2025-08";
   }
 
   // Calculate pending distributions
@@ -156,7 +159,10 @@ export function calculateTokenReturns(
     let monthlyRevenue = projection.production * adjustedOilPrice;
 
     // Add pending distributions for first 12 months from cashflowStartDate
-    if (projection.month >= cashflowStartDate && projection.month < pendingDistributionsEndDate) {
+    if (
+      projection.month >= cashflowStartDate &&
+      projection.month < pendingDistributionsEndDate
+    ) {
       monthlyRevenue += monthlyPendingDistribution;
     }
 
