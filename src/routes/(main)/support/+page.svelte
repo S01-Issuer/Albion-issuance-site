@@ -28,8 +28,8 @@
 				<div class="text-sm text-black space-y-3">
 					<p>Gas fees are small transaction costs required by the blockchain network. Here's how to get ETH on Base:</p>
 					<ol class="list-decimal list-inside space-y-2 ml-2">
-						<li><strong>Get ETH on Ethereum mainnet:</strong> Purchase ETH from a centralized exchange (like Coinbase, Kraken, or Gemini) and withdraw it to your wallet address.</li>
-						<li><strong>Bridge ETH to Base:</strong> Use the official Base bridge (bridge.base.org) to transfer your ETH from Ethereum to the Base network. This is a one-way bridge that takes about 5-10 minutes.</li>
+						<li><strong>Get ETH on Ethereum mainnet:</strong> Purchase ETH from an on-ramp (like Coinbase, Bitstamp, or Binance) and withdraw it to your wallet address.</li>
+						<li><strong>Bridge ETH to Base:</strong> Use the bridge functionality built into most wallets (e.g. Rabby) to transfer your ETH from Ethereum to the Base network.</li>
 						<li><strong>Confirm you're on Base:</strong> Make sure your wallet is connected to the Base network (not Ethereum mainnet) when making purchases or claims.</li>
 					</ol>
 					<p class="pt-2"><em>Note: You only need a small amount of ETH (usually $1-5 worth) to cover gas fees for multiple transactions.</em></p>
@@ -43,7 +43,7 @@
 					<p>Tokens are purchased using USDC stablecoin on the Base network. Here's what you need:</p>
 					<ul class="list-disc list-inside space-y-2 ml-2">
 						<li><strong>USDC on Base:</strong> You must have USDC (USD Coin) on the Base network, not on Ethereum mainnet.</li>
-						<li><strong>Getting USDC:</strong> Purchase USDC from a centralized exchange and bridge it to Base, or swap ETH for USDC on Base using decentralized exchanges like Uniswap.</li>
+						<li><strong>Getting USDC:</strong> Purchase USDC from an on-ramp (like Coinbase, Bitstamp, or Binance) and bridge it to Base, or swap ETH for USDC on Base using decentralized exchanges like Uniswap.</li>
 						<li><strong>Network confirmation:</strong> Always verify you're connected to the Base network in your wallet before attempting to purchase.</li>
 						<li><strong>Gas fees:</strong> You'll also need a small amount of ETH on Base to pay for transaction fees (see the gas fees question above).</li>
 					</ul>
