@@ -15,7 +15,6 @@ const RETRY_DELAY_MS = 250;
 
 const fallbackGateways = [
   publicEnv.PUBLIC_IPFS_FALLBACK_GATEWAY,
-  "https://cloudflare-ipfs.com/ipfs",
   "https://ipfs.io/ipfs",
   "https://dweb.link/ipfs",
 ].filter((gateway): gateway is string => Boolean(gateway));
