@@ -52,7 +52,7 @@
 		large: 'large'
 	} as const;
 
-	$: cardClasses = `bg-white border border-light-gray rounded-lg transition-all duration-200 ${sizeClasses[size].card} ${centered ? 'text-center' : ''}`;
+	$: cardClasses = `bg-white border border-light-gray rounded-none transition-all duration-200 ${sizeClasses[size].card} ${centered ? 'text-center' : ''}`;
 	$: iconClasses = `block mx-auto ${sizeClasses[size].icon}`;
 	$: titleClasses = `font-extrabold text-black uppercase tracking-wide leading-tight ${sizeClasses[size].title}`;
 	$: descriptionClasses = `text-black opacity-70 leading-relaxed ${sizeClasses[size].description}`;

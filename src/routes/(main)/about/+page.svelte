@@ -58,7 +58,7 @@
 					<!-- For Investors Content -->
 					<div class="space-y-8">
 						<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-							<div class="p-6 bg-light-gray rounded-lg">
+							<div class="p-6 bg-light-gray rounded-none">
 								<div class="flex items-center gap-3 mb-3">
 									<div class="w-10 h-10 bg-primary text-white rounded-full flex items-center justify-center font-extrabold">$</div>
 									<h4 class="text-lg font-bold text-black">Start Small, Think Big</h4>
@@ -66,7 +66,7 @@
 								<p class="text-sm text-black leading-relaxed">Diversify your portfolio with energy assets starting from just US$1, giving you unparalleled flexibility.</p>
 							</div>
 							
-							<div class="p-6 bg-light-gray rounded-lg">
+							<div class="p-6 bg-light-gray rounded-none">
 								<div class="flex items-center gap-3 mb-3">
 									<div class="w-10 h-10 bg-primary text-white rounded-full flex items-center justify-center font-extrabold">⬆</div>
 									<h4 class="text-lg font-bold text-black">Institutional-Grade Access</h4>
@@ -74,7 +74,7 @@
 								<p class="text-sm text-black leading-relaxed">Invest in the same quality assets as major funds and institutions, previously reserved for the ultra-wealthy.</p>
 							</div>
 							
-							<div class="p-6 bg-light-gray rounded-lg">
+							<div class="p-6 bg-light-gray rounded-none">
 								<div class="flex items-center gap-3 mb-3">
 									<div class="w-10 h-10 bg-primary text-white rounded-full flex items-center justify-center font-extrabold">✓</div>
 									<h4 class="text-lg font-bold text-black">Complete Transparency</h4>
@@ -82,7 +82,7 @@
 								<p class="text-sm text-black leading-relaxed">Every payout recorded on-chain. Every transaction verifiable. Full audit trails publicly accessible 24/7.</p>
 							</div>
 							
-							<div class="p-6 bg-light-gray rounded-lg">
+							<div class="p-6 bg-light-gray rounded-none">
 								<div class="flex items-center gap-3 mb-3">
 									<div class="w-10 h-10 bg-primary text-white rounded-full flex items-center justify-center font-extrabold">↔</div>
 									<h4 class="text-lg font-bold text-black">Liquid When You Need It</h4>
@@ -90,7 +90,7 @@
 								<p class="text-sm text-black leading-relaxed">Trade your tokens on secondary markets anytime. No lock-up periods, no redemption gates.</p>
 							</div>
 							
-							<div class="p-6 bg-light-gray rounded-lg md:col-span-2 lg:col-span-1">
+							<div class="p-6 bg-light-gray rounded-none md:col-span-2 lg:col-span-1">
 								<div class="flex items-center gap-3 mb-3">
 									<div class="w-10 h-10 bg-primary text-white rounded-full flex items-center justify-center font-extrabold">%</div>
 									<h4 class="text-lg font-bold text-black">Real Revenue, Real Returns</h4>
@@ -103,7 +103,7 @@
 					<!-- For Energy Companies Content -->
 					<div class="space-y-8">
 						<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-							<div class="p-6 bg-light-gray rounded-lg">
+							<div class="p-6 bg-light-gray rounded-none">
 								<div class="flex items-center gap-3 mb-3">
 									<div class="w-10 h-10 bg-secondary text-white rounded-full flex items-center justify-center font-extrabold">🌍</div>
 									<h4 class="text-lg font-bold text-black">Global Capital Access</h4>
@@ -111,7 +111,7 @@
 								<p class="text-sm text-black leading-relaxed">Access millions of retail and crypto investors worldwide. Tap new pools of capital for your projects.</p>
 							</div>
 							
-							<div class="p-6 bg-light-gray rounded-lg">
+							<div class="p-6 bg-light-gray rounded-none">
 								<div class="flex items-center gap-3 mb-3">
 									<div class="w-10 h-10 bg-secondary text-white rounded-full flex items-center justify-center font-extrabold">⚡</div>
 									<h4 class="text-lg font-bold text-black">Days, Not Months</h4>
@@ -119,7 +119,7 @@
 								<p class="text-sm text-black leading-relaxed">Complete fundraising rounds in days with streamlined digital processes. No roadshows or endless negotiations.</p>
 							</div>
 							
-							<div class="p-6 bg-light-gray rounded-lg">
+							<div class="p-6 bg-light-gray rounded-none">
 								<div class="flex items-center gap-3 mb-3">
 									<div class="w-10 h-10 bg-secondary text-white rounded-full flex items-center justify-center font-extrabold">⚙</div>
 									<h4 class="text-lg font-bold text-black">You're in Control</h4>
@@ -127,7 +127,7 @@
 								<p class="text-sm text-black leading-relaxed">Choose exactly which assets to tokenize and what percentage to offer. Maintain full operational control.</p>
 							</div>
 							
-							<div class="p-6 bg-light-gray rounded-lg">
+							<div class="p-6 bg-light-gray rounded-none">
 								<div class="flex items-center gap-3 mb-3">
 									<div class="w-10 h-10 bg-secondary text-white rounded-full flex items-center justify-center font-extrabold">-$</div>
 									<h4 class="text-lg font-bold text-black">Cut the Middleman</h4>
@@ -135,7 +135,7 @@
 								<p class="text-sm text-black leading-relaxed">Save 80-90% compared to traditional investment banking fees. More capital for your projects.</p>
 							</div>
 							
-							<div class="p-6 bg-light-gray rounded-lg md:col-span-2 lg:col-span-1">
+							<div class="p-6 bg-light-gray rounded-none md:col-span-2 lg:col-span-1">
 								<div class="flex items-center gap-3 mb-3">
 									<div class="w-10 h-10 bg-secondary text-white rounded-full flex items-center justify-center font-extrabold">=</div>
 									<h4 class="text-lg font-bold text-black">Keep Your Equity</h4>
@@ -155,7 +155,7 @@
 
 		<!-- Brand Experience Icons -->
 		<div class="grid grid-cols-2 lg:grid-cols-4 gap-8 mb-8">
-			<Card hoverable={false} paddingClass="p-4" roundedClass="rounded-lg">
+			<Card hoverable={false} paddingClass="p-4" roundedClass="rounded-none">
 				<div class="text-center">
 					<div class="w-full h-20 flex items-center justify-center mx-auto mb-3">
 						<img src="/images/google-logo.png" alt="Google" class="h-16 w-auto object-contain" />
@@ -164,7 +164,7 @@
 				</div>
 			</Card>
 			
-			<Card hoverable={false} paddingClass="p-4" roundedClass="rounded-lg">
+			<Card hoverable={false} paddingClass="p-4" roundedClass="rounded-none">
 				<div class="text-center">
 					<div class="w-full h-20 flex items-center justify-center mx-auto mb-3">
 						<img src="/images/virgin-logo.png" alt="Virgin" class="h-16 w-auto object-contain" />
@@ -173,7 +173,7 @@
 				</div>
 			</Card>
 			
-			<Card hoverable={false} paddingClass="p-4" roundedClass="rounded-lg">
+			<Card hoverable={false} paddingClass="p-4" roundedClass="rounded-none">
 				<div class="text-center">
 					<div class="w-full h-20 flex items-center justify-center mx-auto mb-3">
 						<img src="/images/holochain-logo.svg" alt="Holochain" class="h-20 w-auto object-contain" />
@@ -182,7 +182,7 @@
 				</div>
 			</Card>
 			
-			<Card hoverable={false} paddingClass="p-2" roundedClass="rounded-lg">
+			<Card hoverable={false} paddingClass="p-2" roundedClass="rounded-none">
 				<div class="text-center">
 					<div class="w-full h-24 flex items-center justify-center mx-auto mb-2">
 						<img src="/images/heritage-oil-logo.svg" alt="Heritage Oil" class="h-24 w-auto object-contain" />
@@ -198,7 +198,7 @@
 		<SectionTitle level="h2" size="section" center className="mb-12">The Albion Advantage</SectionTitle>
 		
 		<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-			<Card hoverable={false} paddingClass="p-8" roundedClass="rounded-lg">
+			<Card hoverable={false} paddingClass="p-8" roundedClass="rounded-none">
 				<div class="text-center">
 					<div class="w-16 h-16 bg-black text-white rounded-full flex items-center justify-center text-2xl font-extrabold mx-auto mb-4">1</div>
 					<SectionTitle level="h3" size="small" uppercase>Digital Innovation</SectionTitle>
@@ -206,7 +206,7 @@
 				</div>
 			</Card>
 			
-			<Card hoverable={false} paddingClass="p-8" roundedClass="rounded-lg">
+			<Card hoverable={false} paddingClass="p-8" roundedClass="rounded-none">
 				<div class="text-center">
 					<div class="w-16 h-16 bg-black text-white rounded-full flex items-center justify-center text-2xl font-extrabold mx-auto mb-4">2</div>
 					<SectionTitle level="h3" size="small" uppercase>Energy Expertise</SectionTitle>
@@ -214,7 +214,7 @@
 				</div>
 			</Card>
 			
-			<Card hoverable={false} paddingClass="p-8" roundedClass="rounded-lg">
+			<Card hoverable={false} paddingClass="p-8" roundedClass="rounded-none">
 				<div class="text-center">
 					<div class="w-16 h-16 bg-black text-white rounded-full flex items-center justify-center text-2xl font-extrabold mx-auto mb-4">3</div>
 					<SectionTitle level="h3" size="small" uppercase>Value Creation</SectionTitle>

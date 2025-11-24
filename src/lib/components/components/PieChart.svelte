@@ -239,8 +239,8 @@
 			<div class="flex flex-wrap gap-x-4 gap-y-2 justify-center">
 				{#each pieData as segment, i (segment.label + i)}
 					<div class="flex items-center gap-2">
-						<div 
-							class="w-3 h-3 rounded-sm flex-shrink-0"
+						<div
+							class="w-3 h-3 rounded-none flex-shrink-0"
 							style={`background-color: ${segment.color}`}
 						></div>
 						<span class="text-xs font-medium text-black">
@@ -254,8 +254,8 @@
 	
 	<!-- Tooltip -->
 	{#if tooltipData.show}
-		<div 
-			class="absolute z-50 bg-black text-white p-3 rounded text-sm pointer-events-none"
+		<div
+			class="absolute z-50 bg-black text-white p-3 rounded-none text-sm pointer-events-none"
 			style={`left: ${tooltipData.x}px; top: ${tooltipData.y - 60}px; transform: translateX(-50%);`}
 		>
 			<div class="font-bold">{tooltipData.label}</div>

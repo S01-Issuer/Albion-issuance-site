@@ -24,7 +24,7 @@
 
 {#if show}
 	<div 
-		class="absolute pointer-events-none z-50 bg-black text-white px-3 py-2 rounded-md text-xs whitespace-nowrap shadow-lg {alignmentClass}"
+		class="absolute pointer-events-none z-50 bg-black text-white px-3 py-2 rounded-none text-xs whitespace-nowrap shadow-lg {alignmentClass}"
 		style="left: {align === 'center' ? x : align === 'left' ? x : 'auto'}px; top: {y - 40}px; {align === 'right' ? `right: ${x}px` : ''}"
 	>
 		{#if label}

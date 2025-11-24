@@ -6,6 +6,7 @@
 	import { web3Modal, signerAddress, connected, loading, disconnectWagmi } from 'svelte-wagmi';
     import { formatAddress } from '$lib/utils/formatters';
     import { slide } from 'svelte/transition';
+	import NetworkSelector from '$lib/components/NetworkSelector.svelte';
 	
 	$: currentPath = $page.url.pathname;
 	let mobileMenuOpen = false;
@@ -149,11 +150,14 @@
 					<a href="/claims" class={classNames(navLinkClasses, currentPath === '/claims' && navLinkActiveClasses)}>Claims</a>
 				</div>
 				
-				<!-- Right side: Wallet button + Mobile menu button -->
+				<!-- Right side: Network selector + Wallet button + Mobile menu button -->
 				<div class="flex items-center gap-2 flex-shrink-0">
+					<!-- Network selector -->
+					<NetworkSelector />
+
 					<!-- Wallet button (responsive for both desktop and mobile) -->
-					<button 
-						class="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 text-xs sm:text-sm bg-white border border-light-gray rounded hover:bg-light-gray hover:border-secondary transition-all duration-200"
+					<button
+						class="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 text-xs sm:text-sm bg-white border border-light-gray rounded-none hover:bg-light-gray hover:border-secondary transition-all duration-200"
 						on:click={connectWallet}
 						disabled={$loading}
 					>

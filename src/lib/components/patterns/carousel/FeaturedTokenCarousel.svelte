@@ -4,11 +4,14 @@
 	import type { Asset } from '$lib/types/uiTypes';
 	import { PrimaryButton, SecondaryButton, FormattedNumber, FormattedReturn } from '$lib/components/components';
 	import { sftMetadata, sfts } from '$lib/stores';
+	import { chainId } from 'svelte-wagmi';
 	import { formatSmartNumber } from '$lib/utils/formatters';
 	import { formatSupplyDisplay } from '$lib/utils/supplyHelpers';
-	import { calculateTokenReturns } from '$lib/utils';
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
+	import { getAddressUrl } from '$lib/utils/explorer';
+	import { calculateLifetimeIRR } from '$lib/utils/returnsEstimatorHelpers';
+	import ReturnsEstimatorModal from '$lib/components/patterns/ReturnsEstimatorModal.svelte';
 
 	export let autoPlay = true;
 	export let autoPlayInterval = 5000;
@@ -29,6 +32,12 @@
 	let isTransitioning = false;
 	let touchStartX = 0;
 	let touchEndX = 0;
+
+	// Returns estimator modal state
+	let showReturnsEstimator = false;
+	let estimatorToken: TokenMetadata | null = null;
+	let estimatorMintedSupply = 0;
+	let estimatorAvailableSupply = 0;
 
 	// Calculate supply values for a token
 	function getTokenSupplyValues(token: TokenMetadata) {
@@ -129,15 +138,9 @@
 		}
 	}
 
-	let tooltipId = '';
-	let tooltipTimer: ReturnType<typeof setTimeout> | null = null;
-
 	onDestroy(() => {
 		if (autoPlayTimer) {
 			clearInterval(autoPlayTimer);
-		}
-		if (tooltipTimer) {
-			clearTimeout(tooltipTimer);
 		}
 	});
 
@@ -159,7 +162,7 @@
 		}, 600);
 	}
 
-	function goToSlide(index: number) {
+	function _goToSlide(index: number) {
 		if (index >= 0 && index < featuredTokensWithAssets.length && !isTransitioning) {
 			isTransitioning = true;
 			currentIndex = index;
@@ -187,49 +190,6 @@
 
 	function handleMouseLeave() {
 		if (autoPlay && featuredTokensWithAssets.length > 1) startAutoPlay();
-	}
-
-	function showTooltipWithDelay(id: string, delay = 300) {
-		if (tooltipTimer) {
-			clearTimeout(tooltipTimer);
-		}
-
-		tooltipTimer = setTimeout(() => {
-			tooltipId = id;
-			tooltipTimer = null;
-		}, delay);
-	}
-
-	function hideTooltip() {
-		if (tooltipTimer) {
-			clearTimeout(tooltipTimer);
-			tooltipTimer = null;
-		}
-
-		tooltipId = '';
-	}
-
-	function handleKeydown(event: KeyboardEvent) {
-		if (featuredTokensWithAssets.length <= 1) return;
-		
-		switch (event.key) {
-			case 'ArrowLeft':
-				event.preventDefault();
-				prevSlide();
-				break;
-			case 'ArrowRight':
-				event.preventDefault();
-				nextSlide();
-				break;
-			case 'Home':
-				event.preventDefault();
-				goToSlide(0);
-				break;
-			case 'End':
-				event.preventDefault();
-				goToSlide(featuredTokensWithAssets.length - 1);
-				break;
-		}
 	}
 
 	function handleTouchStart(event: TouchEvent) {
@@ -261,18 +221,18 @@
 
 	// Enhanced Tailwind class mappings with better mobile responsiveness - FIXED
 	const containerClasses = 'relative w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8';
-	const loadingStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-lg';
-	const errorStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-lg';
-	const emptyStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-lg';
+	const loadingStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-none';
+	const errorStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-none';
+	const emptyStateClasses = 'max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center p-8 lg:p-16 text-black bg-white border border-light-gray rounded-none';
 	const spinnerClasses = 'w-8 h-8 border-4 border-light-gray border-t-primary animate-spin mb-4';
-	const retryButtonClasses = 'mt-4 px-6 py-3 bg-primary text-white border-none cursor-pointer font-semibold transition-colors duration-200 hover:bg-secondary touch-target rounded';
-	const carouselWrapperClasses = 'relative overflow-hidden rounded-lg outline-none focus:ring-4 focus:ring-primary/50 touch-pan-y';
+	const retryButtonClasses = 'mt-4 px-6 py-3 bg-primary text-white border-none cursor-pointer font-semibold transition-colors duration-200 hover:bg-secondary touch-target rounded-none';
+	const carouselWrapperClasses = 'relative overflow-hidden rounded-none outline-none focus:ring-4 focus:ring-primary/50 touch-pan-y';
 	const carouselTrackClasses = 'flex w-full transition-transform duration-500 ease-in-out will-change-transform';
 	const carouselSlideClasses = 'flex-shrink-0 w-full relative';
 	const activeSlideClasses = 'opacity-100';
 	const inactiveSlideClasses = 'opacity-100';
 	const bannerCardClasses = 'grid grid-cols-1 lg:grid-cols-2 bg-white border border-light-gray overflow-hidden';
-	const tokenSectionClasses = 'p-4 sm:p-6 lg:p-8 bg-white border-b lg:border-b-0 lg:border-r border-light-gray flex flex-col justify-between min-h-[300px] sm:min-h-[350px] lg:min-h-[400px]';
+	const tokenSectionClasses = 'p-4 sm:p-6 lg:p-8 bg-white border-b lg:border-b-0 lg:border-r border-light-gray flex flex-col justify-between items-start min-h-[300px] sm:min-h-[350px] lg:min-h-[400px]';
 	const assetSectionClasses = 'p-4 sm:p-6 lg:p-8 bg-light-gray flex flex-col justify-between min-h-[300px] sm:min-h-[350px] lg:min-h-[400px] hidden lg:flex';
 	const tokenHeaderClasses = 'mb-3 sm:mb-4 lg:mb-6';
 	const tokenNameClasses = 'text-lg sm:text-xl lg:text-2xl font-bold text-black tracking-wider mb-2 leading-tight text-left';
@@ -290,7 +250,7 @@
 	const statItemClasses = 'text-left';
 	const statLabelClasses = 'text-xs font-medium text-gray-500 mb-1 font-figtree uppercase tracking-wide';
 	const statValueClasses = 'text-sm sm:text-base lg:text-lg font-bold text-black';
-	const tokenActionsClasses = 'flex flex-col gap-2 sm:gap-3 mt-auto';
+	const tokenActionsClasses = 'flex flex-row gap-2 sm:gap-3 mt-auto';
 	const assetMetaClasses = 'flex flex-col gap-2 mt-auto';
 	const assetMetaItemClasses = 'flex gap-2';
 	const assetMetaLabelClasses = 'text-xs font-medium text-gray-500 font-figtree';
@@ -313,6 +273,14 @@
 			default:
 				return statusIndicatorClasses;
 		}
+	}
+
+	// Open returns estimator modal
+	function openReturnsEstimator(token: TokenMetadata, mintedSupply: number, availableSupply: number) {
+		estimatorToken = token;
+		estimatorMintedSupply = mintedSupply;
+		estimatorAvailableSupply = availableSupply;
+		showReturnsEstimator = true;
 	}
 </script>
 
@@ -351,16 +319,14 @@
 			</button>
 		{/if}
 
-		<div 
+		<div
 			class={carouselWrapperClasses}
 			on:mouseenter={handleMouseEnter}
 			on:mouseleave={handleMouseLeave}
-			on:keydown={handleKeydown}
 			on:touchstart={handleTouchStart}
 			on:touchend={handleTouchEnd}
-			role="button"
-			aria-label="Featured tokens carousel - use arrow keys to navigate"
-			tabindex="0"
+			role="region"
+			aria-label="Featured tokens carousel"
 		>
 			<!-- Carousel track -->
 			<div 
@@ -370,8 +336,9 @@
 				{#each featuredTokensWithAssets as item, index (item.token.contractAddress)}
 					{@const sft = $sfts?.find(s => s.id.toLowerCase() === item.token.contractAddress.toLowerCase())}
 					{@const maxSupply = catalogService.getTokenMaxSupply(item.token.contractAddress) ?? undefined}
-					{@const calculatedReturns = calculateTokenReturns(item.asset, item.token, sft?.totalShares, maxSupply)}
 					{@const supplyValues = getTokenSupplyValues(item.token)}
+					{@const currentReturns = calculateLifetimeIRR(item.token, 65, supplyValues.mintedSupply, 1)}
+					{@const fullyDilutedReturns = calculateLifetimeIRR(item.token, 65, supplyValues.maxSupply, 1)}
 					<div class={`${carouselSlideClasses} ${index === currentIndex ? activeSlideClasses : inactiveSlideClasses}`}>
 						<div class={bannerCardClasses}>
 							<!-- Token Section -->
@@ -392,7 +359,15 @@
 									<div class="mb-3">
 										<h3 class={tokenNameClasses}>{item.token.releaseName}</h3>
 									</div>
-									<div class={tokenContractClasses}>{item.token.contractAddress}</div>
+									<a
+										href={getAddressUrl(item.token.contractAddress, $chainId)}
+										target="_blank"
+										rel="noopener noreferrer"
+										class={tokenContractClasses + " no-underline hover:text-primary transition-colors text-left"}
+										on:click|stopPropagation
+									>
+										{item.token.contractAddress}
+									</a>
 								</div>
 
 												<div class={tokenStatsClasses}>
@@ -418,56 +393,38 @@
 						</div>
 					</div>
 
-		<!-- Returns - responsive label and format -->
-		<div class={statItemClasses}>
-			<div class={`${statLabelClasses} relative flex items-center gap-1`}>
-				<span class="hidden sm:inline">Base IRR</span>
-				<span class="sm:hidden">Est. IRR</span>
-				<span
-					class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100"
-					on:mouseenter={() => showTooltipWithDelay('irr-info')}
-					on:mouseleave={hideTooltip}
-					on:focus={() => showTooltipWithDelay('irr-info', 0)}
-					on:blur={hideTooltip}
-					tabindex="0"
-					role="button"
-				>
-					ⓘ
-				</span>
-				{#if tooltipId === 'irr-info'}
-					<div class="absolute top-full left-0 mt-1 bg-black text-white p-2 rounded text-xs max-w-xs z-[1000]">
-						IRR is a standard oil and gas industry and project finance returns metric that gives the rate of return that would set the NPV of cashflows to 0. It accounts for early repayment of invested capital.
-					</div>
-				{/if}
-			</div>
-			<div class={statValueClasses + ' text-primary'}>
-				<span class="hidden sm:inline">
-					<FormattedReturn value={calculatedReturns?.baseReturn} />
-				</span>
-							<span class="sm:hidden flex items-center gap-1">
-								{#if calculatedReturns?.baseReturn !== undefined && calculatedReturns?.bonusReturn !== undefined}
-									<span class="flex items-center gap-1 text-xs">
-										<FormattedReturn value={calculatedReturns.baseReturn} />
-										<span>+</span>
-										<FormattedReturn value={calculatedReturns.bonusReturn} />
-									</span>
-								{:else}
-									TBD
-								{/if}
-							</span>
+					<!-- Current Returns -->
+					<div class={statItemClasses}>
+						<div class={statLabelClasses}>Current Returns</div>
+						<div class={statValueClasses + ' text-primary'}>
+							<FormattedReturn value={currentReturns} />
 						</div>
 					</div>
 
-		<!-- Bonus IRR - hidden on mobile -->
-		<div class={`${statItemClasses} hidden sm:block`}>
-			<div class={statLabelClasses}>Bonus IRR</div>
+					<!-- Fully Diluted Returns -->
+					<div class={statItemClasses}>
+						<div class={statLabelClasses}>Fully Diluted Returns</div>
 						<div class={statValueClasses + ' text-primary'}>
-							<FormattedReturn value={calculatedReturns?.bonusReturn} showPlus={true} />
+							<FormattedReturn value={fullyDilutedReturns} />
 						</div>
 					</div>
 				</div>
 
-												<div class={tokenActionsClasses + " sm:flex-col flex-row gap-2 sm:gap-4"}>
+
+			<!-- Disclaimer - full width -->
+			<div class="text-xs text-black opacity-60 font-figtree italic mb-3 text-left">
+				Returns value early principal repayments by assuming re-investment in similar assets
+			</div>
+
+			<!-- View returns estimator button - full width -->
+			<button
+				class="text-base font-semibold text-secondary hover:text-primary transition-colors cursor-pointer bg-transparent border-none p-0 mb-4 text-left"
+				on:click={() => openReturnsEstimator(item.token, supplyValues.mintedSupply, supplyValues.availableSupply)}
+			>
+				View returns estimator →
+			</button>
+
+												<div class={tokenActionsClasses}>
 					<PrimaryButton on:click={() => handleBuyTokens(item.token.contractAddress)}>
 						Buy Tokens
 					</PrimaryButton>
@@ -539,7 +496,7 @@
 		{#if featuredTokensWithAssets.length > 1}
 			<div class="flex justify-center gap-1 mt-2 z-10">
 				{#each featuredTokensWithAssets as indicatorItem, index (indicatorItem.token.contractAddress)}
-					<div 
+					<div
 						class={index === currentIndex ? 'w-2 h-2 bg-gray-800 rounded-full' : 'w-2 h-2 bg-gray-300 rounded-full'}
 					></div>
 				{/each}
@@ -547,3 +504,13 @@
 		{/if}
 	{/if}
 </div>
+
+<!-- Returns Estimator Modal -->
+{#if estimatorToken}
+	<ReturnsEstimatorModal
+		bind:isOpen={showReturnsEstimator}
+		token={estimatorToken}
+		mintedSupply={estimatorMintedSupply}
+		availableSupply={estimatorAvailableSupply}
+	/>
+{/if}

@@ -1,8 +1,8 @@
 import { PINATA_GATEWAY } from "$lib/network";
 
-// Basic CID pattern: allow common prefixes (bafy..., Qm...)
+// Basic CID pattern: allow common prefixes (bafy..., bafk..., Qm...)
 function looksLikeCid(input: string): boolean {
-  return /^bafy[\w]{20,}|^Qm[1-9A-HJ-NP-Za-km-z]{40,}/.test(input);
+  return /^baf[a-z0-9]{50,}|^Qm[1-9A-HJ-NP-Za-km-z]{40,}/.test(input);
 }
 
 export function getImageUrl(path: string | undefined | null): string {

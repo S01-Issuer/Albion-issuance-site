@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { sftMetadata, sfts, dataLoaded } from '$lib/stores';
+	import { connected, web3Modal, chainId } from 'svelte-wagmi';
 	import type {
 		Asset,
 		MonthlyReport,
@@ -16,10 +17,17 @@
 	import { useAssetDetailData, useDataExport } from '$lib/composables';
 	import AssetDetailHeader from '$lib/components/patterns/assets/AssetDetailHeader.svelte';
 	import AssetOverviewTab from '$lib/components/patterns/assets/AssetOverviewTab.svelte';
+	import ReturnsEstimatorModal from '$lib/components/patterns/ReturnsEstimatorModal.svelte';
 import { calculateTokenReturns, getTokenPayoutHistory, getTokenSupply } from '$lib/utils/returnCalculations';
+import { calculateLifetimeIRR, calculateMonthlyTokenCashflows, calculateIRR } from '$lib/utils/returnsEstimatorHelpers';
 import { PINATA_GATEWAY } from '$lib/network';
 import { catalogService } from '$lib/services';
 import { getTokenTermsPath } from '$lib/utils/tokenTerms';
+import { getTxUrl, getAddressUrl } from '$lib/utils/explorer';
+import { Chart as ChartJS, registerables } from 'chart.js';
+import { onDestroy } from 'svelte';
+
+ChartJS.register(...registerables);
 
 const isDev = import.meta.env.DEV;
 const logDev = (...messages: unknown[]) => {
@@ -163,7 +171,7 @@ function formatDueDate(date: Date): string {
 	return `${monthLabel} ${day}${suffix}`;
 }
 
-const metricCardClasses = 'text-center p-4 bg-white border border-light-gray rounded-lg';
+const metricCardClasses = 'text-center p-4 bg-white border border-light-gray rounded-none';
 const metricValueClasses = 'text-2xl font-extrabold text-black mb-1';
 const metricLabelClasses = 'text-xs font-medium text-black opacity-70';
 
@@ -185,6 +193,8 @@ let revenueReportsWithIncome: RevenueReport[] = [];
 let revenueChartData: Array<{ label: string; value: number }> = [];
 let latestRevenueReport: RevenueReport | null = null;
 let revenueAverage = 0;
+let revenueChart: ChartJS | null = null;
+let revenueChartCanvas: HTMLCanvasElement;
 let revenueTotal = 0;
 let revenueHasData = false;
 let productionReports: Array<MonthlyReport | ProductionHistoryRecord> = [];
@@ -308,6 +318,11 @@ $: {
 	}
 }
 
+// Create/update revenue chart when data changes
+$: if (revenueChartCanvas && revenueReports.length > 0 && primaryToken) {
+	createRevenueChart();
+}
+
 $: {
 	if (assetTokens && assetTokens.length > 0) {
 		const newPayoutSignature = JSON.stringify(
@@ -389,6 +404,102 @@ async function checkFutureReleases(currentAssetId: string) {
 	showTooltip = '';
 }
 
+function createRevenueChart() {
+	if (!revenueChartCanvas || !primaryToken) return;
+
+	// Destroy existing chart
+	if (revenueChart) {
+		revenueChart.destroy();
+	}
+
+	// Get months from actual revenue reports
+	const months = revenueReports.map(r => r.month);
+
+	// Get projections data
+	const projections = primaryToken.asset?.plannedProduction?.projections || [];
+
+	// Calculate projected revenue for months where we have actuals
+	const projectedRevenue = months.map(month => {
+		const projection = projections.find(p => p.month === month);
+		if (!projection) return 0;
+
+		// Get oil price from asset technical data or use default
+		const benchmarkPremiumStr = primaryToken.asset?.technical?.pricing?.benchmarkPremium;
+		const transportCostsStr = primaryToken.asset?.technical?.pricing?.transportCosts;
+		const benchmarkPremium = benchmarkPremiumStr ? (parseFloat(String(benchmarkPremiumStr).replace(/[^-\d.]/g, '')) || 0) : 0;
+		const transportCosts = transportCostsStr ? (parseFloat(String(transportCostsStr).replace(/[^-\d.]/g, '')) || 0) : 0;
+		const defaultOilPrice = 65; // Default assumption
+		const adjustedOilPrice = defaultOilPrice + benchmarkPremium - transportCosts;
+
+		return projection.production * adjustedOilPrice;
+	});
+
+	// Get actual revenue
+	const actualRevenue = revenueReports.map(r => r.revenue);
+
+	// Create labels
+	const labels = months.map(month => formatReportMonth(month));
+
+	const ctx = revenueChartCanvas.getContext('2d');
+	if (!ctx) return;
+
+	revenueChart = new ChartJS(ctx, {
+		type: 'bar',
+		data: {
+			labels,
+			datasets: [
+				{
+					label: 'Actual Revenue',
+					data: actualRevenue,
+					backgroundColor: '#08bccc',
+					borderColor: '#08bccc',
+					borderWidth: 0,
+				},
+				{
+					label: 'Projected Revenue',
+					data: projectedRevenue,
+					backgroundColor: '#283c84',
+					borderColor: '#283c84',
+					borderWidth: 0,
+				}
+			]
+		},
+		options: {
+			responsive: true,
+			maintainAspectRatio: false,
+			plugins: {
+				legend: {
+					display: true,
+					position: 'bottom',
+				},
+				tooltip: {
+					callbacks: {
+						label: function(context) {
+							return context.dataset.label + ': $' + (context.parsed.y ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+						}
+					}
+				}
+			},
+			scales: {
+				y: {
+					beginAtZero: true,
+					ticks: {
+						callback: function(value) {
+							return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+						}
+					}
+				}
+			}
+		}
+	});
+}
+
+onDestroy(() => {
+	if (revenueChart) {
+		revenueChart.destroy();
+	}
+});
+
 $: productionReports =
 	(assetData?.productionHistory ?? assetData?.monthlyReports ?? []) as Array<
 		MonthlyReport | ProductionHistoryRecord
@@ -468,6 +579,26 @@ $: historyPayouts = selectedHistoryToken
   : [];
 $: if (!historyModalOpen && historyModalToken) {
   historyModalToken = null;
+}
+
+// Returns Estimator Modal state
+let returnsEstimatorOpen = false;
+let selectedReturnsToken: TokenMetadata | null = null;
+let selectedReturnsTokenMintedSupply: number = 0;
+let selectedReturnsTokenAvailableSupply: number = 0;
+
+function openReturnsEstimator(token: TokenMetadata, mintedSupply: number, availableSupply: number) {
+	selectedReturnsToken = token;
+	selectedReturnsTokenMintedSupply = mintedSupply;
+	selectedReturnsTokenAvailableSupply = availableSupply;
+	returnsEstimatorOpen = true;
+}
+
+function closeReturnsEstimator() {
+	returnsEstimatorOpen = false;
+	selectedReturnsToken = null;
+	selectedReturnsTokenMintedSupply = 0;
+	selectedReturnsTokenAvailableSupply = 0;
 }
 
 // Tooltip state
@@ -594,8 +725,15 @@ function closeHistoryModal() {
 	}
 
 
-function handleBuyTokens(tokenAddress: string, event?: Event) {
+async function handleBuyTokens(tokenAddress: string, event?: Event) {
 	event?.stopPropagation();
+
+	// Check if wallet is connected, if not prompt user to connect
+	if (!$connected) {
+		await $web3Modal.open();
+		return;
+	}
+
 	selectedTokenAddress = tokenAddress;
 	showPurchaseWidget = true;
 }
@@ -815,7 +953,7 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 							{#each assetTokens[0].asset.documents as document (document.ipfs ?? document.name ?? document.type)}
 								<div class="flex items-center justify-between p-4 border-b border-light-gray last:border-b-0">
 									<div class="flex items-center space-x-3">
-										<div class="w-8 h-8 bg-secondary rounded flex items-center justify-center">
+										<div class="w-8 h-8 bg-secondary rounded-none flex items-center justify-center">
 												📄
 										</div>
 										<div>
@@ -966,18 +1104,10 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 										📊 Export Data
 									</SecondaryButton>
 								</div>
-								<div class="w-full relative">
-									<Chart
-										data={revenueChartData}
-										width={700}
-										height={350}
-										valuePrefix="$"
-										barColor="#08bccc"
-										animate={true}
-										showGrid={true}
-									/>
+								<div class="w-full relative" style="height: 350px;">
+									<canvas bind:this={revenueChartCanvas}></canvas>
 									{#if !revenueHasData}
-										<div class="absolute inset-0 bg-gray-100 bg-opacity-90 flex items-center justify-center rounded">
+										<div class="absolute inset-0 bg-gray-100 bg-opacity-90 flex items-center justify-center rounded-none">
 											<div class="text-center">
 												<div class="text-6xl font-bold text-gray-400 mb-2">N/A</div>
 												<p class="text-gray-500">No revenue data available yet</p>
@@ -1097,11 +1227,11 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 	</ContentSection>
 
 		<!-- Available Tokens Section -->
-		<ContentSection background="white" padding="compact">
-			<div class="bg-white border border-light-gray section-no-border" id="token-section">
-				<div class="py-6">
+		<ContentSection background="white" padding="compact" className="overflow-visible">
+			<div class="bg-white border border-light-gray section-no-border overflow-visible" id="token-section">
+				<div class="py-6 overflow-visible">
 					<h3 class="text-3xl md:text-2xl font-extrabold text-black uppercase tracking-wider mb-8">Token Information</h3>
-				<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+				<div class="grid grid-cols-1 md:grid-cols-2 gap-8 overflow-visible">
 
 				{#each sortedTokens as token (token.contractAddress)}
 				{@const sft = $sfts?.find((s) => s.id.toLowerCase() === token.contractAddress.toLowerCase())}
@@ -1110,32 +1240,39 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 				{@const hasAvailableSupply = (supply?.availableSupply ?? 0) > 0}
 				{@const calculatedReturns = assetData ? calculateTokenReturns(assetData, token, sft?.totalShares, maxSupply) : null}
 				{@const tokenTermsUrl = getTokenTermsPath(token.contractAddress)}
-					<div id="token-{token.contractAddress}">
-							<Card hoverable={false} paddingClass="p-0">
-						<CardContent paddingClass="p-0">
-							<div class="min-h-[700px] sm:min-h-[600px] flex flex-col">
+					<div id="token-{token.contractAddress}" class="overflow-visible">
+							<Card hoverable={false} paddingClass="p-0" overflowClass="overflow-visible">
+						<CardContent paddingClass="p-0" overflowClass="overflow-visible">
+							<div class="min-h-[700px] sm:min-h-[600px] flex flex-col overflow-visible">
 								<div class="{!hasAvailableSupply ? 'text-base font-extrabold text-white bg-black text-center py-3 uppercase tracking-wider' : 'text-base font-extrabold text-black bg-primary text-center py-3 uppercase tracking-wider'} w-full">
 									{hasAvailableSupply ? 'Available for Purchase' : 'Currently Sold Out'}
 								</div>
 
-								<div class="p-8 pb-0 relative">
-									<div class="flex-1 mt-6">
+								<div class="p-8 pb-0 relative overflow-visible">
+									<div class="flex-1 mt-6 overflow-visible">
 										<div class="flex justify-between items-start mb-3 gap-4">
 											<h4 class="text-2xl font-extrabold text-black font-figtree flex-1">{token.releaseName}</h4>
-											<div class="text-sm font-extrabold text-white bg-secondary px-3 py-1 tracking-wider rounded whitespace-nowrap">
+											<div class="text-sm font-extrabold text-white bg-secondary px-3 py-1 tracking-wider rounded-none whitespace-nowrap">
 												{token.sharePercentage || 25}% of Asset
 											</div>
 										</div>
-										<p class="text-sm text-secondary font-medium break-all tracking-tight opacity-80 font-figtree">{token.contractAddress}</p>
+										<a
+											href={getAddressUrl(token.contractAddress, $chainId)}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="text-sm text-secondary font-medium break-all tracking-tight opacity-80 font-figtree no-underline hover:text-primary hover:opacity-100 transition-all block"
+										>
+											{token.contractAddress}
+										</a>
 										{#if tokenTermsUrl}
-											<a href={tokenTermsUrl} target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-sm font-semibold text-secondary no-underline hover:text-primary mt-2 font-figtree">
+											<a href={tokenTermsUrl} target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-sm font-semibold text-secondary no-underline hover:text-primary font-figtree">
 												View terms →
 											</a>
 										{/if}
 									</div>
 								</div>
 
-								<div class="p-8 pt-6 space-y-4">
+								<div class="p-8 pt-6 space-y-4 overflow-visible">
 									<div class="flex justify-between items-start">
 										<span class="text-base font-medium text-black opacity-70 relative font-figtree">Minted Supply </span>
 										<span class="text-base font-extrabold text-black text-right">{supply?.mintedSupply !== undefined ? Number(supply.mintedSupply).toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: supply.mintedSupply % 1 === 0 ? 0 : 2 }) : 0}</span>
@@ -1144,10 +1281,12 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 										<span class="text-base font-medium text-black opacity-70 relative font-figtree">Max Supply</span>
 										<span class="text-base font-extrabold text-black text-right">{supply?.maxSupply || 0}</span>
 									</div>
-									<div class="flex justify-between items-start relative">
-										<span class="text-base font-medium text-black opacity-70 relative font-figtree">
+									<div class="flex justify-between items-start relative overflow-visible">
+										<span class="text-base font-medium text-black opacity-70 font-figtree flex items-center gap-1">
 											Implied Barrels/Token
-											<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100" on:mouseenter={() => showTooltipWithDelay('barrels')} on:mouseleave={hideTooltip} role="button" tabindex="0">ⓘ</span>
+											<span class="inline-flex items-center justify-center w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold cursor-help hover:bg-gray-400 transition-colors" on:mouseenter={() => showTooltipWithDelay('barrels-' + token.contractAddress)} on:mouseleave={hideTooltip} on:focus={() => showTooltipWithDelay('barrels-' + token.contractAddress)} on:blur={hideTooltip} role="button" tabindex="0">
+												?
+											</span>
 										</span>
 										<span class="text-base font-extrabold text-black text-right">{
 											calculatedReturns?.impliedBarrelsPerToken === Infinity
@@ -1156,22 +1295,28 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 													? calculatedReturns.impliedBarrelsPerToken.toFixed(6)
 													: '0.000000'
 										}</span>
-										{#if showTooltip === 'barrels'}
-											<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">Estimated barrels of oil equivalent per token based on reserves and token supply</div>
+										{#if showTooltip === 'barrels-' + token.contractAddress}
+											<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 p-2 rounded-none text-xs z-[10000] mb-[6px] max-w-[260px] whitespace-normal break-words text-left bg-black text-white shadow-lg">
+												Estimated barrels of oil equivalent per token based on reserves and token supply
+											</div>
 										{/if}
 									</div>
-									<div class="flex justify-between items-start relative">
-										<span class="text-base font-medium text-black opacity-70 relative font-figtree">
+									<div class="flex justify-between items-start relative overflow-visible">
+										<span class="text-base font-medium text-black opacity-70 font-figtree flex items-center gap-1">
 											Breakeven Oil Price
-											<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100" on:mouseenter={() => showTooltipWithDelay('breakeven')} on:mouseleave={hideTooltip} role="button" tabindex="0">ⓘ</span>
+											<span class="inline-flex items-center justify-center w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold cursor-help hover:bg-gray-400 transition-colors" on:mouseenter={() => showTooltipWithDelay('breakeven-' + token.contractAddress)} on:mouseleave={hideTooltip} on:focus={() => showTooltipWithDelay('breakeven-' + token.contractAddress)} on:blur={hideTooltip} role="button" tabindex="0">
+												?
+											</span>
 										</span>
 										<span class="text-base font-extrabold text-black text-right">{
 											calculatedReturns?.breakEvenOilPrice !== undefined
 												? `US$${calculatedReturns?.breakEvenOilPrice.toFixed(2)}`
 												: 'US$0.00'
 										}</span>
-										{#if showTooltip === 'breakeven'}
-											<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">Oil price required to cover operational costs and maintain profitability</div>
+										{#if showTooltip === 'breakeven-' + token.contractAddress}
+											<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 p-2 rounded-none text-xs z-[10000] mb-[6px] max-w-[260px] whitespace-normal break-words text-left bg-black text-white shadow-lg">
+												Oil price required to cover operational costs and maintain profitability
+											</div>
 										{/if}
 									</div>
 									<div class="flex justify-between items-start">
@@ -1180,55 +1325,65 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 									</div>
 								</div>
 
-								<div class="p-8 pt-0 border-t border-light-gray">
-									<h5 class="text-sm font-extrabold text-black uppercase tracking-wider mb-4 pt-6 flex items-center gap-1 relative">
-										<span>Estimated IRR</span>
-										<span
-											class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100"
-											on:mouseenter={() => showTooltipWithDelay('irr')}
-											on:mouseleave={hideTooltip}
-											role="button"
-											tabindex="0"
-										>
-											ⓘ
-										</span>
-										{#if showTooltip === 'irr'}
-											<div class="absolute top-full left-0 mt-1 bg-black text-white p-2 rounded text-xs max-w-xs z-[1000]">
-												IRR is a standard oil and gas industry and project finance returns metric that gives the rate of return that would set the NPV of cashflows to 0. It accounts for early repayment of invested capital.
+								<div class="p-8 pt-0 border-t border-light-gray overflow-visible">
+									{#if token}
+										{@const defaultOilPrice = 65}
+										{@const crudeBenchmark = token.asset?.technical?.crudeBenchmark || 'Oil'}
+										{@const lifetimeIRR = calculateLifetimeIRR(token, defaultOilPrice, supply?.mintedSupply ?? 0, 1)}
+										{@const monthlyCashflows = calculateMonthlyTokenCashflows(token, defaultOilPrice, supply?.mintedSupply ?? 0, 1)}
+										{@const cashflows = monthlyCashflows.map(m => m.cashflow)}
+										{@const monthlyIRR = calculateIRR(cashflows)}
+										{@const remainingIRR = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99}
+										{@const fullyDilutedCashflows = calculateMonthlyTokenCashflows(token, defaultOilPrice, supply?.mintedSupply ?? 0, supply?.availableSupply ?? 0)}
+										{@const fullyDilutedCashflowsArray = fullyDilutedCashflows.map(m => m.cashflow)}
+										{@const fullyDilutedMonthlyIRR = calculateIRR(fullyDilutedCashflowsArray)}
+										{@const fullyDilutedRemainingIRR = fullyDilutedMonthlyIRR > -0.99 ? (Math.pow(1 + fullyDilutedMonthlyIRR, 12) - 1) * 100 : -99}
+
+										<h5 class="text-sm font-extrabold text-black uppercase tracking-wider mb-4 pt-6">
+											Returns @${defaultOilPrice} {crudeBenchmark} Oil Price
+										</h5>
+										<div class="grid grid-cols-3 gap-2 sm:gap-3 mb-3 overflow-visible">
+											<div class="text-center p-3 bg-white">
+												<span class="text-xs font-medium text-black opacity-70 block mb-1">Current</span>
+												<span class="text-xl font-extrabold text-primary">{formatSmartReturn(remainingIRR)}</span>
 											</div>
-										{/if}
-									</h5>
-									<div class="grid grid-cols-3 gap-3">
-										<div class="text-center p-3 bg-white">
-											<span class="text-xs font-medium text-black opacity-70 block mb-1 relative">Base IRR <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100" on:mouseenter={() => showTooltipWithDelay('base')} on:mouseleave={hideTooltip} role="button" tabindex="0">ⓘ</span></span>
-											<span class="text-xl font-extrabold text-primary">{
-												calculatedReturns?.baseReturn !== undefined
-													? formatSmartReturn(calculatedReturns.baseReturn)
-													: 'TBD'
-											}</span>
-											{#if showTooltip === 'base'}<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">IRR assuming max supply</div>{/if}
+											<div class="text-center p-3 bg-white">
+												<span class="text-xs font-medium text-black opacity-70 block mb-1">Fully Diluted</span>
+												<span class="text-xl font-extrabold text-primary">{formatSmartReturn(fullyDilutedRemainingIRR)}</span>
+											</div>
+											<div class="text-center p-3 bg-white border-l border-light-gray relative overflow-visible" style="border-left-width: 1.5px;">
+												<div class="flex items-center justify-center gap-1 mb-1">
+													<span class="text-xs font-medium text-black opacity-70">Lifetime</span>
+													<span
+														class="inline-flex items-center justify-center w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold cursor-help hover:bg-gray-400 transition-colors"
+														on:mouseenter={() => showTooltipWithDelay('lifetime-tooltip-' + token.contractAddress)}
+														on:mouseleave={hideTooltip}
+														on:focus={() => showTooltipWithDelay('lifetime-tooltip-' + token.contractAddress)}
+														on:blur={hideTooltip}
+														role="button"
+														tabindex="0"
+													>
+														?
+													</span>
+													{#if showTooltip === 'lifetime-tooltip-' + token.contractAddress}
+														<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded-none text-xs whitespace-nowrap z-[1000] mb-[5px]">
+															Return from holding token since launch, assuming current supply
+														</div>
+													{/if}
+												</div>
+												<span class="text-xl font-extrabold text-primary">{formatSmartReturn(lifetimeIRR)}</span>
+											</div>
 										</div>
-										<div class="text-center p-3 bg-white">
-											<span class="text-xs font-medium text-black opacity-70 block mb-1 relative">Bonus IRR <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold ml-1 cursor-help opacity-70 transition-opacity duration-200 hover:opacity-100" on:mouseenter={() => showTooltipWithDelay('bonus')} on:mouseleave={hideTooltip} role="button" tabindex="0">ⓘ</span></span>
-											<span class="text-xl font-extrabold text-primary">{
-												calculatedReturns?.bonusReturn !== undefined
-													? (() => {
-														const formatted = formatSmartReturn(calculatedReturns.bonusReturn);
-														return formatted.startsWith('>') ? formatted : `+${formatted}`;
-													})()
-													: 'TBD'
-											}</span>
-											{#if showTooltip === 'bonus'}<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-2 rounded text-xs whitespace-nowrap z-[1000] mb-[5px] max-w-[200px] whitespace-normal text-left">Additional IRR where supply is lower than max supply</div>{/if}
-										</div>
-										<div class="text-center p-3 bg-white hidden sm:block">
-											<span class="text-xs font-medium text-black opacity-70 block mb-1 relative">Total Expected</span>
-										<span class="text-xl font-extrabold text-primary">{
-											calculatedReturns?.baseReturn !== undefined && calculatedReturns?.bonusReturn !== undefined
-												? formatSmartReturn(calculatedReturns.baseReturn + calculatedReturns.bonusReturn)
-												: 'TBD'
-										}</span>
-										</div>
-									</div>
+										<p class="text-xs text-gray-600 mb-2 italic">
+											Returns value early principal repayments by assuming re-investment in similar assets
+										</p>
+										<button
+											class="text-base font-semibold text-secondary hover:text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-left w-full"
+											on:click={() => openReturnsEstimator(token, supply?.mintedSupply ?? 0, supply?.availableSupply ?? 0)}
+										>
+											View returns estimator →
+										</button>
+									{/if}
 								</div>
 
 								<div class="px-4 sm:px-8 pb-6 sm:pb-8">
@@ -1252,7 +1407,7 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 											size="small"
 											on:click={(event) => handleHistoryButtonClick(token.contractAddress, event)}
 										>
-											<span class="hidden sm:inline">Distributions History</span>
+											<span class="hidden sm:inline">Distributions</span>
 											<span class="sm:hidden">History</span>
 										</SecondaryButton>
 									</div>
@@ -1273,24 +1428,29 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 					{#if selectedHistoryToken}
 						<div class="mb-6">
 							<h4 class="text-lg font-extrabold text-black uppercase tracking-wider mb-1">{selectedHistoryToken.releaseName}</h4>
-							<p class="text-xs text-black opacity-70 break-all">{selectedHistoryToken.contractAddress}</p>
+							<a
+								href={getAddressUrl(selectedHistoryToken.contractAddress, $chainId)}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="text-xs text-black opacity-70 break-all no-underline hover:text-primary hover:opacity-100 transition-all inline-block"
+							>
+								{selectedHistoryToken.contractAddress}
+							</a>
 						</div>
 
 						{#if historyPayouts.length > 0}
 								<div class="space-y-4">
-									<div class="grid grid-cols-[1.2fr,1fr,1fr,1.6fr,1.6fr] gap-6 text-xs font-bold text-black uppercase tracking-wider border-b border-light-gray pb-2">
+									<div class="grid grid-cols-[1.2fr,1fr,1.6fr,1.6fr] gap-6 text-xs font-bold text-black uppercase tracking-wider border-b border-light-gray pb-2">
 										<div class="text-left">Month</div>
 										<div class="text-center">Total Payments</div>
-										<div class="text-right">Per Token</div>
 										<div class="text-left">Claims Vault</div>
 										<div class="text-left">Payout Transaction</div>
 									</div>
 										<div class="space-y-2 max-h-[400px] overflow-y-auto pr-1">
 											{#each historyPayouts as payout (payout.orderHash ?? payout.txHash ?? payout.month)}
-												<div class="grid grid-cols-[1.2fr,1fr,1fr,1.6fr,1.6fr] gap-6 text-sm items-center">
+												<div class="grid grid-cols-[1.2fr,1fr,1.6fr,1.6fr] gap-6 text-sm items-center">
 												<div class="text-left font-medium text-black">{formatReportMonth(payout.month)}</div>
 												<div class="text-center font-semibold text-black">{formatCurrency(payout.totalPayout)}</div>
-												<div class="text-right font-semibold text-black">US${payout.payoutPerToken.toFixed(5)}</div>
 												<div class="text-left font-semibold text-secondary">
 													{#if payout.orderHash}
 														<a
@@ -1311,7 +1471,7 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 												<div class="text-left font-semibold text-secondary">
 													{#if payout.txHash}
 														<a
-															href={`https://basescan.org/tx/${payout.txHash}`}
+															href={getTxUrl(payout.txHash, $chainId)}
 															target="_blank"
 															rel="noopener noreferrer"
 															class="inline-flex items-center gap-1 no-underline hover:text-primary break-all"
@@ -1328,10 +1488,9 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 											</div>
 										{/each}
 									</div>
-										<div class="border-t border-light-gray pt-4 grid grid-cols-[1.2fr,1fr,1fr,1.6fr,1.6fr] gap-6 text-sm font-extrabold items-center">
+										<div class="border-t border-light-gray pt-4 grid grid-cols-[1.2fr,1fr,1.6fr,1.6fr] gap-6 text-sm font-extrabold items-center">
 										<div class="text-left text-black">Total</div>
 										<div class="text-center text-black">{formatCurrency(historyPayouts.reduce((sum, p) => sum + p.totalPayout, 0))}</div>
-										<div class="text-right text-black">US${historyPayouts.reduce((sum, p) => sum + p.payoutPerToken, 0).toFixed(5)}</div>
 										<div class="text-left text-black opacity-50">—</div>
 										<div class="text-left text-black opacity-50">—</div>
 									</div>
@@ -1351,6 +1510,16 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 					{/if}
 				</Modal>
 			{/if}
+
+			<!-- Returns Estimator Modal -->
+			<ReturnsEstimatorModal
+				isOpen={returnsEstimatorOpen}
+				token={selectedReturnsToken}
+				mintedSupply={selectedReturnsTokenMintedSupply}
+				availableSupply={selectedReturnsTokenAvailableSupply}
+				onClose={closeReturnsEstimator}
+			/>
+
 					<!-- Future Releases Card -->
 						{#if hasFutureReleases}
 							<Card hoverable={false}>
@@ -1480,7 +1649,7 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 				on:close={closeLocationModal}
 			>
 				<div class="space-y-4">
-					<div class="relative w-full pb-[56.25%] overflow-hidden rounded-lg border border-light-gray bg-black/5">
+					<div class="relative w-full pb-[56.25%] overflow-hidden rounded-none border border-light-gray bg-black/5">
 						{#if locationModalMapUrl}
 							<iframe
 								src={locationModalMapUrl}
@@ -1520,7 +1689,7 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 					<img
 						src={getImageUrl(selectedGalleryImage.url)}
 						alt={selectedGalleryImage.caption || selectedGalleryImage.title || 'Asset image'}
-						class="w-full max-h-[70vh] object-contain rounded border border-light-gray bg-black/5"
+						class="w-full max-h-[70vh] object-contain rounded-none border border-light-gray bg-black/5"
 					/>
 					{#if selectedGalleryImage.caption || selectedGalleryImage.title}
 						<p class="text-sm text-black opacity-80 text-center">{selectedGalleryImage.caption || selectedGalleryImage.title}</p>

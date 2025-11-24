@@ -26,7 +26,7 @@
 	import { goto } from '$app/navigation';
 	import { useTooltip } from '$lib/composables';
 	import { getImageUrl } from '$lib/utils/imagePath';
-import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
+	import { decodeSftInformation } from '$lib/decodeMetadata/helpers';
 import type { ClaimsResult, ClaimsHoldingsGroup } from '$lib/services/ClaimsService';
 import type { ClaimHistory as ClaimsHistoryItem } from '$lib/utils/claims';
 import type { PinnedMetadata } from '$lib/types/PinnedMetadata';
@@ -858,7 +858,7 @@ function percentageDisplay(value: number): string {
 				</div>
 
 				{#if claimsDataUnavailable}
-					<div class="mt-6 max-w-3xl mx-auto px-4 py-3 border border-yellow-400 bg-yellow-50 text-yellow-900 text-sm font-medium rounded-lg" role="alert" aria-live="polite">
+					<div class="mt-6 max-w-3xl mx-auto px-4 py-3 border border-yellow-400 bg-yellow-50 text-yellow-900 text-sm font-medium rounded-none" role="alert" aria-live="polite">
 						Some data could not be loaded. Please try again later.
 					</div>
 				{/if}
@@ -908,16 +908,23 @@ function percentageDisplay(value: number): string {
 						</Card>
 					{:else}
 						{#each holdings as holding (holding.id)}
+							{@const imageUrl = holding.asset?.coverImage
+								? getImageUrl(holding.asset.coverImage)
+								: holding.asset?.galleryImages?.[0]?.url
+								? getImageUrl(holding.asset.galleryImages[0].url)
+								: null}
 								<div class="mb-3">
 									<Card hoverable={false} showBorder>
 									<CardContent paddingClass="p-6 lg:p-9 h-full flex flex-col justify-between">
 												<div class="flex justify-between items-start mb-4 lg:mb-7">
 													<div class="flex items-start gap-3 lg:gap-4">
-														<div class="w-12 h-12 lg:w-14 lg:h-14 bg-light-gray rounded-lg overflow-hidden flex items-center justify-center flex-shrink-0">
-															{#if holding.asset?.coverImage}
-																<img src={getImageUrl(holding.asset.coverImage)} 
-																	alt={holding.name} 
-																	class="w-full h-full object-cover" />
+														<div class="w-12 h-12 lg:w-14 lg:h-14 bg-light-gray rounded-none overflow-hidden flex items-center justify-center flex-shrink-0">
+															{#if imageUrl}
+																<img src={imageUrl}
+																	alt={holding.name}
+																	class="w-full h-full object-cover"
+																					on:error={(e) => { const target = e.currentTarget as HTMLImageElement; target.style.display = 'none'; target.nextElementSibling?.classList.remove('hidden'); }} />
+																<div class="text-xl lg:text-2xl opacity-50 hidden">🛢️</div>
 															{:else}
 																<div class="text-xl lg:text-2xl opacity-50">🛢️</div>
 															{/if}
@@ -975,42 +982,46 @@ function percentageDisplay(value: number): string {
 													</div>
 
 													<!-- Capital Returned -->
-													<div class="relative flex flex-col">
+													<div class="relative flex flex-col overflow-visible">
 														<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-2 flex items-start gap-1 h-8">
 															<span>Capital Returned</span>
-															<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold cursor-help opacity-70"
+															<span class="inline-flex items-center justify-center w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold cursor-help hover:bg-gray-400 transition-colors"
 																on:mouseenter={() => showTooltipWithDelay('capital-' + holding.id)}
 																on:mouseleave={hideTooltip}
+																on:focus={() => showTooltipWithDelay('capital-' + holding.id)}
+																on:blur={hideTooltip}
 																role="button"
-																tabindex="0">ⓘ</span>
+																tabindex="0">?</span>
 														</div>
 														<div class="text-lg lg:text-xl font-extrabold text-black">
 															{percentageDisplay(holding.capitalReturned / 100)}
 														</div>
 														<div class="text-xs lg:text-sm text-black opacity-70">To Date</div>
 														{#if isTooltipVisible('capital-' + holding.id)}
-															<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-3 rounded text-xs z-[1000] mb-2 w-48">
+															<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-3 rounded-none text-xs z-[1000] mb-2 w-48">
 																The portion of your initial investment already recovered
 															</div>
 														{/if}
 													</div>
 
 													<!-- Asset Depletion -->
-													<div class="relative flex flex-col hidden lg:flex">
+													<div class="relative flex flex-col hidden lg:flex overflow-visible">
 														<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-2 flex items-start gap-1 h-8">
 															<span>Est. Asset Depletion</span>
-															<span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-light-gray text-black text-[10px] font-bold cursor-help opacity-70"
+															<span class="inline-flex items-center justify-center w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold cursor-help hover:bg-gray-400 transition-colors"
 																on:mouseenter={() => showTooltipWithDelay('depletion-' + holding.id)}
 																on:mouseleave={hideTooltip}
+																on:focus={() => showTooltipWithDelay('depletion-' + holding.id)}
+																on:blur={hideTooltip}
 																role="button"
-																tabindex="0">ⓘ</span>
+																tabindex="0">?</span>
 														</div>
 									<div class="text-lg lg:text-xl font-extrabold text-black">
 										{holding.assetDepletion !== null && holding.assetDepletion !== undefined ? `${holding.assetDepletion.toFixed(1)}%` : 'TBD'}
 									</div>
 														<div class="text-xs lg:text-sm text-black opacity-70">To Date</div>
 														{#if isTooltipVisible('depletion-' + holding.id)}
-															<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-3 rounded text-xs z-[1000] mb-2 w-48">
+															<div class="absolute bottom-full left-1/2 transform -translate-x-1/2 bg-black text-white p-3 rounded-none text-xs z-[1000] mb-2 w-48">
 																The portion of total expected oil and gas extracted so far
 															</div>
 														{/if}
@@ -1220,7 +1231,7 @@ function percentageDisplay(value: number): string {
 				
 				<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
 					<!-- Capital Walk Chart -->
-					<div class="lg:col-span-2 bg-white border border-light-gray rounded-lg p-6">
+					<div class="lg:col-span-2 bg-white border border-light-gray rounded-none p-6">
 						<h4 class="text-lg font-extrabold text-black mb-4">Cash Flow Analysis</h4>
 						<div class="space-y-6">
 							<!-- Combined Monthly Cash Flows -->
@@ -1280,83 +1291,91 @@ function percentageDisplay(value: number): string {
 
 					<!-- Metrics Cards -->
 					<div class="space-y-4">
-						<div class="bg-white border border-light-gray rounded-lg p-4 relative overflow-hidden">
+						<div class="bg-white border border-light-gray rounded-none p-4 relative overflow-visible">
 							<div class="text-sm font-bold text-black opacity-70 uppercase tracking-wider mb-2">Total External Capital</div>
 							<div class="text-xl font-extrabold text-black mb-1 break-all">{currencyDisplay(capitalWalkData.totalExternalCapital)}</div>
 							<div class="text-xs text-black opacity-70">Peak cash required</div>
-							<div 
-								class="absolute top-4 right-4 w-4 h-4 rounded-full bg-light-gray text-black text-xs flex items-center justify-center cursor-help"
+							<div
+								class="absolute top-4 right-4 w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold flex items-center justify-center cursor-help hover:bg-gray-400 transition-colors"
 								on:mouseenter={() => showTooltipWithDelay('external-capital')}
 								on:mouseleave={hideTooltip}
+								on:focus={() => showTooltipWithDelay('external-capital')}
+								on:blur={hideTooltip}
 								role="button"
 								tabindex="0"
 							>
 								?
 							</div>
 							{#if isTooltipVisible('external-capital')}
-								<div class="absolute right-0 top-10 bg-black text-white p-4 rounded text-xs z-10 w-56">
+								<div class="absolute right-0 top-10 bg-black text-white p-4 rounded-none text-xs z-[1000] w-56">
 									Max cash you ever had to supply from outside, assuming payouts were available for reinvestment
 								</div>
 							{/if}
 						</div>
-						
-						<div class="bg-white border border-light-gray rounded-lg p-4 relative overflow-hidden">
+
+						<div class="bg-white border border-light-gray rounded-none p-4 relative overflow-visible">
 							<div class="text-sm font-bold text-black opacity-70 uppercase tracking-wider mb-2">Gross Deployed</div>
 							<div class="text-xl font-extrabold text-black mb-1 break-all">{formatCurrency(capitalWalkData.grossDeployed)}</div>
 							<div class="text-xs text-black opacity-70">Total invested</div>
-							<div 
-								class="absolute top-4 right-4 w-4 h-4 rounded-full bg-light-gray text-black text-xs flex items-center justify-center cursor-help"
+							<div
+								class="absolute top-4 right-4 w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold flex items-center justify-center cursor-help hover:bg-gray-400 transition-colors"
 								on:mouseenter={() => showTooltipWithDelay('gross-deployed')}
 								on:mouseleave={hideTooltip}
+								on:focus={() => showTooltipWithDelay('gross-deployed')}
+								on:blur={hideTooltip}
 								role="button"
 								tabindex="0"
 							>
 								?
 							</div>
 							{#if isTooltipVisible('gross-deployed')}
-								<div class="absolute right-0 top-10 bg-black text-white p-3 rounded text-xs z-10 w-48">
+								<div class="absolute right-0 top-10 bg-black text-white p-3 rounded-none text-xs z-[1000] w-48">
 									Total amount invested across all assets
 								</div>
 							{/if}
 						</div>
-						
-						<div class="bg-white border border-light-gray rounded-lg p-4 relative overflow-hidden">
+
+						<div class="bg-white border border-light-gray rounded-none p-4 relative overflow-visible">
 							<div class="text-sm font-bold text-black opacity-70 uppercase tracking-wider mb-2">Gross Payout</div>
 							<div class="text-xl font-extrabold text-primary mb-1 break-all">{currencyDisplay(capitalWalkData.grossPayout)}</div>
 							<div class="text-xs text-black opacity-70">Total distributions</div>
-							<div 
-								class="absolute top-4 right-4 w-4 h-4 rounded-full bg-light-gray text-black text-xs flex items-center justify-center cursor-help"
+							<div
+								class="absolute top-4 right-4 w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold flex items-center justify-center cursor-help hover:bg-gray-400 transition-colors"
 								on:mouseenter={() => showTooltipWithDelay('gross-payout')}
 								on:mouseleave={hideTooltip}
+								on:focus={() => showTooltipWithDelay('gross-payout')}
+								on:blur={hideTooltip}
 								role="button"
 								tabindex="0"
 							>
 								?
 							</div>
 							{#if isTooltipVisible('gross-payout')}
-								<div class="absolute right-0 top-10 bg-black text-white p-3 rounded text-xs z-10 w-48">
+								<div class="absolute right-0 top-10 bg-black text-white p-3 rounded-none text-xs z-[1000] w-48">
 									Total distributions received from all assets
 								</div>
 							{/if}
 						</div>
-						
-						<div class="bg-white border border-light-gray rounded-lg p-4 relative overflow-hidden">
+
+						<div class="bg-white border border-light-gray rounded-none p-4 relative overflow-visible">
 							<div class="text-sm font-bold text-black opacity-70 uppercase tracking-wider mb-2">Current Net Position</div>
 							<div class="text-xl font-extrabold {capitalWalkData.currentNetPosition >= 0 ? 'text-green-600' : 'text-red-600'} mb-1 break-all">
 								{currencyDisplay(capitalWalkData.currentNetPosition)}
 							</div>
 							<div class="text-xs text-black opacity-70">Total Payouts - Total Invested</div>
-							<div 
-								class="absolute top-4 right-4 w-4 h-4 rounded-full bg-light-gray text-black text-xs flex items-center justify-center cursor-help"
+							<div
+								class="absolute top-4 right-4 w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold flex items-center justify-center cursor-help hover:bg-gray-400 transition-colors"
 								on:mouseenter={() => showTooltipWithDelay('realised-profit')}
 								on:mouseleave={hideTooltip}
+								on:focus={() => showTooltipWithDelay('realised-profit')}
+								on:blur={hideTooltip}
 								role="button"
 								tabindex="0"
 							>
 								?
 							</div>
 							{#if isTooltipVisible('realised-profit')}
-								<div class="absolute right-0 top-10 bg-black text-white p-3 rounded text-xs z-10 w-48">
+								<div class="absolute right-0 top-10 bg-black text-white p-3 rounded-none text-xs z-[1000] w-48">
 									Your current profit/loss position accounting for all investments and payouts received
 								</div>
 							{/if}
@@ -1407,7 +1426,7 @@ function percentageDisplay(value: number): string {
 								{#each tokenAllocations as allocation (allocation.assetId)}
 									<div class="flex justify-between items-center pb-4 border-b border-light-gray last:border-b-0 last:pb-0">
 										<div class="flex items-center gap-3">
-											<div class="w-8 h-8 bg-light-gray rounded overflow-hidden flex items-center justify-center">
+											<div class="w-8 h-8 bg-light-gray rounded-none overflow-hidden flex items-center justify-center">
 												<div class="text-base opacity-50">🛢️</div>
 											</div>
 											<div>

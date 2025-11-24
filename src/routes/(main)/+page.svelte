@@ -7,6 +7,7 @@
 	import SectionTitle from '$lib/components/components/SectionTitle.svelte';
 	import { PageLayout, HeroSection, ContentSection } from '$lib/components/layout';
 	import { marketDataService, type MarketData } from '$lib/services/MarketDataService';
+	import { connected, web3Modal } from 'svelte-wagmi';
 
 	// Composables
 	const { platformStats, formattedStats: sftsFormattedStats } = usePlatformStats();
@@ -20,7 +21,13 @@
 	let selectedTokenAddress: string | null = null;
 	let selectedAssetId: string | null = null;
 	
-	function handleBuyTokensFromCarousel(event: CustomEvent) {
+	async function handleBuyTokensFromCarousel(event: CustomEvent) {
+		// Check if wallet is connected, if not prompt user to connect
+		if (!$connected) {
+			await $web3Modal.open();
+			return;
+		}
+
 		selectedTokenAddress = event.detail.tokenAddress;
 		selectedAssetId = null;
 		showPurchaseWidget = true;

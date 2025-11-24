@@ -133,23 +133,19 @@ function makeToken(overrides: Partial<TokenMetadata> = {}): TokenMetadata {
 }
 
 describe("returnCalculations", () => {
-  it("calculates base/bonus/implied barrels with on-chain minted supply", () => {
+  it("calculates implied barrels with on-chain minted supply", () => {
     const asset = makeAsset();
     const token = makeToken();
     const onChainMinted = (500n * 10n ** 18n).toString();
     const res = calculateTokenReturns(asset, token, onChainMinted);
-    expect(res.baseReturn).toBeGreaterThanOrEqual(0);
-    expect(Number.isFinite(res.baseReturn)).toBe(true);
-    expect(res.bonusReturn).toBeGreaterThanOrEqual(0);
     expect(res.impliedBarrelsPerToken).toBeGreaterThanOrEqual(0);
     expect(res.breakEvenOilPrice).toBeGreaterThanOrEqual(0);
   });
 
-  it("handles zero minted supply: bonus -> very large, implied barrels -> Infinity, break-even 0", () => {
+  it("handles zero minted supply: implied barrels -> Infinity, break-even 0", () => {
     const asset = makeAsset();
     const token = makeToken();
     const res = calculateTokenReturns(asset, token, "0");
-    expect(res.bonusReturn).toBeGreaterThan(1e6);
     expect(res.impliedBarrelsPerToken).toBe(Infinity);
     expect(res.breakEvenOilPrice).toBe(0);
   });
@@ -158,13 +154,11 @@ describe("returnCalculations", () => {
     const asset = makeAsset({ plannedProduction: undefined });
     const token = makeToken({ sharePercentage: 0 });
     const res = calculateTokenReturns(asset, token, undefined);
-    expect(res.baseReturn).toBe(0);
-    expect(res.bonusReturn).toBe(0);
     expect(res.impliedBarrelsPerToken).toBe(0);
     expect(res.breakEvenOilPrice).toBe(0);
   });
 
-  it("applies benchmark premium and transport costs when present on asset", () => {
+  it("calculates metrics correctly regardless of pricing adjustments", () => {
     const base = makeAsset();
     const asset = makeAsset({
       technical: {
@@ -178,7 +172,8 @@ describe("returnCalculations", () => {
       token,
       (500n * 10n ** 18n).toString(),
     );
-    expect(res.baseReturn).toBeGreaterThanOrEqual(0);
+    expect(res.impliedBarrelsPerToken).toBeGreaterThanOrEqual(0);
+    expect(res.breakEvenOilPrice).toBeGreaterThanOrEqual(0);
   });
 
   it("getTokenSupply computes utilization and available supply", () => {

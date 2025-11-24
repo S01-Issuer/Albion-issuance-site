@@ -4,13 +4,15 @@ import { createEventDispatcher, onMount } from 'svelte';
 import type { Asset } from '$lib/types/uiTypes';
 import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 	import { formatCurrency, formatEndDate, formatSmartNumber } from '$lib/utils/formatters';
-	import { getTokenReturns } from '$lib/utils';
 	import { useCatalogService } from '$lib/services';
 	import { sfts } from '$lib/stores';
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import FormattedReturn from '$lib/components/components/FormattedReturn.svelte';
 	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 	import { hasAvailableSupplySync } from '$lib/utils/supplyHelpers';
+	import { calculateLifetimeIRR } from '$lib/utils/returnsEstimatorHelpers';
+	import { formatSupplyDisplay } from '$lib/utils/supplyHelpers';
+	import ReturnsEstimatorModal from '$lib/components/patterns/ReturnsEstimatorModal.svelte';
 
 	export let asset: Asset;
 	export let token: TokenMetadata[];
@@ -18,6 +20,12 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 
 	const dispatch = createEventDispatcher();
 	const catalogService = useCatalogService();
+
+	// Returns estimator modal state
+	let showReturnsEstimator = false;
+	let estimatorToken: TokenMetadata | null = null;
+	let estimatorMintedSupply = 0;
+	let estimatorAvailableSupply = 0;
 
 	// Generate consistent asset URL from token contract address
 	$: consistentAssetId = token.length > 0 ? getEnergyFieldId(token[0].contractAddress) : (energyFieldId || asset.id);
@@ -62,26 +70,29 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 
 	// Use tokens array directly
 	$: tokensArray = token;
-	$: primaryToken = tokensArray.length > 0 ? tokensArray[0] : null;
-	
+
 	// Check if any tokens are available
 	$: hasAvailableTokens = tokensArray.some(t => hasAvailableSupplySync(t));
 
-	// Extract token data with fallbacks
-	$: shareOfAsset = primaryToken?.sharePercentage ? `${primaryToken.sharePercentage}%` : 'TBD';
-	
 	function handleBuyTokens(tokenAddress?: string) {
 		// If a specific token address is provided, use it; otherwise use the first available token
 		const targetTokenAddress = tokenAddress || (tokensArray.length > 0 ? tokensArray[0].contractAddress : null);
-		dispatch('buyTokens', { 
+		dispatch('buyTokens', {
 			assetId: asset.id,
 			tokenAddress: targetTokenAddress
 		});
 	}
+
+	function openReturnsEstimator(token: TokenMetadata, mintedSupply: number, availableSupply: number) {
+		estimatorToken = token;
+		estimatorMintedSupply = mintedSupply;
+		estimatorAvailableSupply = availableSupply;
+		showReturnsEstimator = true;
+	}
 	
 	// Tailwind class mappings used in markup
 	const assetDescriptionClasses = 'text-gray-700 text-sm leading-relaxed m-0 mb-4 line-clamp-2 font-figtree lg:line-clamp-3 lg:text-base lg:mb-6';
-	const highlightedStatsClasses = 'grid grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4 my-3 lg:my-4 p-3 lg:p-4 bg-white rounded-lg';
+	const highlightedStatsClasses = 'grid grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4 my-3 lg:my-4 p-3 lg:p-4 bg-white rounded-none';
 	const highlightStatClasses = 'flex flex-col items-center text-center';
 	const highlightValueClasses = 'text-lg sm:text-xl lg:text-2xl font-extrabold text-secondary mb-1 font-figtree';
 	const highlightLabelClasses = 'text-xs lg:text-sm text-gray-500 font-medium font-figtree';
@@ -90,18 +101,10 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 	const tokensTitleClasses = 'text-base lg:text-lg font-extrabold text-black m-0 mb-3 lg:mb-4 font-figtree';
 	const tokensListClasses = 'flex flex-col gap-2 lg:gap-3';
 	const tokensListScrollableClasses = 'flex flex-col gap-2 lg:gap-3 max-h-[10rem] lg:max-h-[13rem] overflow-y-auto pr-1 lg:pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400';
-	const tokenButtonClasses = 'flex flex-col sm:flex-row justify-between items-start sm:items-center w-full p-3 lg:p-4 bg-white rounded-none cursor-pointer transition-all duration-200 text-left relative hover:bg-light-gray border border-light-gray gap-2 sm:gap-0';
+	const tokenButtonClasses = 'flex flex-col sm:flex-row justify-between items-start sm:items-center w-full p-3 lg:p-4 bg-white rounded-none text-left relative border border-light-gray gap-2 sm:gap-0 transition-all duration-200 hover:bg-light-gray hover:shadow-md';
 	const tokenButtonLeftClasses = 'flex flex-col gap-1 flex-1';
-	const tokenButtonRightClasses = 'flex flex-row sm:flex-col w-full sm:w-auto justify-between sm:justify-end items-center sm:items-end gap-2';
 	const tokenSymbolClasses = 'font-extrabold text-sm lg:text-base text-black font-figtree';
 	const tokenNameClasses = 'text-xs lg:text-sm text-gray-500 leading-tight font-figtree';
-	const tokenPaymentDateClasses = 'text-xs text-secondary font-medium mt-1 hidden lg:block';
-	const returnsDisplayClasses = 'flex items-center gap-1 lg:gap-2';
-	const returnItemClasses = 'flex flex-col items-center text-center';
-	const returnLabelClasses = 'text-[0.6rem] lg:text-xs text-gray-500 font-medium whitespace-nowrap';
-	const returnValueClasses = 'text-sm lg:text-lg text-primary font-extrabold font-figtree';
-	const returnDividerClasses = 'text-xs lg:text-sm text-gray-500 font-medium mx-1';
-	const buyCtaClasses = 'text-sm lg:text-base font-extrabold text-black font-figtree';
 
 </script>
 
@@ -189,58 +192,89 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 				{#each tokensArray as tokenItem (tokenItem.contractAddress)}
 				{@const sftForToken = $sfts?.find(s => s.id.toLowerCase() === tokenItem.contractAddress.toLowerCase())}
 				{@const maxSupplyForToken = catalogService.getTokenMaxSupply(tokenItem.contractAddress) ?? undefined}
-				{@const mintedSupplyForToken = sftForToken?.totalShares}
-				{@const calculatedReturns = getTokenReturns(asset, tokenItem, mintedSupplyForToken, maxSupplyForToken)}
-				{@const baseReturn = calculatedReturns?.baseReturn ? Math.round(calculatedReturns.baseReturn) : 0}
-				{@const bonusReturn = calculatedReturns?.bonusReturn ? Math.round(calculatedReturns.bonusReturn) : 0}
-				{@const firstPaymentMonth = tokenItem.firstPaymentDate || 'TBD'}
-					<button 
-						class={tokenButtonClasses} 
-						on:click|stopPropagation={() => handleBuyTokens(tokenItem.contractAddress)}
-					>
+				{@const mintedSupply = sftForToken?.totalShares ? formatSupplyDisplay(sftForToken.totalShares) : 0}
+				{@const maxSupply = maxSupplyForToken ? formatSupplyDisplay(maxSupplyForToken) : 0}
+				{@const currentReturns = calculateLifetimeIRR(tokenItem, 65, mintedSupply, 1)}
+				{@const fullyDilutedReturns = calculateLifetimeIRR(tokenItem, 65, maxSupply, 1)}
+					<div class={tokenButtonClasses}>
 						<!-- Desktop: Full token info -->
-						<div class="hidden sm:flex w-full justify-between items-center">
+						<div class="hidden sm:flex w-full justify-between items-start gap-4">
 							<div class={tokenButtonLeftClasses}>
-								<div class="flex items-center gap-2 w-full">
-									<span class={tokenSymbolClasses}>{tokenItem.symbol}</span>
-									<span class="text-xs font-extrabold text-white bg-secondary px-2 py-1 tracking-wider rounded-none whitespace-nowrap">{tokenItem.sharePercentage ? `${tokenItem.sharePercentage}%` : shareOfAsset} of Asset</span>
-								</div>
-								<span class={tokenNameClasses}>{tokenItem.releaseName}</span>
-								<span class={tokenPaymentDateClasses}>First payment: {firstPaymentMonth}</span>
-							</div>
-							<div class={tokenButtonRightClasses}>
-								<div class={returnsDisplayClasses}>
-									<div class={returnItemClasses}>
-										<span class={returnLabelClasses}>Base IRR</span>
-										<span class={returnValueClasses}>
-											<FormattedReturn value={baseReturn} />
-										</span>
-									</div>
-									<div class={returnDividerClasses}>+</div>
-									<div class={returnItemClasses}>
-										<span class={returnLabelClasses}>Bonus IRR</span>
-										<span class={returnValueClasses}>
-											<FormattedReturn value={bonusReturn} />
-										</span>
-									</div>
-								</div>
-								<span class={buyCtaClasses}>Buy →</span>
-							</div>
-						</div>
-						
-						<!-- Mobile: Simplified token info -->
-						<div class="sm:hidden flex justify-between items-center w-full">
-							<div class="flex-1">
 								<span class={tokenSymbolClasses}>{tokenItem.symbol}</span>
+								<span class={tokenNameClasses}>{tokenItem.releaseName}</span>
+								<button
+									class="mt-2 px-3 py-1.5 bg-black text-white text-xs font-bold rounded-none hover:bg-primary hover:scale-105 transition-all duration-200 w-1/2"
+									on:click|stopPropagation={() => handleBuyTokens(tokenItem.contractAddress)}
+								>
+									Buy
+								</button>
 							</div>
-							<div class="flex items-center gap-3">
-								<div class="text-center">
-										<span class="text-sm font-extrabold text-primary">{baseReturn}% Base IRR + {bonusReturn}% Bonus IRR</span>
+							<div class="flex flex-col items-start gap-2 border-l border-gray-300 pl-2">
+								<div class="text-sm font-bold text-black text-left mb-1">Returns</div>
+								<div class="flex items-center gap-3">
+									<div class="flex items-center gap-1.5">
+										<span class="text-xs text-gray-500 font-medium">Current:</span>
+										<span class="text-base text-primary font-extrabold">
+											<FormattedReturn value={currentReturns} />
+										</span>
+									</div>
+									<div class="flex items-center gap-1.5">
+										<span class="text-xs text-gray-500 font-medium">Fully Diluted:</span>
+										<span class="text-base text-primary font-extrabold">
+											<FormattedReturn value={fullyDilutedReturns} />
+										</span>
+									</div>
 								</div>
-								<span class={buyCtaClasses}>Buy →</span>
+								<button
+									class="text-base font-semibold text-secondary hover:text-primary transition-colors"
+									on:click|stopPropagation={() => openReturnsEstimator(tokenItem, mintedSupply, maxSupply)}
+								>
+									View returns estimator →
+								</button>
 							</div>
 						</div>
-					</button>
+
+						<!-- Mobile: Simplified token info -->
+						<div class="sm:hidden flex flex-col w-full gap-3">
+							<div class="flex justify-between items-start">
+								<div class="flex-1">
+									<span class={tokenSymbolClasses}>{tokenItem.symbol}</span>
+									<span class={tokenNameClasses}>{tokenItem.releaseName}</span>
+								</div>
+								<div class="border-l border-gray-300 pl-2">
+									<div class="text-xs font-bold text-black mb-1 text-left">Returns</div>
+									<div class="flex flex-col gap-1 text-xs">
+										<div class="flex items-center gap-1">
+											<span class="text-gray-500">Current:</span>
+											<span class="text-primary font-extrabold">
+												<FormattedReturn value={currentReturns} />
+											</span>
+										</div>
+										<div class="flex items-center gap-1">
+											<span class="text-gray-500">Diluted:</span>
+											<span class="text-primary font-extrabold">
+												<FormattedReturn value={fullyDilutedReturns} />
+											</span>
+										</div>
+									</div>
+								</div>
+							</div>
+							<div class="flex flex-col gap-2">
+								<button
+									class="w-1/2 px-3 py-1.5 bg-black text-white text-xs font-bold rounded-none hover:bg-primary hover:scale-105 transition-all duration-200"
+									on:click|stopPropagation={() => handleBuyTokens(tokenItem.contractAddress)}
+								>
+									Buy
+								</button>
+								<button
+									class="text-sm font-semibold text-secondary hover:text-primary transition-colors text-left"
+									on:click|stopPropagation={() => openReturnsEstimator(tokenItem, mintedSupply, maxSupply)}
+								>
+									View returns estimator →
+								</button>
+							</div>
+						</div>
+					</div>
 				{/each}
 				</div>
 				
@@ -261,3 +295,13 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 		{/if}
 	</CardContent>
 </Card>
+
+<!-- Returns Estimator Modal -->
+{#if estimatorToken}
+	<ReturnsEstimatorModal
+		bind:isOpen={showReturnsEstimator}
+		token={estimatorToken}
+		mintedSupply={estimatorMintedSupply}
+		availableSupply={estimatorAvailableSupply}
+	/>
+{/if}

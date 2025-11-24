@@ -18,7 +18,7 @@
 	};
 </script>
 
-<Card {hoverable} roundedClass="rounded-lg">
+<Card {hoverable} roundedClass="rounded-none">
 	<CardContent paddingClass="p-8">
 		<div class={centered ? 'text-center' : ''}>
 			{#if iconType === 'emoji'}
