@@ -16,28 +16,24 @@
 			...base.rpcUrls,
 			default: {
 				http: [
-					"https://mainnet.base.org",                    // Official Base RPC
-					"https://base-rpc.publicnode.com",             // PublicNode
-					"https://base.llamarpc.com",                   // LlamaRPC
-					"https://0xrpc.io/base",                       // 0xRPC
-					"https://base.drpc.org",                       // DRPC
-					"https://base-mainnet.gateway.tatum.io",       // Tatum
-					"https://base.blockpi.network/v1/rpc/public",  // BlockPI
-					"https://1rpc.io/base",                        // 1RPC
-					"https://base.meowrpc.com"                     // MeowRPC
+					"https://mainnet.base.org",                    // Primary
+					"https://base-rpc.publicnode.com",
+					"https://mainnet.base.org",                    // Secondary explicit repeat per requested list
+					"https://base.llamarpc.com",
+					"https://base.meowrpc.com",
+					"https://base-mainnet.public.blastapi.io",
+					"https://gateway.tenderly.co/public/base"
 				]
 			},
 			public: {
 				http: [
-					"https://mainnet.base.org",                    // Official Base RPC
-					"https://base-rpc.publicnode.com",             // PublicNode
-					"https://base.llamarpc.com",                   // LlamaRPC
-					"https://0xrpc.io/base",                       // 0xRPC
-					"https://base.drpc.org",                       // DRPC
-					"https://base-mainnet.gateway.tatum.io",       // Tatum
-					"https://base.blockpi.network/v1/rpc/public",  // BlockPI
-					"https://1rpc.io/base",                        // 1RPC
-					"https://base.meowrpc.com"                     // MeowRPC
+					"https://mainnet.base.org",
+					"https://base-rpc.publicnode.com",
+					"https://mainnet.base.org",
+					"https://base.llamarpc.com",
+					"https://base.meowrpc.com",
+					"https://base-mainnet.public.blastapi.io",
+					"https://gateway.tenderly.co/public/base"
 				]
 			}
 		}

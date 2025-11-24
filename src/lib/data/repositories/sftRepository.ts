@@ -4,8 +4,8 @@
 
 import { executeGraphQL } from "../clients/cachedGraphqlClient";
 import {
-  BASE_SFT_SUBGRAPH_URL,
-  BASE_METADATA_SUBGRAPH_URL,
+  BASE_SFT_SUBGRAPH_URLS,
+  BASE_METADATA_SUBGRAPH_URLS,
   ENERGY_FIELDS,
   ACTIVE_METABOARD_ADMIN,
 } from "$lib/network";
@@ -45,6 +45,7 @@ export class SftRepository {
    * Fetch all SFTs from the subgraph
    */
   async getAllSfts(): Promise<OffchainAssetReceiptVault[]> {
+    const [primaryUrl, ...fallbackUrls] = BASE_SFT_SUBGRAPH_URLS;
     const query = `
       query GetAllSfts {
         offchainAssetReceiptVaults {
@@ -61,10 +62,14 @@ export class SftRepository {
     `;
 
     try {
-      logDev("Fetching SFTs from:", BASE_SFT_SUBGRAPH_URL);
+      logDev("Fetching SFTs from:", primaryUrl);
       const data = await executeGraphQL<GetSftsResponse>(
-        BASE_SFT_SUBGRAPH_URL,
+        primaryUrl,
         query,
+        undefined,
+        {
+          fallbackUrls,
+        },
       );
 
       logDev("Raw SFT data received:", {
@@ -91,6 +96,7 @@ export class SftRepository {
    * Fetch SFT metadata from the metadata subgraph
    */
   async getSftMetadata(): Promise<MetaV1S[]> {
+    const [primaryUrl, ...fallbackUrls] = BASE_METADATA_SUBGRAPH_URLS;
     // Extract all SFT addresses from ENERGY_FIELDS
     const sftAddresses = ENERGY_FIELDS.flatMap((field) =>
       field.sftTokens.map((token) => token.address),
@@ -123,8 +129,12 @@ export class SftRepository {
 
     try {
       const data = await executeGraphQL<GetMetadataResponse>(
-        BASE_METADATA_SUBGRAPH_URL,
+        primaryUrl,
         query,
+        undefined,
+        {
+          fallbackUrls,
+        },
       );
 
       if (!data || !data.metaV1S) {
@@ -147,6 +157,7 @@ export class SftRepository {
   ): Promise<DepositWithReceipt[]> {
     if (!ownerAddress) return [];
 
+    const [primaryUrl, ...fallbackUrls] = BASE_SFT_SUBGRAPH_URLS;
     const sftAddresses = ENERGY_FIELDS.flatMap((field) =>
       field.sftTokens.map((token) => token.address),
     );
@@ -171,11 +182,14 @@ export class SftRepository {
 
     try {
       const data = await executeGraphQL<GetDepositsResponse>(
-        BASE_SFT_SUBGRAPH_URL,
+        primaryUrl,
         query,
         {
           owner: ownerAddress.toLowerCase(),
           sftIds: sftAddresses.map((s) => s.toLowerCase()),
+        },
+        {
+          fallbackUrls,
         },
       );
       return data.depositWithReceipts || [];

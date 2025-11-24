@@ -91,8 +91,7 @@
 	$: if ($vaultQuery && $vaultQuery.data) {
 		sfts.set($vaultQuery.data);
 	} else if ($vaultQuery && $vaultQuery.isError) {
-		// Set to empty array on error to indicate "loaded but failed"
-		sfts.set([]);
+		// Keep existing store value on error to avoid wiping last-known-good data
 	}
 	
 
