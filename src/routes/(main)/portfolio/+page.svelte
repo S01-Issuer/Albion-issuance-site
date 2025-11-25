@@ -41,6 +41,7 @@ type PortfolioTab = 'overview' | 'performance' | 'allocation';
 
 interface ClaimGroupSummary {
 	fieldName: string;
+	tokenAddress: string;
 	unclaimedAmount: number;
 	claimedAmount: number;
 	totalEarned: number;
@@ -438,10 +439,10 @@ function percentageDisplay(value: number): string {
 
 				// Map holdings to claimsHoldings format with derived totals
 				claimsHoldings = claimsResult.holdings.map((group: ClaimsHoldingsGroup) => {
+					// Filter claims by token address to ensure correct matching per token
+					const normalizedTokenAddress = group.tokenAddress?.toLowerCase();
 					const groupClaims = claimsResult.claimHistory.filter(
-						(claim) =>
-							claim.fieldName === group.fieldName ||
-							claim.asset === group.fieldName,
+						(claim) => claim.tokenAddress?.toLowerCase() === normalizedTokenAddress,
 					);
 					const claimedAmount = groupClaims.reduce((sum, claim) => {
 						const amount = Number(claim.amount ?? 0);
@@ -455,6 +456,7 @@ function percentageDisplay(value: number): string {
 					const totalEarned = claimedAmount + unclaimedAmount;
 					return {
 						fieldName: group.fieldName,
+						tokenAddress: group.tokenAddress,
 						unclaimedAmount,
 						claimedAmount,
 						totalEarned,
@@ -583,12 +585,13 @@ function percentageDisplay(value: number): string {
 				let totalEarnedForSft = 0;
 				let unclaimedAmountForSft = 0;
 				let claimedAmountForSft = 0;
-					
-					// Find claims data for this specific SFT by matching field name
+
+					// Find claims data for this specific SFT by matching the token address
+					const normalizedSftAddress = sft.id.toLowerCase();
 					const sftClaimsGroup = claimsHoldings.find(
-						(group) => group.fieldName === assetFieldName,
+						(group) => group.tokenAddress?.toLowerCase() === normalizedSftAddress,
 					);
-					
+
 					// Use data from claimsGroup if available (this is the source of truth)
 				if (sftClaimsGroup) {
 					claimedAmountForSft = Number(sftClaimsGroup.claimedAmount ?? 0);
@@ -596,10 +599,10 @@ function percentageDisplay(value: number): string {
 					const groupTotal = Number(sftClaimsGroup.totalEarned ?? 0);
 					totalEarnedForSft = groupTotal || claimedAmountForSft + unclaimedAmountForSft;
 				}
-					
-					// Get claim history for this asset
+
+					// Get claim history for this asset by matching token address
 					const sftClaims = claimHistory.filter(
-						(claim) => claim.asset === asset.assetName || claim.fieldName === asset.assetName,
+						(claim) => claim.tokenAddress?.toLowerCase() === normalizedSftAddress,
 					);
 					const totalEarnedFromHistory = sftClaims.reduce((sum, claim) => {
 						const amount = Number(claim?.amount ?? 0);

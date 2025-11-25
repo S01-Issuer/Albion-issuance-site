@@ -120,6 +120,7 @@ export type ClaimHistory = {
   txHash: string;
   status: string;
   fieldName?: string;
+  tokenAddress?: string;
 };
 
 export type ClaimSignedContext = {
@@ -384,6 +385,7 @@ export async function sortClaimsData(
   ownerAddress: string,
   fieldName: string,
   orderTimestamp?: string,
+  tokenAddress?: string,
 ): Promise<SortedClaimsResult> {
   const blockRange = getBlockRangeFromTrades(trades);
 
@@ -511,6 +513,7 @@ export async function sortClaimsData(
       asset: fieldName || "Unknown Field",
       txHash: trades[0].tradeEvent?.transaction?.id || "N/A",
       status: "completed",
+      tokenAddress,
     };
   });
 
