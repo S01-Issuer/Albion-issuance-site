@@ -8,7 +8,7 @@ const cache = new Map<
   string,
   { body: Uint8Array; contentType: string; timestamp: number }
 >();
-const CACHE_TTL = 1000 * 60 * 60; // 1 hour
+const CACHE_TTL = 1000 * 60 * 30; // 30 minutes
 const MAX_RETRIES = 2;
 const TIMEOUT_MS = 15_000;
 const RETRY_DELAY_MS = 250;

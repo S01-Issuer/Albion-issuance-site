@@ -47,6 +47,8 @@
 	function invalidateClaimData() {
 		// Force subsequent loads to re-fetch orderbook data after a claim
 		graphQLCache.invalidate(BASE_ORDERBOOK_SUBGRAPH_URL);
+		// Clear CSV cache so fresh data is fetched on next load
+		claimsService.clearCache();
 	}
 
 	function updateClaimsCacheSnapshot() {
