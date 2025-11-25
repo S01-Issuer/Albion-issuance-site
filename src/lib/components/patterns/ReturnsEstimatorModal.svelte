@@ -318,6 +318,7 @@
 	}
 
 	function handleClose() {
+		isOpen = false;
 		onClose();
 	}
 
@@ -348,8 +349,9 @@
 <!-- Modal Backdrop -->
 {#if isOpen}
 	<div class={displayClasses} on:click={handleClose} on:keydown={(e) => e.key === 'Escape' && handleClose()} role="dialog" aria-modal="true" tabindex="-1" transition:fade={{ duration: 200 }}>
+		<!-- svelte-ignore a11y-no-noninteractive-element-interactions a11y-click-events-have-key-events -->
 		<!-- Modal Content -->
-		<div class={modalClasses} role="document" tabindex="-1">
+		<div class={modalClasses} role="document" tabindex="-1" on:click|stopPropagation>
 			<!-- Header -->
 			<div class={headerClasses}>
 				<div class="flex items-start justify-between">

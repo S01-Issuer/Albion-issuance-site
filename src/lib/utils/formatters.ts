@@ -382,6 +382,114 @@ export function formatHash(
  * @param options - Formatting options
  * @returns Formatted return string
  */
+/**
+ * Formats a date string from "YYYY-MM" to "1st MMM YYYY"
+ * @param dateStr - Date string in "YYYY-MM" format
+ * @returns Formatted date string (e.g., "1st Nov 2025")
+ */
+export function formatAccrualStartDate(dateStr: string): string {
+  if (!dateStr || dateStr === "undefined") return "TBD";
+
+  const parts = dateStr.split("-");
+  if (parts.length < 2) return "TBD";
+
+  const [year, month] = parts;
+  const monthNames = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+
+  const monthIndex = parseInt(month) - 1;
+  if (monthIndex < 0 || monthIndex >= 12) return "TBD";
+
+  return `1st ${monthNames[monthIndex]} ${year}`;
+}
+
+/**
+ * Calculates the estimated first payout date from a "YYYY-MM" date string
+ * First payout is 2 months after the accrual start, on the first Monday of that month
+ * @param dateStr - Date string in "YYYY-MM" format
+ * @returns Formatted date string (e.g., "5th Jan 2026")
+ */
+export function formatEstFirstPayout(dateStr: string): string {
+  if (!dateStr || dateStr === "undefined") return "TBD";
+
+  const parts = dateStr.split("-");
+  if (parts.length < 2) return "TBD";
+
+  const [year, month] = parts;
+  const monthIndex = parseInt(month) - 1;
+  if (monthIndex < 0 || monthIndex >= 12) return "TBD";
+
+  // Add 2 months
+  let payoutMonth = monthIndex + 2;
+  let payoutYear = parseInt(year);
+  if (payoutMonth >= 12) {
+    payoutMonth -= 12;
+    payoutYear += 1;
+  }
+
+  // Find the first Monday of that month
+  const firstOfMonth = new Date(payoutYear, payoutMonth, 1);
+  const dayOfWeek = firstOfMonth.getDay(); // 0 = Sunday, 1 = Monday, etc.
+
+  // Calculate days until first Monday
+  // If day is Sunday (0), first Monday is day 2
+  // If day is Monday (1), first Monday is day 1
+  // If day is Tuesday (2), first Monday is day 7
+  // etc.
+  let firstMondayDay: number;
+  if (dayOfWeek === 0) {
+    firstMondayDay = 2; // Sunday -> Monday is next day + 1
+  } else if (dayOfWeek === 1) {
+    firstMondayDay = 1; // Already Monday
+  } else {
+    firstMondayDay = 1 + (8 - dayOfWeek); // Days until next Monday
+  }
+
+  const monthNames = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+
+  // Format ordinal suffix
+  const ordinalSuffix = (n: number): string => {
+    if (n > 3 && n < 21) return "th";
+    switch (n % 10) {
+      case 1:
+        return "st";
+      case 2:
+        return "nd";
+      case 3:
+        return "rd";
+      default:
+        return "th";
+    }
+  };
+
+  return `${firstMondayDay}${ordinalSuffix(firstMondayDay)} ${monthNames[payoutMonth]} ${payoutYear}`;
+}
+
 export function formatSmartReturn(
   returnPercentage: number | undefined,
   options: {

@@ -12,7 +12,7 @@
 	import TabButton from '$lib/components/components/TabButton.svelte';
 	import { PageLayout, ContentSection } from '$lib/components/layout';
 	import { getImageUrl } from '$lib/utils/imagePath';
-	import { formatCurrency, formatSmartReturn, formatHash, formatEndDate } from '$lib/utils/formatters';
+	import { formatCurrency, formatSmartReturn, formatHash, formatEndDate, formatAccrualStartDate, formatEstFirstPayout } from '$lib/utils/formatters';
 	import { hasIncompleteReleases } from '$lib/utils/futureReleases';
 	import { useAssetDetailData, useDataExport } from '$lib/composables';
 	import AssetDetailHeader from '$lib/components/patterns/assets/AssetDetailHeader.svelte';
@@ -1320,8 +1320,12 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 										{/if}
 									</div>
 									<div class="flex justify-between items-start">
-										<span class="text-base font-medium text-black opacity-70 relative font-figtree">First Payment Date</span>
-										<span class="text-base font-extrabold text-black text-right">{formatEndDate(token.firstPaymentDate || '')}</span>
+										<span class="text-base font-medium text-black opacity-70 relative font-figtree">Royalty Accrual Start</span>
+										<span class="text-base font-extrabold text-black text-right">{formatAccrualStartDate(token.firstPaymentDate || '')}</span>
+									</div>
+									<div class="flex justify-between items-start">
+										<span class="text-base font-medium text-black opacity-70 relative font-figtree">Est. First Payout</span>
+										<span class="text-base font-extrabold text-black text-right">{formatEstFirstPayout(token.firstPaymentDate || '')}</span>
 									</div>
 								</div>
 
