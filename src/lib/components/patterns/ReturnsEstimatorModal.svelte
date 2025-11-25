@@ -28,11 +28,13 @@
 	let discountRate = 10;
 	let numberOfTokens = 1;
 
-	// Reset assumptions when modal opens
+	// Reset assumptions and calculate when modal opens
 	$: if (isOpen && token) {
 		oilPrice = 65;
 		discountRate = 10;
 		numberOfTokens = availableSupply < 1 ? parseFloat(availableSupply.toFixed(3)) : 1;
+		// Explicitly trigger calculation after reset
+		updateCalculations();
 	}
 
 	// Validation error for numberOfTokens

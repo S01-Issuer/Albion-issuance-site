@@ -10,7 +10,7 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 	import FormattedReturn from '$lib/components/components/FormattedReturn.svelte';
 	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 	import { hasAvailableSupplySync } from '$lib/utils/supplyHelpers';
-	import { calculateLifetimeIRR } from '$lib/utils/returnsEstimatorHelpers';
+	import { calculateLifetimeIRR, calculateMonthlyTokenCashflows, calculateIRR } from '$lib/utils/returnsEstimatorHelpers';
 	import { formatSupplyDisplay } from '$lib/utils/supplyHelpers';
 	import ReturnsEstimatorModal from '$lib/components/patterns/ReturnsEstimatorModal.svelte';
 
@@ -194,7 +194,9 @@ import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 				{@const maxSupplyForToken = catalogService.getTokenMaxSupply(tokenItem.contractAddress) ?? undefined}
 				{@const mintedSupply = sftForToken?.totalShares ? formatSupplyDisplay(sftForToken.totalShares) : 0}
 				{@const maxSupply = maxSupplyForToken ? formatSupplyDisplay(maxSupplyForToken) : 0}
-				{@const currentReturns = calculateLifetimeIRR(tokenItem, 65, mintedSupply, 1)}
+				{@const remainingCashflows = calculateMonthlyTokenCashflows(tokenItem, 65, mintedSupply, 1).map(m => m.cashflow)}
+				{@const monthlyIRR = remainingCashflows.length > 1 ? calculateIRR(remainingCashflows) : 0}
+				{@const currentReturns = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99}
 				{@const fullyDilutedReturns = calculateLifetimeIRR(tokenItem, 65, maxSupply, 1)}
 					<div class={tokenButtonClasses}>
 						<!-- Desktop: Full token info -->
