@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { writeContract, simulateContract } from '@wagmi/core';
+	import { writeContract, simulateContract, waitForTransactionReceipt } from '@wagmi/core';
 	import { derived, get } from 'svelte/store';
 	import { onMount, onDestroy } from 'svelte';
 	import { web3Modal, signerAddress, connected, wagmiConfig, chainId } from 'svelte-wagmi';
@@ -29,6 +29,7 @@
 	let unclaimedPayout = 0;
 	let pageLoading = true;
 	let claiming = false;
+	let confirming = false;
 	let claimSuccess = false;
 	let dataLoadError = false;
 
@@ -232,9 +233,17 @@
 			});
 
 			// Execute transaction after successful simulation
-			await writeContract($wagmiConfig, request);
-			claimSuccess = true;
+			const hash = await writeContract($wagmiConfig, request);
 			
+			// Wait for transaction confirmation
+			confirming = true;
+			await waitForTransactionReceipt($wagmiConfig, {
+				hash,
+				confirmations: 2
+			});
+			confirming = false;
+			
+			claimSuccess = true;
 			applyClaimOptimisticUpdate();
 			// Invalidate caches and reload claims data after successful claim
 			invalidateClaimData();
@@ -249,6 +258,7 @@
 			claimSuccess = false;
 		} finally {
 			claiming = false;
+			confirming = false;
 		}
 	}
 
@@ -295,9 +305,17 @@
 			});
 
 			// Execute transaction after successful simulation
-			await writeContract($wagmiConfig, request);
-			claimSuccess = true;
+			const hash = await writeContract($wagmiConfig, request);
 			
+			// Wait for transaction confirmation
+			confirming = true;
+			await waitForTransactionReceipt($wagmiConfig, {
+				hash,
+				confirmations: 2
+			});
+			confirming = false;
+			
+			claimSuccess = true;
 			applyClaimOptimisticUpdate(group);
 				// Invalidate caches and reload claims data after successful claim
 			invalidateClaimData();
@@ -312,6 +330,7 @@
 			claimSuccess = false;
 		} finally {
 			claiming = false;
+			confirming = false;
 		}
 	}
 
@@ -417,15 +436,22 @@
 				<div class="text-center mt-6 lg:mt-8">
 					<PrimaryButton
 						on:click={claimAllPayouts}
-						disabled={claiming}
+						disabled={claiming || confirming}
 						size="large"
 					>
-						{claiming ? 'Processing...' : `Claim All (${formatCurrency(unclaimedPayout)})`}
+						{claiming ? 'Submitting transaction...' : confirming ? 'Waiting for confirmation...' : `Claim All (${formatCurrency(unclaimedPayout)})`}
 					</PrimaryButton>
 				</div>
 			{/if}
 
-			{#if claimSuccess}
+			{#if claiming || confirming}
+				<div class="text-center mt-4 p-4 bg-blue-100 text-blue-800 rounded-none max-w-md mx-auto">
+					<div class="w-4 h-4 border-2 border-blue-800 border-t-transparent animate-spin inline-block mr-2"></div>
+					{claiming ? 'Submitting transaction...' : 'Waiting for transaction confirmation...'}
+				</div>
+			{/if}
+
+			{#if claimSuccess && !claiming && !confirming}
 				<div class="text-center mt-4 p-4 bg-green-100 text-green-800 rounded-none max-w-md mx-auto">
 					✅ Claim successful! Tokens have been sent to your wallet.
 				</div>
@@ -462,11 +488,11 @@
 									<div class="text-center">
 										<SecondaryButton 
 											size="small" 
-											disabled={claiming || group.totalAmount <= 0}
+											disabled={claiming || confirming || group.totalAmount <= 0}
 											on:click={() => handleClaimSingle(group)}
 											fullWidth
 										>
-											{claiming ? 'Processing...' : 'Claim'}
+											{claiming ? 'Submitting...' : confirming ? 'Confirming...' : 'Claim'}
 										</SecondaryButton>
 									</div>
 								</div>
@@ -549,7 +575,7 @@
 									</tr>
 								</thead>
 								<tbody>
-									{#each paginatedHistory as claim (claim.txHash || claim.date)}
+									{#each paginatedHistory as claim, index (claim.txHash + index)}
 										<tr class="border-b border-light-gray last:border-0 hover:bg-light-gray/10 transition-colors">
 											<td class="p-4 text-sm text-black">
 												{formatDate(claim.date)}
