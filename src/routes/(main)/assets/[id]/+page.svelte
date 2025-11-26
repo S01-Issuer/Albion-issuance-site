@@ -26,8 +26,13 @@ import { getTokenTermsPath } from '$lib/utils/tokenTerms';
 import { getTxUrl, getAddressUrl } from '$lib/utils/explorer';
 import { Chart as ChartJS, registerables } from 'chart.js';
 import { onDestroy } from 'svelte';
+import { useQueryClient } from '@tanstack/svelte-query';
+import { hasAvailableSupplySync } from '$lib/utils/supplyHelpers';
 
 ChartJS.register(...registerables);
+
+// Query client for refreshing SFT data after purchase
+const queryClient = useQueryClient();
 
 const isDev = import.meta.env.DEV;
 const logDev = (...messages: unknown[]) => {
@@ -244,6 +249,14 @@ let loadedAssetId: string | null = null;
 		const dateB = b.firstPaymentDate || '';
 		return dateA.localeCompare(dateB);
 	}) : [];
+
+	// Separate tokens into available, future, and sold out
+	$: availableTokens = sortedTokens.filter(t => hasAvailableSupplySync(t));
+	$: soldOutTokens = sortedTokens.filter(t => !hasAvailableSupplySync(t));
+	$: soldOutCount = soldOutTokens.length;
+
+	// Tokens to display: available tokens, plus sold out if toggle is on
+	$: visibleTokens = showSoldOutTokens ? [...availableTokens, ...soldOutTokens] : availableTokens;
 	$: receiptsData = primaryToken?.asset?.receiptsData ?? [];
 $: revenueReports = buildRevenueReports(receiptsData, assetData?.monthlyReports ?? []);
 $: revenueReportsWithIncome = revenueReports.filter((report) => report.revenue > 0);
@@ -511,6 +524,9 @@ let futureSignupSubmitting = false;
 let futureSignupStatus: 'idle' | 'success' | 'error' = 'idle';
 let lastFutureReleaseCheck = '';
 
+// Sold out tokens toggle state
+let showSoldOutTokens = false;
+
 async function handleFutureSignupSubmit(event: SubmitEvent) {
     event.preventDefault();
     if (futureSignupSubmitting) return;
@@ -743,10 +759,11 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 	openHistoryModal(tokenAddress);
 }
 	
-	function handlePurchaseSuccess() {
+	async function handlePurchaseSuccess() {
 		showPurchaseWidget = false;
 		selectedTokenAddress = null;
-		// Could refresh token data here
+		// Refresh SFT data to update token availability
+		await queryClient.invalidateQueries({ queryKey: ['getSfts'] });
 	}
 	
 	function handleWidgetClose() {
@@ -1233,7 +1250,7 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 					<h3 class="text-3xl md:text-2xl font-extrabold text-black uppercase tracking-wider mb-8">Token Information</h3>
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-8 overflow-visible">
 
-				{#each sortedTokens as token (token.contractAddress)}
+				{#each visibleTokens as token (token.contractAddress)}
 				{@const sft = $sfts?.find((s) => s.id.toLowerCase() === token.contractAddress.toLowerCase())}
 				{@const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress) ?? undefined}
 				{@const supply = getTokenSupply(token, sft, maxSupply)}
@@ -1638,6 +1655,18 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 					</Card>
 					{/if}
 				</div>
+
+				<!-- Sold Out Tokens Toggle -->
+				{#if soldOutCount > 0}
+					<div class="mt-8 flex justify-center">
+						<button
+							class="px-6 py-3 bg-white border border-light-gray text-black font-semibold text-sm uppercase tracking-wider cursor-pointer transition-all duration-200 hover:bg-light-gray hover:border-black"
+							on:click={() => showSoldOutTokens = !showSoldOutTokens}
+						>
+							{showSoldOutTokens ? 'Hide Sold Out Tokens' : `View Sold Out Tokens (${soldOutCount})`}
+						</button>
+					</div>
+				{/if}
 				</div>
 			</div>
 		</ContentSection>
