@@ -121,6 +121,7 @@ let activeTab: PortfolioTab = 'overview';
 	// Page state
 	let pageLoading = true;
 	let isLoadingData = false;
+	let loadingForAddress: string | null = null;
 	let totalInvested = 0;
 	let totalPayoutsEarned = 0;
 	let unclaimedPayout = 0;
@@ -408,8 +409,11 @@ function percentageDisplay(value: number): string {
 	}
 
 	async function loadSftData() {
-		if (isLoadingData || !$signerAddress) return;
+		if (!$signerAddress) return;
+		// Prevent duplicate loads for the same address
+		if (isLoadingData && loadingForAddress === $signerAddress) return;
 		isLoadingData = true;
+		loadingForAddress = $signerAddress;
 		pageLoading = true;
 
 		// Reset all portfolio variables
@@ -804,6 +808,7 @@ function percentageDisplay(value: number): string {
 		} finally {
 			pageLoading = false;
 			isLoadingData = false;
+			loadingForAddress = null;
 		}
 	}
 	

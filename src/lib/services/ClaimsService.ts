@@ -147,11 +147,10 @@ export class ClaimsService {
       const result = results[index];
 
       if (result.status === "rejected") {
-        if (result.reason instanceof ClaimsCsvLoadError) {
-          csvLoadFailed = true;
-          continue;
-        }
-        throw result.reason;
+        // Log the error and set the flag - don't throw to allow partial results
+        console.error("Error processing claim:", result.reason);
+        csvLoadFailed = true;
+        continue;
       }
 
       const claimData = result.value;

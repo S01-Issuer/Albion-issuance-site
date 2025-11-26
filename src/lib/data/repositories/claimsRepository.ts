@@ -54,23 +54,18 @@ export class ClaimsRepository {
       }
     `;
 
-    try {
-      const data = await executeGraphQL<GetTradesResponse>(
-        primaryUrl,
-        query,
-        {
-          orderHash: cleanOrderHash,
-          sender: ownerAddress.toLowerCase(),
-        },
-        {
-          fallbackUrls,
-        },
-      );
-      return data?.trades || [];
-    } catch (error) {
-      console.error("Error fetching trades:", error);
-      return [];
-    }
+    const data = await executeGraphQL<GetTradesResponse>(
+      primaryUrl,
+      query,
+      {
+        orderHash: cleanOrderHash,
+        sender: ownerAddress.toLowerCase(),
+      },
+      {
+        fallbackUrls,
+      },
+    );
+    return data?.trades || [];
   }
 
   /**
@@ -111,20 +106,15 @@ export class ClaimsRepository {
       }
     `;
 
-    try {
-      const data = await executeGraphQL<GetOrdersResponse>(
-        primaryUrl,
-        query,
-        { orderHash: cleanOrderHash },
-        {
-          fallbackUrls,
-        },
-      );
-      return data?.orders || [];
-    } catch (error) {
-      console.error("Error fetching order:", error);
-      return [];
-    }
+    const data = await executeGraphQL<GetOrdersResponse>(
+      primaryUrl,
+      query,
+      { orderHash: cleanOrderHash },
+      {
+        fallbackUrls,
+      },
+    );
+    return data?.orders || [];
   }
 }
 

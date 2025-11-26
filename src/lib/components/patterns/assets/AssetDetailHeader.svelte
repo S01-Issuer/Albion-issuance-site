@@ -10,10 +10,6 @@ export let tokenCount: number = 0;
 export let onTokenSectionClick: (() => void) | undefined = undefined;
 export let onLocationClick: (() => void) | undefined = undefined;
 
-	function getAssetImage(assetData: Asset | null): string {
-		return assetData?.coverImage || '/images/placeholder-asset.jpg';
-	}
-
 	function getShareData(): ShareData {
 		return {
 			title: `Investment Opportunity: ${asset?.name}`,
@@ -85,14 +81,16 @@ export let onLocationClick: (() => void) | undefined = undefined;
 			<div class="mb-6 sm:mb-8 lg:mb-12">
 							<div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-8 mb-6 lg:mb-8">
 				<!-- Thumbnail - hidden on mobile -->
+				{#if asset?.coverImage}
 				<div class="hidden sm:block w-12 h-12 sm:w-14 sm:h-14 lg:w-16 lg:h-16 rounded-none-none overflow-hidden border border-light-gray flex-shrink-0">
-					<img 
-						src={getImageUrl(getAssetImage(asset))} 
+					<img
+						src={getImageUrl(asset.coverImage)}
 						alt={asset?.name || 'Asset'}
 						loading="lazy"
 						class="w-full h-full object-cover"
 					/>
 				</div>
+				{/if}
 					<div class="flex-1">
 						<div class="flex flex-col gap-4 lg:flex-row lg:justify-between lg:items-start lg:gap-4 mb-4">
 							<h1 class="text-2xl sm:text-3xl lg:text-4xl xl:text-5xl font-extrabold text-black uppercase tracking-tight m-0 leading-tight">{asset?.name}</h1>

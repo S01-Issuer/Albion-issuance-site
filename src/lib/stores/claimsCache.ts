@@ -10,18 +10,18 @@ interface CacheEntry {
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 function createClaimsCache() {
-  const { subscribe, set } = writable<CacheEntry | null>(null);
+  const store = writable<CacheEntry | null>(null);
 
   return {
-    subscribe,
+    subscribe: store.subscribe,
 
     get(address: string): ClaimsResult | null {
-      const cache = get({ subscribe });
+      const cache = get(store);
       if (!cache || cache.address !== address) return null;
 
       const age = Date.now() - cache.timestamp;
       if (age > CACHE_DURATION) {
-        this.clear();
+        store.set(null);
         return null;
       }
 
@@ -29,7 +29,7 @@ function createClaimsCache() {
     },
 
     set(address: string, data: ClaimsResult) {
-      set({
+      store.set({
         data,
         address,
         timestamp: Date.now(),
@@ -37,11 +37,11 @@ function createClaimsCache() {
     },
 
     clear() {
-      set(null);
+      store.set(null);
     },
 
     isValid(address: string): boolean {
-      const cache = get({ subscribe });
+      const cache = get(store);
       if (!cache || cache.address !== address) return false;
       return Date.now() - cache.timestamp < CACHE_DURATION;
     },

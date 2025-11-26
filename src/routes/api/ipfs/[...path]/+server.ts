@@ -16,7 +16,7 @@ const RETRY_DELAY_MS = 250;
 const fallbackGateways = [
   publicEnv.PUBLIC_IPFS_FALLBACK_GATEWAY,
   "https://ipfs.io/ipfs",
-  "https://dweb.link/ipfs",
+  "https://eu.orbitor.dev/ipfs",
 ].filter((gateway): gateway is string => Boolean(gateway));
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

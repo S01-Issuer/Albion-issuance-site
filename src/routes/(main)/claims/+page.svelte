@@ -52,22 +52,6 @@
 		claimsService.clearCache();
 	}
 
-	function updateClaimsCacheSnapshot() {
-		if (dataLoadError) return;
-		const address = get(signerAddress) ?? '';
-		if (!address) return;
-		claimsCache.set(address, {
-			holdings,
-			claimHistory,
-			totals: {
-				earned: totalEarned,
-				claimed: totalClaimed,
-				unclaimed: unclaimedPayout
-			},
-			hasCsvLoadError: false
-		});
-	}
-
 	function resetClaimsState() {
 		claimHistory = [];
 		holdings = [];
@@ -76,34 +60,8 @@
 		unclaimedPayout = 0;
 	}
 
-	function applyClaimOptimisticUpdate(claimGroup?: ClaimsHoldingsGroup) {
-		if (claimGroup) {
-			const claimedAmount = claimGroup.totalAmount ?? 0;
-			if (claimedAmount > 0) {
-				totalClaimed += claimedAmount;
-				unclaimedPayout = Math.max(unclaimedPayout - claimedAmount, 0);
-			}
-			holdings = holdings
-				.map((group) =>
-					group.fieldName === claimGroup.fieldName
-						? { ...group, totalAmount: 0, holdings: [] }
-						: group
-				)
-				.filter((group) => group.totalAmount > 0 && group.holdings.length > 0);
-			updateClaimsCacheSnapshot();
-			return;
-		}
-
-		const claimedAmount = unclaimedPayout;
-		if (claimedAmount > 0) {
-			totalClaimed += claimedAmount;
-		}
-		unclaimedPayout = 0;
-		holdings = [];
-		updateClaimsCacheSnapshot();
-	}
-
 	onMount(() => {
+		claimSuccess = false;
 		subscribeToWallet();
 	});
 
@@ -161,7 +119,6 @@
 				totalEarned = result.totals.earned;
 				totalClaimed = result.totals.claimed;
 				unclaimedPayout = result.totals.unclaimed;
-				updateClaimsCacheSnapshot();
 			} else {
 				resetClaimsState();
 			}
@@ -244,14 +201,12 @@
 			confirming = false;
 			
 			claimSuccess = true;
-			applyClaimOptimisticUpdate();
 			// Invalidate caches and reload claims data after successful claim
 			invalidateClaimData();
-			setTimeout(() => {
-				const address = get(signerAddress) ?? '';
-				if (!address) return;
-				loadClaimsData(address, true);
-			}, 2000);
+			const address = get(signerAddress) ?? '';
+			if (address) {
+				await loadClaimsData(address, true);
+			}
 
 		} catch (error) {
 			console.error('Claim all failed:', error);
@@ -316,14 +271,12 @@
 			confirming = false;
 			
 			claimSuccess = true;
-			applyClaimOptimisticUpdate(group);
-				// Invalidate caches and reload claims data after successful claim
+			// Invalidate caches and reload claims data after successful claim
 			invalidateClaimData();
-			setTimeout(() => {
-				const address = get(signerAddress) ?? '';
-				if (!address) return;
-				loadClaimsData(address, true);
-			}, 2000);
+			const address = get(signerAddress) ?? '';
+			if (address) {
+				await loadClaimsData(address, true);
+			}
 
 		} catch (error) {
 			console.error('Claim single failed:', error);
