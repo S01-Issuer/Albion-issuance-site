@@ -19,10 +19,6 @@
 	import type { ClaimHistory } from '$lib/utils/claims';
 
 	const claimsService = useClaimsService();
-	const isDev = import.meta.env.DEV;
-	const logDev = (...messages: unknown[]) => {
-		if (isDev) console.warn('[Claims]', ...messages);
-	};
 
 	let totalEarned = 0;
 	let totalClaimed = 0;
@@ -88,7 +84,6 @@
 			}
 			const cached = forceFresh ? null : claimsCache.get(cacheKey);
 			if (cached) {
-				logDev('Using cached data');
 				dataLoadError = !!cached.hasCsvLoadError;
 				if (dataLoadError) {
 					resetClaimsState();
@@ -104,7 +99,6 @@
 				return;
 			}
 
-			logDev('Loading fresh data');
 			const result = await claimsService.loadClaimsForWallet(cacheKey);
 			
 			// Store in cache
@@ -142,6 +136,39 @@
 
 	async function connectWallet() {
 		if ($web3Modal) $web3Modal.open();
+	}
+
+	async function waitForTransactionInSubgraph(hash: string, maxAttempts = 30): Promise<void> {
+		return new Promise((resolve, reject) => {
+			let attempts = 0;
+			const interval = setInterval(async () => {
+				attempts++;
+				try {
+					// Dynamic import to avoid CommonJS module resolution issues
+					// @ts-ignore - CommonJS module type definition issue
+					const orderbookModule = await import('@rainlanguage/orderbook') as any;
+					const getTransaction = orderbookModule.getTransaction as (url: string, hash: string) => Promise<{ value?: unknown }>;
+					const result = await getTransaction(BASE_ORDERBOOK_SUBGRAPH_URL, hash);
+
+					if (result?.value) {
+						clearInterval(interval);
+						resolve();
+						return;
+					}
+					
+					if (attempts >= maxAttempts) {
+						clearInterval(interval);
+						reject(new Error(`Transaction not found in subgraph after ${maxAttempts} attempts`));
+					}
+				} catch (error) {
+					// Don't fail on individual polling errors, just continue
+					if (attempts >= maxAttempts) {
+						clearInterval(interval);
+						reject(error);
+					}
+				}
+			}, 2000);
+		});
 	}
 
 	async function claimAllPayouts() {
@@ -198,6 +225,14 @@
 				hash,
 				confirmations: 2
 			});
+			
+			// Wait for transaction to be indexed in subgraph
+			try {
+				await waitForTransactionInSubgraph(hash);
+			} catch (error) {
+				// Transaction not yet indexed, continuing anyway
+			}
+			
 			confirming = false;
 			
 			claimSuccess = true;
@@ -268,6 +303,14 @@
 				hash,
 				confirmations: 2
 			});
+			
+			// Wait for transaction to be indexed in subgraph
+			try {
+				await waitForTransactionInSubgraph(hash);
+			} catch (error) {
+				// Transaction not yet indexed, continuing anyway
+			}
+			
 			confirming = false;
 			
 			claimSuccess = true;
