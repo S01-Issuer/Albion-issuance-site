@@ -24,8 +24,8 @@
 	let totalClaimed = 0;
 	let unclaimedPayout = 0;
 	let pageLoading = true;
-	let claiming = false;
-	let confirming = false;
+	let claimingTarget: 'all' | string | null = null; // 'all' for claim all, field name for single, null for none
+	let confirmingTarget: 'all' | string | null = null;
 	let claimSuccess = false;
 	let dataLoadError = false;
 
@@ -172,7 +172,7 @@
 	}
 
 	async function claimAllPayouts() {
-		claiming = true;
+		claimingTarget = 'all';
 		try {
 			if (holdings.length === 0 || holdings[0].holdings.length === 0) {
 				throw new Error('No holdings available to claim');
@@ -218,23 +218,23 @@
 
 			// Execute transaction after successful simulation
 			const hash = await writeContract($wagmiConfig, request);
-			
+
 			// Wait for transaction confirmation
-			confirming = true;
+			confirmingTarget = 'all';
 			await waitForTransactionReceipt($wagmiConfig, {
 				hash,
 				confirmations: 2
 			});
-			
+
 			// Wait for transaction to be indexed in subgraph
 			try {
 				await waitForTransactionInSubgraph(hash);
 			} catch (error) {
 				// Transaction not yet indexed, continuing anyway
 			}
-			
-			confirming = false;
-			
+
+			confirmingTarget = null;
+
 			claimSuccess = true;
 			// Invalidate caches and reload claims data after successful claim
 			invalidateClaimData();
@@ -247,13 +247,13 @@
 			console.error('Claim all failed:', error);
 			claimSuccess = false;
 		} finally {
-			claiming = false;
-			confirming = false;
+			claimingTarget = null;
+			confirmingTarget = null;
 		}
 	}
 
 	async function handleClaimSingle(group: ClaimsHoldingsGroup) {
-		claiming = true;
+		claimingTarget = group.fieldName;
 		try {
 			if (!group.holdings.length) {
 				throw new Error('No orders available for this claim group');
@@ -296,23 +296,23 @@
 
 			// Execute transaction after successful simulation
 			const hash = await writeContract($wagmiConfig, request);
-			
+
 			// Wait for transaction confirmation
-			confirming = true;
+			confirmingTarget = group.fieldName;
 			await waitForTransactionReceipt($wagmiConfig, {
 				hash,
 				confirmations: 2
 			});
-			
+
 			// Wait for transaction to be indexed in subgraph
 			try {
 				await waitForTransactionInSubgraph(hash);
 			} catch (error) {
 				// Transaction not yet indexed, continuing anyway
 			}
-			
-			confirming = false;
-			
+
+			confirmingTarget = null;
+
 			claimSuccess = true;
 			// Invalidate caches and reload claims data after successful claim
 			invalidateClaimData();
@@ -325,8 +325,8 @@
 			console.error('Claim single failed:', error);
 			claimSuccess = false;
 		} finally {
-			claiming = false;
-			confirming = false;
+			claimingTarget = null;
+			confirmingTarget = null;
 		}
 	}
 
@@ -432,22 +432,15 @@
 				<div class="text-center mt-6 lg:mt-8">
 					<PrimaryButton
 						on:click={claimAllPayouts}
-						disabled={claiming || confirming}
+						disabled={claimingTarget !== null || confirmingTarget !== null}
 						size="large"
 					>
-						{claiming ? 'Submitting transaction...' : confirming ? 'Waiting for confirmation...' : `Claim All (${formatCurrency(unclaimedPayout)})`}
+						{claimingTarget === 'all' ? 'Submitting transaction...' : confirmingTarget === 'all' ? 'Waiting for confirmation...' : `Claim All (${formatCurrency(unclaimedPayout)})`}
 					</PrimaryButton>
 				</div>
 			{/if}
 
-			{#if claiming || confirming}
-				<div class="text-center mt-4 p-4 bg-blue-100 text-blue-800 rounded-none max-w-md mx-auto">
-					<div class="w-4 h-4 border-2 border-blue-800 border-t-transparent animate-spin inline-block mr-2"></div>
-					{claiming ? 'Submitting transaction...' : 'Waiting for transaction confirmation...'}
-				</div>
-			{/if}
-
-			{#if claimSuccess && !claiming && !confirming}
+			{#if claimSuccess && claimingTarget === null && confirmingTarget === null}
 				<div class="text-center mt-4 p-4 bg-green-100 text-green-800 rounded-none max-w-md mx-auto">
 					✅ Claim successful! Tokens have been sent to your wallet.
 				</div>
@@ -482,13 +475,13 @@
 										<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wide">Available</div>
 									</div>
 									<div class="text-center">
-										<SecondaryButton 
-											size="small" 
-											disabled={claiming || confirming || group.totalAmount <= 0}
+										<SecondaryButton
+											size="small"
+											disabled={claimingTarget !== null || confirmingTarget !== null || group.totalAmount <= 0}
 											on:click={() => handleClaimSingle(group)}
 											fullWidth
 										>
-											{claiming ? 'Submitting...' : confirming ? 'Confirming...' : 'Claim'}
+											{claimingTarget === group.fieldName ? 'Submitting...' : confirmingTarget === group.fieldName ? 'Confirming...' : 'Claim'}
 										</SecondaryButton>
 									</div>
 								</div>
