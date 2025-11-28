@@ -6,7 +6,6 @@ import axios from "axios";
 import { ethers } from "ethers";
 import { Wallet, keccak256, hashMessage, getBytes, concat } from "ethers";
 import { formatEther, parseEther } from "viem";
-import { PUBLIC_HYPERSYNC_API_KEY } from "$env/static/public";
 
 // Create a singleton AbiCoder instance for reuse
 // This works in both production and test environments
@@ -82,7 +81,7 @@ interface HypersyncEntry {
   logs: HypersyncLog[];
 }
 
-interface HypersyncResponseData {
+export interface HypersyncResponseData {
   data: HypersyncEntry[];
   next_block: number;
 }
@@ -543,8 +542,9 @@ async function fetchLogs(
   while (currentBlock <= endBlock) {
     try {
       const queryResponse = await axios.post<HypersyncResponseData>(
-        client,
+        "/api/hypersync",
         {
+          client,
           from_block: currentBlock,
           logs: [
             {
@@ -564,13 +564,9 @@ async function fetchLogs(
             ],
             block: ["number", "timestamp"],
           },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${PUBLIC_HYPERSYNC_API_KEY}`
-          },
-        },
+        }
       );
+      
 
       // Concatenate logs if there are any
       const responseData = queryResponse.data;
