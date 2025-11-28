@@ -547,7 +547,7 @@
 									</tr>
 								</thead>
 								<tbody>
-									{#each paginatedHistory as claim (claim.txHash || claim.date)}
+									{#each paginatedHistory as claim, index (claim.txHash + index)}
 										<tr class="border-b border-light-gray last:border-0 hover:bg-light-gray/10 transition-colors">
 											<td class="p-4 text-sm text-black">
 												{formatDate(claim.date)}
