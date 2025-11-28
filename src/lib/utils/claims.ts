@@ -81,7 +81,7 @@ interface HypersyncEntry {
   logs: HypersyncLog[];
 }
 
-interface HypersyncResponseData {
+export interface HypersyncResponseData {
   data: HypersyncEntry[];
   next_block: number;
 }
@@ -541,27 +541,32 @@ async function fetchLogs(
 
   while (currentBlock <= endBlock) {
     try {
-      const queryResponse = await axios.post<HypersyncResponseData>(client, {
-        from_block: currentBlock,
-        logs: [
-          {
-            address: [poolContract],
-            topics: [[eventTopic]],
-          },
-        ],
-        field_selection: {
-          log: [
-            "block_number",
-            "log_index",
-            "transaction_index",
-            "transaction_hash",
-            "data",
-            "address",
-            "topic0",
+      const queryResponse = await axios.post<HypersyncResponseData>(
+        "/api/hypersync",
+        {
+          client,
+          from_block: currentBlock,
+          logs: [
+            {
+              address: [poolContract],
+              topics: [[eventTopic]],
+            },
           ],
-          block: ["number", "timestamp"],
-        },
-      });
+          field_selection: {
+            log: [
+              "block_number",
+              "log_index",
+              "transaction_index",
+              "transaction_hash",
+              "data",
+              "address",
+              "topic0",
+            ],
+            block: ["number", "timestamp"],
+          },
+        }
+      );
+      
 
       // Concatenate logs if there are any
       const responseData = queryResponse.data;
