@@ -58,6 +58,7 @@ interface PendingClaim {
 
 export interface ClaimsHoldingsGroup {
   fieldName: string;
+  tokenAddress: string;
   totalAmount: number;
   holdings: HoldingWithProof[];
 }
@@ -123,7 +124,7 @@ export class ClaimsService {
 
     // Collect all claim processing promises for parallel execution
     const claimPromises: Array<Promise<PendingClaim | null>> = [];
-    const claimMetadata: { fieldName: string; claim: Claim }[] = [];
+    const claimMetadata: { fieldName: string; tokenAddress: string; claim: Claim }[] = [];
 
     // Build list of all claims to process
     for (const field of ENERGY_FIELDS) {
@@ -131,9 +132,9 @@ export class ClaimsService {
         if (!token.claims || token.claims.length === 0) continue;
 
         for (const claim of token.claims as Claim[]) {
-          claimMetadata.push({ fieldName: field.name, claim });
+          claimMetadata.push({ fieldName: field.name, tokenAddress: token.address, claim });
           claimPromises.push(
-            this.processClaimForWallet(claim, ownerAddress, field.name),
+            this.processClaimForWallet(claim, ownerAddress, field.name, token.address),
           );
         }
       }
@@ -146,23 +147,22 @@ export class ClaimsService {
       const result = results[index];
 
       if (result.status === "rejected") {
-        if (result.reason instanceof ClaimsCsvLoadError) {
-          csvLoadFailed = true;
-          continue;
-        }
-        throw result.reason;
+        // Log the error and set the flag - don't throw to allow partial results
+        console.error("Error processing claim:", result.reason);
+        csvLoadFailed = true;
+        continue;
       }
 
       const claimData = result.value;
       if (!claimData) continue;
 
-      const { fieldName } = claimMetadata[index];
+      const { fieldName, tokenAddress } = claimMetadata[index];
 
       // Merge results
       claimHistory = [...claimHistory, ...claimData.claims];
 
-      // Group holdings by field name
-      this.mergeHoldingsGroup(holdings, fieldName, claimData.holdings);
+      // Group holdings by token address (each token has its own claims)
+      this.mergeHoldingsGroup(holdings, fieldName, tokenAddress, claimData.holdings);
 
       // Update totals
       totalClaimed += claimData.totalClaimed;
@@ -189,6 +189,7 @@ export class ClaimsService {
     claim: Claim,
     ownerAddress: string,
     fieldName: string,
+    tokenAddress: string,
   ): Promise<PendingClaim | null> {
     if (!claim.csvLink) return null;
 
@@ -218,6 +219,8 @@ export class ClaimsService {
       trades,
       ownerAddress,
       fieldName,
+      undefined,
+      tokenAddress,
     )) as SortedClaimsData;
 
     // Generate proofs for holdings
@@ -257,14 +260,17 @@ export class ClaimsService {
   }
 
   /**
-   * Merge holdings into grouped structure
+   * Merge holdings into grouped structure by token address
    */
   private mergeHoldingsGroup(
     groups: ClaimsHoldingsGroup[],
     fieldName: string,
+    tokenAddress: string,
     newHoldings: HoldingWithProof[],
   ): void {
-    const existing = groups.find((g) => g.fieldName === fieldName);
+    // Group by token address (each SFT token has its own claims)
+    const normalizedAddress = tokenAddress.toLowerCase();
+    const existing = groups.find((g) => g.tokenAddress.toLowerCase() === normalizedAddress);
 
     if (existing) {
       existing.holdings = [...existing.holdings, ...newHoldings];
@@ -279,6 +285,7 @@ export class ClaimsService {
       );
       groups.push({
         fieldName,
+        tokenAddress,
         totalAmount,
         holdings: newHoldings,
       });
