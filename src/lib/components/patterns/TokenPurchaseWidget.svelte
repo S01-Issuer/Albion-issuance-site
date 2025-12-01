@@ -24,6 +24,7 @@
 	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 	import { getTokenTermsPath } from '$lib/utils/tokenTerms';
 	import { getTxUrl } from '$lib/utils/explorer';
+	import { addTokenToWallet } from '$lib/utils/walletUtils';
 
 	export let isOpen = false;
 	export let tokenAddress: string | null = null;
@@ -31,14 +32,32 @@
 
 	const dispatch = createEventDispatcher();
 
+	// Transaction status constants
+	const TxStatus = {
+		IDLE: 'idle',
+		CHECKING_ALLOWANCE: 'checking_allowance',
+		PENDING_APPROVAL: 'pending_approval',
+		PENDING_DEPOSIT: 'pending_deposit',
+		CONFIRMING: 'confirming',
+		SUCCESS: 'success',
+		ERROR: 'error'
+	} as const;
+
+	type TxStatusType = typeof TxStatus[keyof typeof TxStatus];
+
 	// Purchase form state
 	let investmentAmount = 5000;
 	let agreedToTerms = false;
-	let purchasing = false;
-	let purchaseSuccess = false;
+	let txStatus: TxStatusType = TxStatus.IDLE;
 	let purchaseError: string | null = null;
 	let canProceed = false;
 	let transactionHash: string | null = null;
+	let confirmedTokenAmount: number = 0;
+	let confirmedUsdcAmount: number = 0;
+
+	// Derived states
+	$: purchasing = txStatus !== TxStatus.IDLE && txStatus !== TxStatus.SUCCESS && txStatus !== TxStatus.ERROR;
+	$: purchaseSuccess = txStatus === TxStatus.SUCCESS;
 
 	// USDC balance state
 	let usdcBalance = 0;
@@ -209,26 +228,26 @@
 			return;
 		}
 
-		purchasing = true;
+		txStatus = TxStatus.CHECKING_ALLOWANCE;
 		purchaseError = null;
 
 		try {
 			const authorizerAddress = currentSft.activeAuthorizer?.address;
 			if (!authorizerAddress) {
 				purchaseError = 'Authorizer unavailable';
-				purchasing = false;
+				txStatus = TxStatus.ERROR;
 				return;
 			}
 
 			// Get payment token and decimals
-			const paymentToken = await readContract($wagmiConfig, {
+			const paymentTokenAddr = await readContract($wagmiConfig, {
 				abi: authorizerAbi,
 				address: authorizerAddress as Hex,
 				functionName: 'paymentToken',
 				args: []
 			});
 
-			const paymentTokenDecimals = await readContract($wagmiConfig, {
+			const paymentTokenDec = await readContract($wagmiConfig, {
 				abi: authorizerAbi,
 				address: authorizerAddress as Hex,
 				functionName: 'paymentTokenDecimals',
@@ -238,18 +257,21 @@
 			// Check current allowance
 			const currentAllowance = await readContract($wagmiConfig, {
 				abi: erc20Abi,
-				address: paymentToken as Hex,
+				address: paymentTokenAddr as Hex,
 				functionName: 'allowance',
 				args: [$signerAddress as Hex, authorizerAddress as Hex]
 			});
 
-			const requiredAmount = BigInt(parseUnits(normalizedInvestmentAmount.toString(), paymentTokenDecimals));
+			const requiredAmount = BigInt(parseUnits(normalizedInvestmentAmount.toString(), paymentTokenDec));
+
 			// Only approve if current allowance is insufficient
 			if (currentAllowance < requiredAmount) {
+				txStatus = TxStatus.PENDING_APPROVAL;
+
 				// Simulate approval first
 				const { request: approvalRequest } = await simulateContract($wagmiConfig, {
 					abi: erc20Abi,
-					address: paymentToken as Hex,
+					address: paymentTokenAddr as Hex,
 					functionName: 'approve',
 					args: [authorizerAddress as Hex, requiredAmount]
 				});
@@ -266,6 +288,8 @@
 				await new Promise(resolve => setTimeout(resolve, 1000));
 			}
 
+			txStatus = TxStatus.PENDING_DEPOSIT;
+
 			// Simulate deposit transaction
 			const { request: depositRequest } = await simulateContract($wagmiConfig, {
 				abi: OffchainAssetReceiptVaultAbi,
@@ -278,37 +302,59 @@
 			const depositHash = await writeContract($wagmiConfig, depositRequest);
 			transactionHash = depositHash;
 
-			purchaseSuccess = true;
+			txStatus = TxStatus.CONFIRMING;
+
+			// Wait for transaction to be confirmed on chain
+			await waitForTransactionReceipt($wagmiConfig, {
+				hash: depositHash,
+				confirmations: 2
+			});
+
+			// Store confirmed amounts for display
+			confirmedTokenAmount = normalizedInvestmentAmount;
+			confirmedUsdcAmount = normalizedInvestmentAmount;
+
+			txStatus = TxStatus.SUCCESS;
+
 			dispatch('purchaseSuccess', {
 				tokenAddress,
 				assetId,
 				amount: normalizedInvestmentAmount,
 				tokens: order.tokens
 			});
-			
-			// Reset form after success
-			setTimeout(() => {
-				resetForm();
-				closeWidget();
-			}, 2000);
-			
+
 		} catch (error) {
 			purchaseError = error instanceof Error ? error.message : 'Purchase failed';
-		} finally {
-			purchasing = false;
+			txStatus = TxStatus.ERROR;
 		}
 	}
 
 	function resetForm() {
 		investmentAmount = 5000;
 		agreedToTerms = false;
-		purchasing = false;
-		purchaseSuccess = false;
+		txStatus = TxStatus.IDLE;
 		purchaseError = null;
 		transactionHash = null;
+		confirmedTokenAmount = 0;
+		confirmedUsdcAmount = 0;
 		assetData = null;
 		tokenData = null;
 		supply = null;
+	}
+
+	function getStatusMessage(): string {
+		switch (txStatus) {
+			case TxStatus.CHECKING_ALLOWANCE:
+				return 'Checking allowance...';
+			case TxStatus.PENDING_APPROVAL:
+				return 'Awaiting approval confirmation...';
+			case TxStatus.PENDING_DEPOSIT:
+				return 'Awaiting wallet confirmation...';
+			case TxStatus.CONFIRMING:
+				return 'Confirming transaction...';
+			default:
+				return '';
+		}
 	}
 
 	function closeWidget() {
@@ -327,9 +373,24 @@
 			closeWidget();
 		}
 	}
+
+	async function handleAddToWallet() {
+		if (!tokenData) return;
+
+		const success = await addTokenToWallet({
+			address: tokenData.contractAddress,
+			symbol: tokenData.symbol,
+			decimals: 18
+		});
+
+		if (success) {
+			alert('Token is now tracked in your wallet!');
+		}
+	}
 	
 	// Tailwind class mappings
 	const overlayClasses = 'fixed inset-0 bg-black/50 flex items-center justify-end z-[1000] p-8';
+	const confirmationOverlayClasses = 'fixed inset-0 bg-black/50 flex items-center justify-center z-[1001] p-8';
 	const containerClasses = 'bg-white w-full max-w-md max-h-[90vh] flex flex-col shadow-2xl';
 	const headerClasses = 'flex justify-between items-center p-8 border-b border-light-gray';
 	const titleClasses = 'flex-1';
@@ -396,35 +457,17 @@
 
 			<!-- Content -->
 			<div class={contentClasses}>
-				{#if purchaseSuccess}
-					<!-- Success State -->
-					<div class={successStateClasses}>
-						<div class={successIconClasses}>✓</div>
-						<h3 class={successTitleClasses}>Purchase Successful!</h3>
-						<p class={successTextClasses}>You have successfully purchased <FormattedNumber value={order.tokens} type="token" /> tokens.</p>
-						{#if transactionHash}
-							<div class="mt-6 p-4 bg-light-gray rounded">
-								<p class="text-sm text-gray-600 mb-2">Transaction Hash:</p>
-								<p class="text-xs font-mono text-black break-all mb-3">{transactionHash}</p>
-								<a
-									href={getTxUrl(transactionHash, $chainId)}
-									target="_blank"
-									rel="noopener noreferrer"
-									class="text-primary hover:text-secondary font-medium text-sm"
-								>
-									View Transaction →
-								</a>
-							</div>
-						{/if}
-					</div>
-				{:else if purchaseError}
-					<!-- Error State -->
-					<div class={errorStateClasses}>
-						<h3 class={errorTitleClasses}>Purchase Failed</h3>
-						<p class={errorTextClasses}>{purchaseError}</p>
-						<SecondaryButton on:click={() => purchaseError = null}>
-							Try Again
-						</SecondaryButton>
+				{#if purchasing}
+					<!-- Transaction Pending State -->
+					<div class="text-center p-8">
+						<div class="w-16 h-16 mx-auto mb-6 flex items-center justify-center">
+							<svg class="animate-spin h-12 w-12 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+							</svg>
+						</div>
+						<h3 class="text-xl font-bold text-black mb-4">{getStatusMessage()}</h3>
+						<p class="text-gray-600 text-sm">Please confirm in your wallet and wait for the transaction to be processed.</p>
 					</div>
 				{:else}
 					<!-- Purchase Form -->
@@ -441,8 +484,8 @@
 									<div class={detailItemClasses}>
 										<span class={detailLabelClasses}>Maximum Supply</span>
 										<span class={detailValueClasses}>
-											<FormattedNumber 
-												value={formatEther(supply?.maxSupply ?? 0n)} 
+											<FormattedNumber
+												value={formatEther(supply?.maxSupply ?? 0n)}
 												type="token"
 											/>
 										</span>
@@ -457,6 +500,18 @@
 										</span>
 									</div>
 								</div>
+								<!-- Track in Wallet link -->
+								<button
+									class="mt-4 inline-flex items-center gap-1.5 text-sm text-secondary hover:text-primary transition-colors duration-200"
+									on:click={handleAddToWallet}
+								>
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+										<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/>
+										<path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/>
+										<path d="M18 12a2 2 0 0 0 0 4h4v-4h-4z"/>
+									</svg>
+									Track in Wallet
+								</button>
 							</div>
 						{/if}
 
@@ -579,18 +634,17 @@
 						</div>
 
 						<!-- Action Buttons -->
-						<div class={formActionsClasses}>
+						<div class="flex gap-3 mt-4">
 							<SecondaryButton on:click={closeWidget}>
 								Cancel
 							</SecondaryButton>
-			<PrimaryButton 
-				on:click={handlePurchase}
-				disabled={!canProceed}
-						>
+							<PrimaryButton
+								on:click={handlePurchase}
+								disabled={!canProceed}
+								fullWidth
+							>
 								{#if isSoldOut()}
 									Sold Out
-								{:else if purchasing}
-									Processing...
 								{:else}
 									Buy Now
 								{/if}
@@ -599,6 +653,74 @@
 					</div>
 				{/if}
 			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Separate Confirmation Modal (centered) -->
+{#if purchaseSuccess || purchaseError}
+	<div class={confirmationOverlayClasses} role="dialog" aria-modal="true" transition:fade={{ duration: 200 }}>
+		<div class="bg-white w-full max-w-sm p-8 shadow-2xl" transition:fly={{ y: 20, duration: 200 }}>
+			{#if purchaseSuccess}
+				<!-- Success State -->
+				<div class="text-center">
+					<div class={successIconClasses}>✓</div>
+					<h3 class={successTitleClasses}>Purchase Confirmed!</h3>
+
+					<!-- Purchase Summary -->
+					<div class="mt-6 p-4 bg-light-gray text-left">
+						<p class="text-xs uppercase tracking-wider text-gray-500 mb-3">Purchase Summary</p>
+						<div class="flex justify-between mb-2">
+							<span class="text-gray-600">Tokens Purchased</span>
+							<span class="font-bold text-black"><FormattedNumber value={confirmedTokenAmount} type="token" /> {tokenData?.symbol || 'tokens'}</span>
+						</div>
+						<div class="flex justify-between">
+							<span class="text-gray-600">Amount Paid</span>
+							<span class="font-bold text-black">{confirmedUsdcAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC</span>
+						</div>
+					</div>
+
+					{#if transactionHash}
+						<div class="mt-4 p-4 bg-light-gray text-left">
+							<p class="text-sm text-gray-600 mb-2">Transaction Hash:</p>
+							<p class="text-xs font-mono text-black break-all mb-3">{transactionHash}</p>
+							<a
+								href={getTxUrl(transactionHash, $chainId)}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="text-primary hover:text-secondary font-medium text-sm"
+							>
+								View Transaction →
+							</a>
+						</div>
+					{/if}
+					<button
+						class="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-secondary bg-white border border-light-gray hover:bg-light-gray hover:border-secondary transition-colors duration-200"
+						on:click={handleAddToWallet}
+						title="Track token in wallet"
+					>
+						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/>
+							<path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/>
+							<path d="M18 12a2 2 0 0 0 0 4h4v-4h-4z"/>
+						</svg>
+						Track in Wallet
+					</button>
+					<SecondaryButton on:click={closeWidget} fullWidth className="mt-4">
+						Close
+					</SecondaryButton>
+				</div>
+			{:else if purchaseError}
+				<!-- Error State -->
+				<div class="text-center">
+					<div class="w-16 h-16 bg-red-500 text-white rounded-full flex items-center justify-center text-2xl mx-auto mb-4">✕</div>
+					<h3 class={errorTitleClasses}>Purchase Failed</h3>
+					<p class={errorTextClasses}>{purchaseError}</p>
+					<SecondaryButton on:click={() => { purchaseError = null; txStatus = TxStatus.IDLE; }}>
+						Try Again
+					</SecondaryButton>
+				</div>
+			{/if}
 		</div>
 	</div>
 {/if}

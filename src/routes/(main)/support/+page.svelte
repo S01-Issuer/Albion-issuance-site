@@ -67,16 +67,24 @@
 
 			<!-- Q4: Tokens in Wallet -->
 			<div class="bg-light-gray p-8 text-left border-b-4 border-primary rounded-none">
-				<SectionTitle level="h3" size="small" uppercase className="mb-4">Why can't I see my tokens in my wallet?</SectionTitle>
+				<SectionTitle level="h3" size="small" uppercase className="mb-4">Help! I can't find my token in my wallet</SectionTitle>
 				<div class="text-sm text-black space-y-3">
 					<p>If your purchased tokens aren't showing up in your wallet, here are the most common reasons and solutions:</p>
 					<ol class="list-decimal list-inside space-y-2 ml-2">
 						<li><strong>Wrong network:</strong> Make sure your wallet is set to the Base network, not Ethereum mainnet. Switch networks in your wallet settings if needed.</li>
-						<li><strong>Token not added:</strong> Most wallets don't automatically display custom tokens. You need to manually add the token using its contract address:
+						<li><strong>Use "Track in Wallet" button:</strong> The easiest way to add your token is to use the "Track in Wallet" button:
+							<ul class="list-disc list-inside ml-4 mt-2 space-y-1">
+								<li>After purchasing, click the "Track in Wallet" button on the success screen</li>
+								<li>Or go to the <a href="/assets" class="text-primary font-semibold hover:text-secondary transition-colors">Assets page</a>, find your token, and click "Track in Wallet"</li>
+								<li>Your wallet will prompt you to confirm adding the token</li>
+								<li>Once confirmed, the token will appear in your wallet balance</li>
+							</ul>
+						</li>
+						<li><strong>Manual addition:</strong> If the button doesn't work, you can manually add the token:
 							<ul class="list-disc list-inside ml-4 mt-2 space-y-1">
 								<li>Go to the Assets page and click on the token you purchased</li>
 								<li>Copy the contract address from the asset details</li>
-								<li>In your wallet, select "Add Token" and paste the contract address</li>
+								<li>In your wallet, select "Add Token" or "Import Token" and paste the contract address</li>
 								<li>The token should now appear in your wallet balance</li>
 							</ul>
 						</li>

@@ -24,6 +24,7 @@ import { PINATA_GATEWAY } from '$lib/network';
 import { catalogService } from '$lib/services';
 import { getTokenTermsPath } from '$lib/utils/tokenTerms';
 import { getTxUrl, getAddressUrl } from '$lib/utils/explorer';
+import { addTokenToWallet } from '$lib/utils/walletUtils';
 import { Chart as ChartJS, registerables } from 'chart.js';
 import { onDestroy } from 'svelte';
 import { useQueryClient } from '@tanstack/svelte-query';
@@ -758,10 +759,28 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 	event?.stopPropagation();
 	openHistoryModal(tokenAddress);
 }
+
+async function handleAddToWallet(token: TokenMetadata, event?: Event) {
+	event?.stopPropagation();
+
+	if (!$connected) {
+		await $web3Modal.open();
+		return;
+	}
+
+	const success = await addTokenToWallet({
+		address: token.contractAddress,
+		symbol: token.symbol,
+		decimals: 18
+	});
+
+	if (success) {
+		alert('Token is now tracked in your wallet!');
+	}
+}
 	
-	async function handlePurchaseSuccess() {
-		showPurchaseWidget = false;
-		selectedTokenAddress = null;
+async function handlePurchaseSuccess() {
+		// Don't close the widget - let user see the confirmation and close manually
 		// Refresh SFT data to update token availability
 		await queryClient.invalidateQueries({ queryKey: ['getSfts'] });
 	}
@@ -1269,9 +1288,19 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 									<div class="flex-1 mt-6 overflow-visible">
 										<div class="flex justify-between items-start mb-3 gap-4">
 											<h4 class="text-2xl font-extrabold text-black font-figtree flex-1">{token.releaseName}</h4>
-											<div class="text-sm font-extrabold text-white bg-secondary px-3 py-1 tracking-wider rounded-none whitespace-nowrap">
-												{token.sharePercentage || 25}% of Asset
-											</div>
+											<!-- Track in Wallet button -->
+											<button
+												class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-secondary border border-light-gray hover:text-primary hover:bg-light-gray hover:border-secondary transition-colors duration-200 whitespace-nowrap"
+												on:click={(event) => handleAddToWallet(token, event)}
+												title="Track in Wallet"
+											>
+												<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+													<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/>
+													<path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/>
+													<path d="M18 12a2 2 0 0 0 0 4h4v-4h-4z"/>
+												</svg>
+												Track in Wallet
+											</button>
 										</div>
 										<a
 											href={getAddressUrl(token.contractAddress, $chainId)}
