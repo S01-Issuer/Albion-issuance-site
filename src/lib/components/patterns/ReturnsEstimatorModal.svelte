@@ -32,14 +32,17 @@
 	$: if (isOpen && token) {
 		oilPrice = 65;
 		discountRate = 10;
-		numberOfTokens = availableSupply < 1 ? parseFloat(availableSupply.toFixed(3)) : 1;
+		// Default to 1 token, unless available supply is between 0 and 1 (fractional)
+		// When sold out (availableSupply <= 0), use 1 for illustrative purposes
+		numberOfTokens = availableSupply > 0 && availableSupply < 1 ? parseFloat(availableSupply.toFixed(3)) : 1;
 		// Explicitly trigger calculation after reset
 		updateCalculations();
 	}
 
 	// Validation error for numberOfTokens
 	// Use a small epsilon to handle floating point precision issues
-	$: tokensError = (numberOfTokens - availableSupply) > 0.0001 ? `Only ${availableSupply.toFixed(3)} tokens available` : '';
+	// Don't show error when sold out (availableSupply <= 0) since calculator is for illustration only
+	$: tokensError = availableSupply > 0 && (numberOfTokens - availableSupply) > 0.0001 ? `Only ${availableSupply.toFixed(3)} tokens available` : '';
 
 	// Token Mode Calculated values - Remaining (from current month)
 	let monthlyTokenCashflows: Array<{ month: string; cashflow: number }> = [];
@@ -436,6 +439,15 @@
 							</div>
 						</div>
 					</div>
+
+					<!-- Sold Out Notice -->
+					{#if availableSupply <= 0}
+						<div class="flex justify-center">
+							<div class="bg-gray-100 border border-gray-300 rounded-none px-4 py-2 inline-flex items-center gap-2 text-sm">
+								<span class="text-gray-600 font-medium">Sold out. Numbers shown for illustrative purposes.</span>
+							</div>
+						</div>
+					{/if}
 
 					<!-- Charts Section -->
 					<div class={sectionClasses}>
