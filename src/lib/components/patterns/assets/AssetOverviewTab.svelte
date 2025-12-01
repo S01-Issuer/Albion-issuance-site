@@ -137,7 +137,7 @@ export let primaryToken: TokenMetadata | null | undefined = undefined;
 							</div>
 						{/if}
 					</span>
-					<span class="text-black">{formatEndDate(primaryToken?.asset?.cashflowStartDate || primaryToken?.firstPaymentDate || '')}</span>
+					<span class="text-black">{formatEndDate(asset?.cashflowStartDate || primaryToken?.firstPaymentDate || '')}</span>
 				</div>
 				<div class="flex justify-between pb-3 border-b border-light-gray text-base last:border-b-0 last:pb-0">
 					<span class="font-semibold text-black">Water Depth</span>
