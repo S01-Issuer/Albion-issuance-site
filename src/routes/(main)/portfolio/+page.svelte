@@ -109,7 +109,8 @@ interface PortfolioHolding {
 	capitalReturned: number;
 	unrecoveredCapital: number;
 	assetDepletion: number | null;
-	asset?: PinnedMetadata['asset'];
+	asset?: PinnedMetadata['asset']; // Token's embedded asset data (for returns estimation)
+	sharedAsset?: import('$lib/types/uiTypes').Asset; // Shared Asset object (for display)
 	sftAddress: string;
 	claimHistory: ClaimsHistoryItem[];
 	pinnedMetadata: PinnedMetadata;
@@ -133,6 +134,7 @@ let activeTab: PortfolioTab = 'overview';
 let allDepositsData: EnrichedDeposit[] = [];
 let claimsHoldings: ClaimGroupSummary[] = [];
 let hasPortfolioHistory = false;
+let catalogRef: ReturnType<typeof useCatalogService> | null = null;
 let latestClaimsSnapshot: ClaimsResult | null = null;
 let claimsDataUnavailable = false;
 	
@@ -310,6 +312,7 @@ function percentageDisplay(value: number): string {
 		];
 
 		const rows: Array<Record<string, string>> = activeHoldings.map((holding) => {
+			// sharePercentage is token-specific, so use token's embedded asset data
 			const sharePercentage = typeof holding.pinnedMetadata.sharePercentage === 'number'
 				? holding.pinnedMetadata.sharePercentage
 				: typeof holding.asset?.sharePercentage === 'number'
@@ -322,14 +325,15 @@ function percentageDisplay(value: number): string {
 				? ((Number(holding.totalInvested) || 0) / totalInvestedAcrossHoldings) * 100
 				: 0;
 
-			const location = holding.asset?.location
-				? [holding.asset.location.state, holding.asset.location.country]
+			// Use sharedAsset for display purposes
+			const location = holding.sharedAsset?.location
+				? [holding.sharedAsset.location.state, holding.sharedAsset.location.country]
 						.filter(Boolean)
 						.join(', ')
 				: holding.location || '';
 
 			return {
-				asset: holding.asset?.assetName || holding.name || 'Unknown Asset',
+				asset: holding.sharedAsset?.name || holding.name || 'Unknown Asset',
 				token_symbol: holding.tokenSymbol || '',
 				share_percentage: toPercent(sharePercentage, true),
 				tokens_owned: toTokens(holding.tokensOwned),
@@ -431,6 +435,7 @@ function percentageDisplay(value: number): string {
 			// Build catalog to populate stores
 			const catalog = useCatalogService();
 			await catalog.build();
+			catalogRef = catalog;
 
 			// Load all claims data using ClaimsService
 			const claimsResult = await loadAllClaimsData();
@@ -703,25 +708,31 @@ function percentageDisplay(value: number): string {
 							.filter((claim) => !claim.status || claim.status === 'completed')
 							.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
 
+						// Look up the shared Asset for display purposes
+						const sharedAsset = catalogRef?.getAssetByTokenAddress(sft.id) ?? undefined;
+
 						holdings.push({
 							id: sft.id.toLowerCase(),
 							name: assetFieldName || `SFT ${sft.id.slice(0, 8)}...`,
-							location: asset.location
-								? `${asset.location.state || 'Unknown'}, ${asset.location.country || 'Unknown'}`
-								: 'Unknown',
+							location: sharedAsset?.location
+								? `${sharedAsset.location.state || 'Unknown'}, ${sharedAsset.location.country || 'Unknown'}`
+								: asset.location
+									? `${asset.location.state || 'Unknown'}, ${asset.location.country || 'Unknown'}`
+									: 'Unknown',
 							totalInvested: totalInvestedInSft,
 							totalPayoutsEarned: totalEarnedForSft,
 							unclaimedAmount: unclaimedAmountForSft,
 							claimedAmount: claimedAmountForSft,
 							lastPayoutAmount: lastClaim ? Number(lastClaim.amount) : 0,
 							lastPayoutDate: lastClaim ? lastClaim.date : null,
-							status: asset.production?.status || 'producing',
+							status: sharedAsset?.status || asset.production?.status || 'producing',
 							tokensOwned: tokensOwned,
 							tokenSymbol: pinnedMetadata.symbol || sft.id.slice(0, 6).toUpperCase(),
 							capitalReturned,
 							unrecoveredCapital,
 							assetDepletion: assetDepletionPercentage,
 							asset,
+							sharedAsset,
 							sftAddress: sft.id,
 							claimHistory: sftClaims,
 							pinnedMetadata: pinnedMetadata
@@ -771,7 +782,7 @@ function percentageDisplay(value: number): string {
 
 				return {
 					assetId: holding.id,
-					assetName: holding.asset?.assetName || holding.name,
+					assetName: holding.sharedAsset?.name || holding.name,
 					tokenSymbol: holding.tokenSymbol,
 					tokensOwned: holding.tokensOwned,
 					currentValue: holding.totalInvested,
@@ -916,10 +927,10 @@ function percentageDisplay(value: number): string {
 						</Card>
 					{:else}
 						{#each holdings as holding (holding.id)}
-							{@const imageUrl = holding.asset?.coverImage
-								? getImageUrl(holding.asset.coverImage)
-								: holding.asset?.galleryImages?.[0]?.url
-								? getImageUrl(holding.asset.galleryImages[0].url)
+							{@const imageUrl = holding.sharedAsset?.coverImage
+								? getImageUrl(holding.sharedAsset.coverImage)
+								: holding.sharedAsset?.galleryImages?.[0]?.url
+								? getImageUrl(holding.sharedAsset.galleryImages[0].url)
 								: null}
 								<div class="mb-3">
 									<Card hoverable={false} showBorder>
@@ -942,9 +953,9 @@ function percentageDisplay(value: number): string {
 																{holding.tokenSymbol}
 															</h4>
 															<div class="text-sm text-black opacity-70 mb-1">{holding.name}</div>
-															{#if holding.asset?.location}
+															{#if holding.sharedAsset?.location}
 																<div class="text-xs text-black opacity-70 mb-2">
-																	{holding.asset.location.state}, {holding.asset.location.country}
+																	{holding.sharedAsset.location.state}, {holding.sharedAsset.location.country}
 																</div>
 															{/if}
 															<StatusBadge 
@@ -1066,9 +1077,9 @@ function percentageDisplay(value: number): string {
 										<div>
 											<h4 class="text-lg font-extrabold text-black">{historyModalHolding.tokenSymbol}</h4>
 											<div class="text-sm text-black opacity-70">{historyModalHolding.name}</div>
-											{#if historyModalHolding.asset?.location}
+											{#if historyModalHolding.sharedAsset?.location}
 												<div class="text-xs text-black opacity-60 mt-1">
-													{historyModalHolding.asset.location.state}, {historyModalHolding.asset.location.country}
+													{historyModalHolding.sharedAsset.location.state}, {historyModalHolding.sharedAsset.location.country}
 												</div>
 											{/if}
 										</div>

@@ -560,6 +560,15 @@ export class AssetTransformer extends BaseSftTransformer {
       operationalMetrics: this.transformOperationalMetrics(
         assetData.operationalMetrics,
       ),
+      documents: normalizeDocuments(
+        (assetData as { documents?: unknown }).documents,
+      ),
+      // HACK: alias royaltyStartDate to cashflowStartDate for metadata compatibility
+      cashflowStartDate: assetData.cashflowStartDate
+        ? ensureYearMonth(assetData.cashflowStartDate)
+        : (assetData as { royaltyStartDate?: string }).royaltyStartDate
+          ? ensureYearMonth((assetData as { royaltyStartDate?: string }).royaltyStartDate)
+          : undefined,
       metadata: metadataTimestamps,
     };
 

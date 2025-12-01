@@ -148,6 +148,36 @@ function parseYearMonth(value: string | null | undefined): Date | null {
 	);
 }
 
+// Normalize date string to YYYY-MM format
+// Handles both "YYYY-MM" and "Month YYYY" formats
+function normalizeToYearMonth(value: string | null | undefined): string {
+	if (!value) return '';
+
+	// Already in YYYY-MM format
+	if (/^\d{4}-\d{2}$/.test(value)) {
+		return value;
+	}
+
+	// Try "Month YYYY" format (e.g., "January 2025")
+	const monthNames = ['january', 'february', 'march', 'april', 'may', 'june',
+		'july', 'august', 'september', 'october', 'november', 'december'];
+	const monthMatch = value.toLowerCase().match(/^([a-z]+)\s+(\d{4})$/);
+	if (monthMatch) {
+		const monthIndex = monthNames.indexOf(monthMatch[1]);
+		if (monthIndex >= 0) {
+			return `${monthMatch[2]}-${String(monthIndex + 1).padStart(2, '0')}`;
+		}
+	}
+
+	// Try parsing as date
+	const parsed = parseYearMonth(value);
+	if (parsed) {
+		return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}`;
+	}
+
+	return '';
+}
+
 function chartLabelFromMonth(value: string): string {
 	if (!value) {
 		return '';
@@ -259,7 +289,15 @@ let loadedAssetId: string | null = null;
 	// Tokens to display: available tokens, plus sold out if toggle is on
 	$: visibleTokens = showSoldOutTokens ? [...availableTokens, ...soldOutTokens] : availableTokens;
 	$: receiptsData = primaryToken?.asset?.receiptsData ?? [];
-$: revenueReports = buildRevenueReports(receiptsData, assetData?.monthlyReports ?? []);
+// Use asset-level monthlyReports as primary source (selected from token with most recent receiptsData)
+// Fall back to primaryToken's receiptsData for backwards compatibility
+$: revenueReportsRaw = buildRevenueReports(assetData?.monthlyReports ?? [], receiptsData);
+// Filter out months before cashflowStartDate
+// Normalize the date to YYYY-MM format for proper comparison
+$: revenueStartDate = normalizeToYearMonth(assetData?.cashflowStartDate);
+$: revenueReports = revenueStartDate
+	? revenueReportsRaw.filter((report) => report.month >= revenueStartDate)
+	: revenueReportsRaw;
 $: revenueReportsWithIncome = revenueReports.filter((report) => report.revenue > 0);
 $: revenueHasData = revenueReportsWithIncome.length > 0;
 $: revenueAverage = revenueReportsWithIncome.length
@@ -289,7 +327,7 @@ $: nextReportDueLabel = (() => {
 	}
 
 	// Fall back to cashflowStartDate if available, otherwise firstPaymentDate
-	const fallbackDate = primaryToken?.asset?.cashflowStartDate || primaryToken?.firstPaymentDate;
+	const fallbackDate = assetData?.cashflowStartDate || primaryToken?.firstPaymentDate;
 	if (fallbackDate) {
 		const label = labelFromMonth(fallbackDate, 1);
 		if (label) return label;
@@ -429,8 +467,8 @@ function createRevenueChart() {
 	// Get months from actual revenue reports
 	const months = revenueReports.map(r => r.month);
 
-	// Get projections data
-	const projections = primaryToken.asset?.plannedProduction?.projections || [];
+	// Get projections data from shared Asset
+	const projections = assetData?.plannedProduction?.projections || [];
 
 	// Calculate projected revenue for months where we have actuals
 	const projectedRevenue = months.map(month => {
@@ -438,8 +476,8 @@ function createRevenueChart() {
 		if (!projection) return 0;
 
 		// Get oil price from asset technical data or use default
-		const benchmarkPremiumStr = primaryToken.asset?.technical?.pricing?.benchmarkPremium;
-		const transportCostsStr = primaryToken.asset?.technical?.pricing?.transportCosts;
+		const benchmarkPremiumStr = assetData?.technical?.pricing?.benchmarkPremium;
+		const transportCostsStr = assetData?.technical?.pricing?.transportCosts;
 		const benchmarkPremium = benchmarkPremiumStr ? (parseFloat(String(benchmarkPremiumStr).replace(/[^-\d.]/g, '')) || 0) : 0;
 		const transportCosts = transportCostsStr ? (parseFloat(String(transportCostsStr).replace(/[^-\d.]/g, '')) || 0) : 0;
 		const defaultOilPrice = 65; // Default assumption
@@ -984,9 +1022,9 @@ async function handlePurchaseSuccess() {
         		
         		<CollapsibleSection title="Documents" isOpenByDefault={false} alwaysOpenOnDesktop={false}>
         			<div class="space-y-3">
-						{#if assetTokens[0]?.asset?.documents && assetTokens[0].asset.documents.length > 0}
+						{#if assetData?.documents && assetData.documents.length > 0}
 							<!-- Legal Documents -->
-							{#each assetTokens[0].asset.documents as document (document.ipfs ?? document.name ?? document.type)}
+							{#each assetData.documents as document (document.ipfs ?? document.name ?? document.type)}
 								<div class="flex items-center justify-between p-4 border-b border-light-gray last:border-b-0">
 									<div class="flex items-center space-x-3">
 										<div class="w-8 h-8 bg-secondary rounded-none flex items-center justify-center">
@@ -1231,8 +1269,8 @@ async function handlePurchaseSuccess() {
 						</div>
 					</div>
 				{:else if activeTab === 'documents'}
-					{#if assetTokens[0]?.asset?.documents && assetTokens[0].asset.documents.length > 0}
-						{#each assetTokens[0].asset.documents as document (document.ipfs ?? document.name ?? document.type)}
+					{#if assetData?.documents && assetData.documents.length > 0}
+						{#each assetData.documents as document (document.ipfs ?? document.name ?? document.type)}
 							<div class="grid md:grid-cols-2 grid-cols-1 gap-8">
 								<div class="space-y-4">
 									<div class="flex items-center justify-between p-4 bg-white border border-light-gray hover:bg-white transition-colors duration-200">
