@@ -106,6 +106,33 @@
 			!isSoldOut();
 	}
 
+	// Retry helper for RPC calls with exponential backoff
+	async function retryRpcCall<T>(
+		fn: () => Promise<T>,
+		maxRetries: number = 3,
+		baseDelay: number = 1000
+	): Promise<T> {
+		let lastError: Error | unknown;
+		for (let attempt = 0; attempt < maxRetries; attempt++) {
+			try {
+				return await fn();
+			} catch (error) {
+				lastError = error;
+				const errorMessage = error instanceof Error ? error.message : String(error);
+				// Check if it's a rate limit error (429)
+				if (errorMessage.includes('429') || errorMessage.includes('rate limit')) {
+					const delay = baseDelay * Math.pow(2, attempt); // Exponential backoff
+					console.warn(`RPC rate limited, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+					await new Promise(resolve => setTimeout(resolve, delay));
+				} else {
+					// For non-rate-limit errors, throw immediately
+					throw error;
+				}
+			}
+		}
+		throw lastError;
+	}
+
 	async function loadTokenData() {
 		try {
 			if (tokenAddress && $sftMetadata && $sfts) {
@@ -134,12 +161,28 @@
 					return;
 				}
 
-				const sftMaxSharesSupply = (await readContract($wagmiConfig, {
-					abi: authorizerAbi,
-					address: sft.activeAuthorizer?.address as Hex,
-					functionName: 'maxSharesSupply',
-					args: [],
-				})) as bigint;
+				// Fetch all authorizer data in parallel with retry
+				const authorizerAddr = sft.activeAuthorizer?.address as Hex;
+				const [sftMaxSharesSupply, paymentTokenAddress, paymentTokenDecimalsValue] = await Promise.all([
+					retryRpcCall(() => readContract($wagmiConfig, {
+						abi: authorizerAbi,
+						address: authorizerAddr,
+						functionName: 'maxSharesSupply',
+						args: [],
+					})) as Promise<bigint>,
+					retryRpcCall(() => readContract($wagmiConfig, {
+						abi: authorizerAbi,
+						address: authorizerAddr,
+						functionName: 'paymentToken',
+						args: []
+					})) as Promise<Hex>,
+					retryRpcCall(() => readContract($wagmiConfig, {
+						abi: authorizerAbi,
+						address: authorizerAddr,
+						functionName: 'paymentTokenDecimals',
+						args: []
+					})) as Promise<number>
+				]);
 
 				tokenData = generateTokenInstanceFromSft(
 					sft,
@@ -154,21 +197,6 @@
 					availableSupply:
 						sftMaxSharesSupply - BigInt(sft.totalShares ?? '0'),
 				};
-
-				// Get payment token and decimals
-				const paymentTokenAddress = (await readContract($wagmiConfig, {
-					abi: authorizerAbi,
-					address: sft.activeAuthorizer?.address as Hex,
-					functionName: 'paymentToken',
-					args: []
-				})) as Hex;
-
-				const paymentTokenDecimalsValue = (await readContract($wagmiConfig, {
-					abi: authorizerAbi,
-					address: sft.activeAuthorizer?.address as Hex,
-					functionName: 'paymentTokenDecimals',
-					args: []
-				})) as number;
 
 				paymentToken = paymentTokenAddress;
 				paymentTokenDecimals = paymentTokenDecimalsValue;
@@ -195,7 +223,7 @@
 
 			loadingBalance = true;
 
-			const balance = (await readContract($wagmiConfig, {
+			const balance = await retryRpcCall(() => readContract($wagmiConfig, {
 				abi: erc20Abi,
 				address: paymentToken,
 				functionName: 'balanceOf',
@@ -239,42 +267,34 @@
 				return;
 			}
 
-			// Get payment token and decimals
-			const paymentTokenAddr = await readContract($wagmiConfig, {
-				abi: authorizerAbi,
-				address: authorizerAddress as Hex,
-				functionName: 'paymentToken',
-				args: []
-			});
+			// Use already-fetched payment token info (don't re-fetch)
+			if (!paymentToken || !paymentTokenDecimals) {
+				purchaseError = 'Payment token info not loaded';
+				txStatus = TxStatus.ERROR;
+				return;
+			}
 
-			const paymentTokenDec = await readContract($wagmiConfig, {
-				abi: authorizerAbi,
-				address: authorizerAddress as Hex,
-				functionName: 'paymentTokenDecimals',
-				args: []
-			}) as number;
-
-			// Check current allowance
-			const currentAllowance = await readContract($wagmiConfig, {
+			// Check current allowance with retry
+			const currentAllowance = await retryRpcCall(() => readContract($wagmiConfig, {
 				abi: erc20Abi,
-				address: paymentTokenAddr as Hex,
+				address: paymentToken,
 				functionName: 'allowance',
 				args: [$signerAddress as Hex, authorizerAddress as Hex]
-			});
+			}));
 
-			const requiredAmount = BigInt(parseUnits(normalizedInvestmentAmount.toString(), paymentTokenDec));
+			const requiredAmount = BigInt(parseUnits(normalizedInvestmentAmount.toString(), paymentTokenDecimals));
 
 			// Only approve if current allowance is insufficient
 			if (currentAllowance < requiredAmount) {
 				txStatus = TxStatus.PENDING_APPROVAL;
 
-				// Simulate approval first
-				const { request: approvalRequest } = await simulateContract($wagmiConfig, {
+				// Simulate approval first with retry
+				const { request: approvalRequest } = await retryRpcCall(() => simulateContract($wagmiConfig, {
 					abi: erc20Abi,
-					address: paymentTokenAddr as Hex,
+					address: paymentToken,
 					functionName: 'approve',
 					args: [authorizerAddress as Hex, requiredAmount]
-				});
+				}));
 
 				const approvalHash = await writeContract($wagmiConfig, approvalRequest);
 
@@ -290,13 +310,13 @@
 
 			txStatus = TxStatus.PENDING_DEPOSIT;
 
-			// Simulate deposit transaction
-			const { request: depositRequest } = await simulateContract($wagmiConfig, {
+			// Simulate deposit transaction with retry
+			const { request: depositRequest } = await retryRpcCall(() => simulateContract($wagmiConfig, {
 				abi: OffchainAssetReceiptVaultAbi,
 				address: tokenAddress as Hex,
 				functionName: 'deposit',
 				args: [BigInt(parseUnits(normalizedInvestmentAmount.toString(), 18)), $signerAddress as Hex, BigInt(0n), "0x"]
-			});
+			}));
 
 			// Execute deposit transaction
 			const depositHash = await writeContract($wagmiConfig, depositRequest);
@@ -457,20 +477,7 @@
 
 			<!-- Content -->
 			<div class={contentClasses}>
-				{#if purchasing}
-					<!-- Transaction Pending State -->
-					<div class="text-center p-8">
-						<div class="w-16 h-16 mx-auto mb-6 flex items-center justify-center">
-							<svg class="animate-spin h-12 w-12 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-							</svg>
-						</div>
-						<h3 class="text-xl font-bold text-black mb-4">{getStatusMessage()}</h3>
-						<p class="text-gray-600 text-sm">Please confirm in your wallet and wait for the transaction to be processed.</p>
-					</div>
-				{:else}
-					<!-- Purchase Form -->
+				<!-- Purchase Form -->
 					<div class={formClasses}>
 						<!-- Token Details -->
 						{#if tokenData}
@@ -651,17 +658,28 @@
 							</PrimaryButton>
 						</div>
 					</div>
-				{/if}
 			</div>
 		</div>
 	</div>
 {/if}
 
-<!-- Separate Confirmation Modal (centered) -->
-{#if purchaseSuccess || purchaseError}
+<!-- Separate Transaction Status Modal (centered) -->
+{#if purchasing || purchaseSuccess || purchaseError}
 	<div class={confirmationOverlayClasses} role="dialog" aria-modal="true" transition:fade={{ duration: 200 }}>
 		<div class="bg-white w-full max-w-sm p-8 shadow-2xl" transition:fly={{ y: 20, duration: 200 }}>
-			{#if purchaseSuccess}
+			{#if purchasing}
+				<!-- Transaction Pending State -->
+				<div class="text-center">
+					<div class="w-16 h-16 mx-auto mb-6 flex items-center justify-center">
+						<svg class="animate-spin h-12 w-12 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+							<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+							<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+						</svg>
+					</div>
+					<h3 class="text-xl font-bold text-black mb-4">{getStatusMessage()}</h3>
+					<p class="text-gray-600 text-sm">Please confirm in your wallet and wait for the transaction to be processed.</p>
+				</div>
+			{:else if purchaseSuccess}
 				<!-- Success State -->
 				<div class="text-center">
 					<div class={successIconClasses}>✓</div>
