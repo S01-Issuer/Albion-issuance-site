@@ -124,7 +124,11 @@ export class ClaimsService {
 
     // Collect all claim processing promises for parallel execution
     const claimPromises: Array<Promise<PendingClaim | null>> = [];
-    const claimMetadata: { fieldName: string; tokenAddress: string; claim: Claim }[] = [];
+    const claimMetadata: {
+      fieldName: string;
+      tokenAddress: string;
+      claim: Claim;
+    }[] = [];
 
     // Build list of all claims to process
     for (const field of ENERGY_FIELDS) {
@@ -132,9 +136,18 @@ export class ClaimsService {
         if (!token.claims || token.claims.length === 0) continue;
 
         for (const claim of token.claims as Claim[]) {
-          claimMetadata.push({ fieldName: field.name, tokenAddress: token.address, claim });
+          claimMetadata.push({
+            fieldName: field.name,
+            tokenAddress: token.address,
+            claim,
+          });
           claimPromises.push(
-            this.processClaimForWallet(claim, ownerAddress, field.name, token.address),
+            this.processClaimForWallet(
+              claim,
+              ownerAddress,
+              field.name,
+              token.address,
+            ),
           );
         }
       }
@@ -162,7 +175,12 @@ export class ClaimsService {
       claimHistory = [...claimHistory, ...claimData.claims];
 
       // Group holdings by token address (each token has its own claims)
-      this.mergeHoldingsGroup(holdings, fieldName, tokenAddress, claimData.holdings);
+      this.mergeHoldingsGroup(
+        holdings,
+        fieldName,
+        tokenAddress,
+        claimData.holdings,
+      );
 
       // Update totals
       totalClaimed += claimData.totalClaimed;
@@ -271,7 +289,9 @@ export class ClaimsService {
   ): void {
     // Group by token address (each SFT token has its own claims)
     const normalizedAddress = tokenAddress.toLowerCase();
-    const existing = groups.find((g) => g.tokenAddress.toLowerCase() === normalizedAddress);
+    const existing = groups.find(
+      (g) => g.tokenAddress.toLowerCase() === normalizedAddress,
+    );
 
     if (existing) {
       existing.holdings = [...existing.holdings, ...newHoldings];

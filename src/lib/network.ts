@@ -70,13 +70,14 @@ const DEV_ENERGY_FIELDS: EnergyField[] = [
         address: "0xd5316ca888491575befc0273a00de2186c53f760",
         claims: [
           {
-            orderHash: "0xdf52f1dbb1f0d0a0d1e839e1a7beddbebccd724633e9a4b8b643290f33dcb770",
+            orderHash:
+              "0xdf52f1dbb1f0d0a0d1e839e1a7beddbebccd724633e9a4b8b643290f33dcb770",
             csvLink: `${PINATA_GATEWAY}/bafkreic2d2jzsqnqhrarzd4pqgkfmge6vu32lzhkcpm45fzt6cxnfivmju`,
             expectedMerkleRoot:
               "0xe62355892574ae4c105123252df38ff60e427d93c06f7eb373821bb15ca4847a",
             expectedContentHash:
               "bafkreic2d2jzsqnqhrarzd4pqgkfmge6vu32lzhkcpm45fzt6cxnfivmju",
-          }
+          },
         ],
       },
     ],
@@ -95,7 +96,7 @@ const DEV_ENERGY_FIELDS: EnergyField[] = [
               "0xe62355892574ae4c105123252df38ff60e427d93c06f7eb373821bb15ca4847a",
             expectedContentHash:
               "bafkreic2d2jzsqnqhrarzd4pqgkfmge6vu32lzhkcpm45fzt6cxnfivmju",
-          }
+          },
         ],
       },
     ],

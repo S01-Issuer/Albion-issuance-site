@@ -567,7 +567,9 @@ export class AssetTransformer extends BaseSftTransformer {
       cashflowStartDate: assetData.cashflowStartDate
         ? ensureYearMonth(assetData.cashflowStartDate)
         : (assetData as { royaltyStartDate?: string }).royaltyStartDate
-          ? ensureYearMonth((assetData as { royaltyStartDate?: string }).royaltyStartDate)
+          ? ensureYearMonth(
+              (assetData as { royaltyStartDate?: string }).royaltyStartDate,
+            )
           : undefined,
       metadata: metadataTimestamps,
     };

@@ -151,10 +151,7 @@ export const GET: RequestHandler = async ({ params, setHeaders }) => {
     // Try fallback public gateways
     for (const gateway of fallbackGateways) {
       try {
-        const { body, contentType } = await fetchFromHttpGateway(
-          gateway,
-          path,
-        );
+        const { body, contentType } = await fetchFromHttpGateway(gateway, path);
         cache.set(path, { body, contentType, timestamp: Date.now() });
         cleanCache();
         setHeaders({

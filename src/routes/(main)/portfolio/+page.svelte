@@ -1291,7 +1291,7 @@ function percentageDisplay(value: number): string {
 											</div>
 
 											<!-- Purchase rows -->
-											{#each editModalPurchases as purchase, index}
+											{#each editModalPurchases as purchase, index (index)}
 												<div class="grid grid-cols-12 gap-2 mb-2">
 													<div class="col-span-4">
 														<input

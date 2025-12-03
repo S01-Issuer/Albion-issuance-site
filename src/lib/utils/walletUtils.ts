@@ -3,10 +3,10 @@
  */
 
 export interface WatchAssetParams {
-	address: string;
-	symbol: string;
-	decimals?: number;
-	image?: string;
+  address: string;
+  symbol: string;
+  decimals?: number;
+  image?: string;
 }
 
 /**
@@ -16,40 +16,42 @@ export interface WatchAssetParams {
  * @param params - Token parameters
  * @returns Promise<boolean> - true if token is now tracked, false otherwise
  */
-export async function addTokenToWallet(params: WatchAssetParams): Promise<boolean> {
-	const { address, symbol, decimals = 18, image } = params;
+export async function addTokenToWallet(
+  params: WatchAssetParams,
+): Promise<boolean> {
+  const { address, symbol, decimals = 18, image } = params;
 
-	if (typeof window === 'undefined' || !window.ethereum) {
-		console.warn('No wallet provider found');
-		return false;
-	}
+  if (typeof window === "undefined" || !window.ethereum) {
+    console.warn("No wallet provider found");
+    return false;
+  }
 
-	try {
-		const wasAdded = await window.ethereum.request({
-			method: 'wallet_watchAsset',
-			params: {
-				type: 'ERC20',
-				options: {
-					address,
-					symbol,
-					decimals,
-					image
-				}
-			}
-		});
+  try {
+    const wasAdded = await window.ethereum.request({
+      method: "wallet_watchAsset",
+      params: {
+        type: "ERC20",
+        options: {
+          address,
+          symbol,
+          decimals,
+          image,
+        },
+      },
+    });
 
-		return Boolean(wasAdded);
-	} catch (error) {
-		console.error('Error adding token to wallet:', error);
-		return false;
-	}
+    return Boolean(wasAdded);
+  } catch (error) {
+    console.error("Error adding token to wallet:", error);
+    return false;
+  }
 }
 
 // Extend Window interface for TypeScript
 declare global {
-	interface Window {
-		ethereum?: {
-			request: (args: { method: string; params?: unknown }) => Promise<unknown>;
-		};
-	}
+  interface Window {
+    ethereum?: {
+      request: (args: { method: string; params?: unknown }) => Promise<unknown>;
+    };
+  }
 }

@@ -587,9 +587,8 @@ async function fetchLogs(
             ],
             block: ["number", "timestamp"],
           },
-        }
+        },
       );
-      
 
       // Concatenate logs if there are any
       const responseData = queryResponse.data;
