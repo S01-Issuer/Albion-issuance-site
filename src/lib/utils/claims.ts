@@ -121,6 +121,7 @@ export type ClaimHistory = {
   status: string;
   fieldName?: string;
   tokenAddress?: string;
+  orderHash?: string; // Used to look up payout date from metadata
 };
 
 export type ClaimSignedContext = {
@@ -386,6 +387,7 @@ export async function sortClaimsData(
   fieldName: string,
   orderTimestamp?: string,
   tokenAddress?: string,
+  orderHash?: string, // OrderHash to include in claims for date lookup from metadata
 ): Promise<SortedClaimsResult> {
   const blockRange = getBlockRangeFromTrades(trades);
 
@@ -465,6 +467,7 @@ export async function sortClaimsData(
   const totalEarned = totalClaimedAmount + totalUnclaimedAmount;
 
   // Create claims array with the same structure as the claims page
+  // Include orderHash so caller can look up payout date from metadata
   const claims: ClaimHistory[] = claimedCsv.map((claim) => {
     // Find the original log data to get the transaction hash
     const originalLog = logs.find((log) => {
@@ -478,7 +481,7 @@ export async function sortClaimsData(
       );
     });
 
-    // Try to get timestamp from various sources
+    // Default to current date - caller should update using orderHash lookup from metadata
     let claimDate = new Date().toISOString();
     if (claim.decodedLog?.timestamp) {
       claimDate = claim.decodedLog.timestamp;
@@ -511,9 +514,10 @@ export async function sortClaimsData(
       date: claimDate,
       amount: formatAmountWei(claim.amount),
       asset: fieldName || "Unknown Field",
-      txHash: trades[0].tradeEvent?.transaction?.id || "N/A",
+      txHash: trades[0]?.tradeEvent?.transaction?.id || "N/A",
       status: "completed",
       tokenAddress,
+      orderHash, // Include for metadata lookup
     };
   });
 
@@ -534,7 +538,7 @@ export async function sortClaimsData(
   return {
     claimedCsv,
     unclaimedCsv,
-    claims,
+    claims, // Only claimed items - for history display
     holdings,
     totalClaims: filteredCsvClaims.length,
     claimedCount: claimedCsv.length,

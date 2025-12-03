@@ -12,7 +12,7 @@
 	import TabButton from '$lib/components/components/TabButton.svelte';
 	import { PageLayout, ContentSection } from '$lib/components/layout';
 	import { getImageUrl } from '$lib/utils/imagePath';
-	import { formatCurrency, formatSmartReturn, formatHash, formatEndDate, formatAccrualStartDate, formatEstFirstPayout } from '$lib/utils/formatters';
+	import { formatCurrency, formatSmartReturn, formatHash, formatAccrualStartDate, formatEstFirstPayout } from '$lib/utils/formatters';
 	import { hasIncompleteReleases } from '$lib/utils/futureReleases';
 	import { useAssetDetailData, useDataExport } from '$lib/composables';
 	import AssetDetailHeader from '$lib/components/patterns/assets/AssetDetailHeader.svelte';

@@ -238,6 +238,11 @@ export class CatalogService {
     for (const [assetId, group] of Object.entries(assetGroups)) {
       const selected = selectSftWithMostRecentReceipts(group);
 
+      if (!selected.pinnedMetadata) {
+        console.warn(`[CatalogService] No metadata for asset ${assetId}`);
+        continue;
+      }
+
       try {
         // Create asset from the selected SFT's metadata
         const assetInstance = assetTransformer.transform(
@@ -258,6 +263,11 @@ export class CatalogService {
     // Third pass: create all tokens
     for (const group of Object.values(assetGroups)) {
       for (const { sft, pinnedMetadata, maxSupply } of group) {
+        if (!pinnedMetadata) {
+          console.warn(`[CatalogService] No metadata for token ${sft.id}`);
+          continue;
+        }
+
         try {
           const tokenInstance = tokenMetadataTransformer.transform(
             sft,

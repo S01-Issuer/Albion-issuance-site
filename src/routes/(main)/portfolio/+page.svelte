@@ -15,11 +15,11 @@
 		PieChart,
 		StatusBadge,
 		ActionCard,
-		FormattedNumber,
 		Modal
 	} from '$lib/components/components';
 	import { PageLayout, HeroSection, ContentSection, FullWidthSection } from '$lib/components/layout';
 	import { formatCurrency, formatPercentage, formatNumber } from '$lib/utils/formatters';
+	import { sftRepository } from '$lib/data/repositories/sftRepository';
 	import { sfts, sftMetadata } from '$lib/stores';
 	import { formatEther } from 'viem';
 	import { goto } from '$app/navigation';
@@ -29,6 +29,7 @@
 import type { ClaimsResult, ClaimsHoldingsGroup } from '$lib/services/ClaimsService';
 import type { ClaimHistory as ClaimsHistoryItem } from '$lib/utils/claims';
 import type { PinnedMetadata } from '$lib/types/PinnedMetadata';
+import type { DepositWithReceipt } from '$lib/types/graphql';
 
 const isDev = import.meta.env.DEV;
 const logDev = (...messages: unknown[]) => {
@@ -78,7 +79,7 @@ type CapitalWalkPoint = {
 
 interface CapitalWalkSummary {
 	chartData: CapitalWalkPoint[];
-	totalExternalCapital: number;
+	peakNegativePosition: number;
 	houseMoneyCrossDate: string | null;
 	grossDeployed: number;
 	grossPayout: number;
@@ -89,7 +90,8 @@ interface PortfolioHolding {
 	id: string;
 	name: string;
 	location: string;
-	totalInvested: number;
+	totalMinted: number; // Sum of deposits (mints)
+	totalInvested: number; // totalMinted + secondary purchases
 	totalPayoutsEarned: number;
 	unclaimedAmount: number;
 	claimedAmount: number;
@@ -128,6 +130,110 @@ let hasPortfolioHistory = false;
 let catalogRef: ReturnType<typeof useCatalogService> | null = null;
 let latestClaimsSnapshot: ClaimsResult | null = null;
 let claimsDataUnavailable = false;
+let allDepositsData: DepositWithReceipt[] = [];
+
+// Secondary purchase entry type
+interface SecondaryPurchaseEntry {
+	month: string;
+	quantity: number;
+	amount: number;
+}
+
+// Secondary purchases stored in localStorage (user-editable)
+let secondaryPurchases: Record<string, SecondaryPurchaseEntry[]> = {};
+
+// Edit modal state
+let editModalOpen = false;
+let editModalHolding: PortfolioHolding | null = null;
+let editModalPurchases: SecondaryPurchaseEntry[] = [];
+
+// Load secondary purchases from localStorage
+function loadSecondaryPurchases(): Record<string, SecondaryPurchaseEntry[]> {
+	if (typeof window === 'undefined') return {};
+	try {
+		const stored = localStorage.getItem('albion-secondary-purchases-v2');
+		return stored ? JSON.parse(stored) : {};
+	} catch {
+		return {};
+	}
+}
+
+// Save secondary purchases to localStorage
+function saveSecondaryPurchases(data: Record<string, SecondaryPurchaseEntry[]>) {
+	if (typeof window === 'undefined') return;
+	try {
+		localStorage.setItem('albion-secondary-purchases-v2', JSON.stringify(data));
+	} catch {
+		console.error('Failed to save secondary purchases to localStorage');
+	}
+}
+
+// Get total secondary amount for a token
+function getSecondaryTotal(tokenAddress: string): number {
+	const purchases = secondaryPurchases[tokenAddress.toLowerCase()];
+	if (!Array.isArray(purchases)) return 0;
+	return purchases.reduce((sum, p) => sum + (p.amount || 0), 0);
+}
+
+function openEditModal(holding: PortfolioHolding) {
+	editModalHolding = holding;
+	const existing = secondaryPurchases[holding.sftAddress.toLowerCase()];
+	editModalPurchases = Array.isArray(existing) && existing.length > 0
+		? [...existing]
+		: [{ month: '', quantity: 0, amount: 0 }];
+	editModalOpen = true;
+}
+
+function closeEditModal() {
+	editModalOpen = false;
+	editModalHolding = null;
+	editModalPurchases = [];
+}
+
+function addPurchaseRow() {
+	editModalPurchases = [...editModalPurchases, { month: '', quantity: 0, amount: 0 }];
+}
+
+function removePurchaseRow(index: number) {
+	editModalPurchases = editModalPurchases.filter((_, i) => i !== index);
+	if (editModalPurchases.length === 0) {
+		editModalPurchases = [{ month: '', quantity: 0, amount: 0 }];
+	}
+}
+
+function saveEditModal() {
+	if (!editModalHolding) return;
+	const address = editModalHolding.sftAddress.toLowerCase();
+
+	// Filter out empty entries
+	const validPurchases = editModalPurchases.filter(p => p.month && p.amount > 0);
+	secondaryPurchases[address] = validPurchases;
+	saveSecondaryPurchases(secondaryPurchases);
+
+	// Calculate total secondary amount
+	const secondaryTotal = validPurchases.reduce((sum, p) => sum + p.amount, 0);
+
+	// Update the holding's totalInvested and recalculate derived values
+	const holdingIndex = holdings.findIndex(h => h.id === editModalHolding?.id);
+	if (holdingIndex !== -1) {
+		const holding = holdings[holdingIndex];
+		const minted = holding.totalMinted;
+		const newTotalInvested = minted + secondaryTotal;
+
+		holding.totalInvested = newTotalInvested;
+		holding.capitalReturned = newTotalInvested > 0
+			? (holding.totalPayoutsEarned / newTotalInvested) * 100
+			: 0;
+		holding.unrecoveredCapital = Math.max(0, newTotalInvested - holding.totalPayoutsEarned);
+
+		holdings = [...holdings]; // Trigger reactivity
+	}
+
+	// Recalculate total invested
+	totalInvested = holdings.reduce((sum, h) => sum + h.totalInvested, 0);
+
+	closeEditModal();
+}
 	
 	// Composables
 	const { show: showTooltipWithDelay, hide: hideTooltip, isVisible: isTooltipVisible } = useTooltip();
@@ -290,7 +396,7 @@ function percentageDisplay(value: number): string {
 			'allocation_percent',
 			'status',
 			'location',
-			'total_holdings_usdc',
+			'total_invested_usdc',
 			'total_earned_usdc',
 			'claimed_usdc',
 			'unclaimed_usdc',
@@ -331,7 +437,7 @@ function percentageDisplay(value: number): string {
 				allocation_percent: toPercent(allocationPercent),
 				status: holding.status || '',
 				location,
-				total_holdings_usdc: toCurrency(holding.totalInvested),
+				total_invested_usdc: toCurrency(holding.totalInvested),
 				total_earned_usdc: toCurrency(holding.totalPayoutsEarned),
 				claimed_usdc: toCurrency(holding.claimedAmount),
 				unclaimed_usdc: toCurrency(holding.unclaimedAmount),
@@ -465,6 +571,12 @@ function percentageDisplay(value: number): string {
 				});
 			}
 
+			// Load secondary purchases from localStorage
+			secondaryPurchases = loadSecondaryPurchases();
+
+			// Get deposits data for calculating totalMinted
+			allDepositsData = await sftRepository.getDepositsForOwner($signerAddress);
+
 			if (!$sfts || !$sftMetadata || $sfts.length === 0 || $sftMetadata.length === 0) {
 				pageLoading = false;
 				isLoadingData = false;
@@ -475,6 +587,34 @@ function percentageDisplay(value: number): string {
 			const decodedMeta = $sftMetadata
 				.map((metaV1) => decodeSftInformation(metaV1))
 				.filter((meta): meta is PinnedMetadata => Boolean(meta));
+
+			// Build orderHash -> month lookup from metadata payoutData
+			const orderHashToMonth: Record<string, string> = {};
+			for (const meta of decodedMeta) {
+				if (Array.isArray(meta.payoutData)) {
+					for (const payout of meta.payoutData) {
+						const orderHash = payout.tokenPayout?.orderHash;
+						const month = payout.month;
+						if (orderHash && month) {
+							orderHashToMonth[orderHash.toLowerCase()] = month;
+						}
+					}
+				}
+			}
+
+			// Update claim history dates using the orderHash -> month lookup
+			if (claimHistory.length > 0 && Object.keys(orderHashToMonth).length > 0) {
+				claimHistory = claimHistory.map((claim) => {
+					if (claim.orderHash) {
+						const month = orderHashToMonth[claim.orderHash.toLowerCase()];
+						if (month) {
+							// Convert month (YYYY-MM) to ISO date (first of month)
+							return { ...claim, date: `${month}-01T00:00:00.000Z` };
+						}
+					}
+					return claim;
+				});
+			}
 
 			// Deduplicate SFTs by ID
 			const uniqueSftsMap: Record<string, typeof $sfts[number]> = {};
@@ -637,11 +777,30 @@ function percentageDisplay(value: number): string {
 					
 					// Only add to holdings if user actually owns tokens
 					if (tokensOwned > 0) {
-						const capitalReturned = tokensOwned > 0
-							? (totalEarnedForSft / tokensOwned) * 100
+						// Calculate totalMinted from deposits only (not transfers/gifts)
+						const sftDeposits = allDepositsData.filter(
+							(deposit) =>
+								deposit.offchainAssetReceiptVault?.id?.toLowerCase() ===
+								sft.id.toLowerCase(),
+						);
+						let totalMinted = 0;
+						for (const deposit of sftDeposits) {
+							const amountRaw = deposit.amount ?? '0';
+							const amountWei = typeof amountRaw === 'bigint' ? amountRaw : BigInt(amountRaw);
+							totalMinted += Number(formatEther(amountWei));
+						}
+						// No fallback - if tokens were received via transfer/gift, totalMinted stays 0
+						// User can add cost basis via Secondary Purchases if needed
+
+						// Get secondary purchases from localStorage
+						const secondaryAmount = getSecondaryTotal(sft.id);
+						const totalInvestedInSft = totalMinted + secondaryAmount;
+
+						const capitalReturned = totalInvestedInSft > 0
+							? (totalEarnedForSft / totalInvestedInSft) * 100
 							: 0;
 
-						const unrecoveredCapital = Math.max(0, tokensOwned - totalEarnedForSft);
+						const unrecoveredCapital = Math.max(0, totalInvestedInSft - totalEarnedForSft);
 
 						const lastClaim = sftClaims
 							.filter((claim) => !claim.status || claim.status === 'completed')
@@ -658,7 +817,8 @@ function percentageDisplay(value: number): string {
 								: asset.location
 									? `${asset.location.state || 'Unknown'}, ${asset.location.country || 'Unknown'}`
 									: 'Unknown',
-							totalInvested: tokensOwned,
+							totalMinted,
+							totalInvested: totalInvestedInSft,
 							totalPayoutsEarned: totalEarnedForSft,
 							unclaimedAmount: unclaimedAmountForSft,
 							claimedAmount: claimedAmountForSft,
@@ -684,9 +844,10 @@ function percentageDisplay(value: number): string {
 			monthlyPayouts = [];
 			const monthlyPayoutTotals: Record<string, number> = {};
 
-			// Process claim history to get monthly aggregations (only completed claims)
+			// Process claim history to get monthly aggregations (all payouts - claimed + unclaimed)
+			// This shows when payouts were made available, not when they were claimed
 			for (const claim of claimHistory) {
-				if (claim.date && claim.amount && (!claim.status || claim.status === 'completed')) {
+				if (claim.date && claim.amount) {
 					const date = new Date(claim.date);
 					const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 					const amount = Number(claim.amount);
@@ -798,7 +959,7 @@ function percentageDisplay(value: number): string {
 				</div>
 			{:else}
 				<div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 lg:gap-8 text-center max-w-6xl mx-auto mt-6">
-					<StatsCard title="Total Holdings" value={formatCurrency(totalInvested, { compact: true })} subtitle="Current Value" size="small" />
+					<StatsCard title="Total Invested" value={formatCurrency(totalInvested, { compact: true })} subtitle="Capital Deployed" size="small" />
 					<StatsCard title="Total Earned" value={claimsDataUnavailable ? 'N/A' : formatCurrency(totalPayoutsEarned, { compact: true })} subtitle="All Payouts" size="small" />
 					<StatsCard title="Unclaimed" value={claimsDataUnavailable ? 'N/A' : formatCurrency(unclaimedPayout, { compact: true })} subtitle="Ready to Claim" size="small" />
 					<StatsCard title="Active Assets" value={activeAssetsCount.toString()} subtitle="Assets Held" size="small" />
@@ -903,18 +1064,35 @@ function percentageDisplay(value: number): string {
 													</div>
 												</div>
 
-												<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mt-4">
+												<div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mt-4">
 													<!-- Tokens -->
 													<div class="flex flex-col">
 														<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-2 h-8">
 															Tokens
 														</div>
-										<div class="text-lg lg:text-xl font-extrabold text-black">
-											{formatNumber(holding.tokensOwned, { decimals: 3 })}
+														<div class="text-lg lg:text-xl font-extrabold text-black">
+															{formatNumber(holding.tokensOwned, { decimals: 3 })}
 														</div>
-														<div class="text-xs lg:text-sm text-black opacity-70">
-															<FormattedNumber value={holding.totalInvested} type="currency" compact={true} />
+													</div>
+
+													<!-- Total Invested -->
+													<div class="flex flex-col">
+														<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-2 h-8 flex items-start gap-1">
+															<span>Total Invested</span>
+															<button
+																class="inline-flex items-center justify-center w-4 h-4 text-black opacity-50 hover:opacity-100 transition-opacity"
+																on:click={() => openEditModal(holding)}
+																aria-label="Edit total invested"
+															>
+																<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3 h-3">
+																	<path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
+																</svg>
+															</button>
 														</div>
+														<div class="text-lg lg:text-xl font-extrabold text-black">
+															{formatCurrency(holding.totalInvested)}
+														</div>
+														<div class="text-xs lg:text-sm text-black opacity-70">US$ Paid</div>
 													</div>
 
 													<!-- Payouts to Date -->
@@ -941,7 +1119,7 @@ function percentageDisplay(value: number): string {
 																tabindex="0">?</span>
 														</div>
 														<div class="text-lg lg:text-xl font-extrabold text-black">
-															{percentageDisplay(holding.capitalReturned / 100)}
+															{holding.totalInvested > 0 ? percentageDisplay(holding.capitalReturned / 100) : 'N/A'}
 														</div>
 														<div class="text-xs lg:text-sm text-black opacity-70">To Date</div>
 														{#if isTooltipVisible('capital-' + holding.id)}
@@ -1017,7 +1195,7 @@ function percentageDisplay(value: number): string {
 												<div class="text-lg font-extrabold text-black">{formatNumber(historyModalHolding.tokensOwned, { decimals: 3 })}</div>
 											</div>
 											<div>
-												<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-1">Total Holdings</div>
+												<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-1">Total Invested</div>
 												<div class="text-lg font-extrabold text-black">{formatCurrency(historyModalHolding.totalInvested)}</div>
 											</div>
 										</div>
@@ -1070,39 +1248,176 @@ function percentageDisplay(value: number): string {
 								</div>
 							</Modal>
 						{/if}
+
+						<!-- Edit Total Invested Modal -->
+						{#if editModalOpen && editModalHolding}
+							<Modal
+								bind:isOpen={editModalOpen}
+								title="Edit Total Invested"
+								size="medium"
+								on:close={closeEditModal}
+							>
+								<div class="space-y-6 px-4 sm:px-6">
+									<div>
+										<h4 class="text-lg font-extrabold text-black mb-1">{editModalHolding.tokenSymbol}</h4>
+										<div class="text-sm text-black opacity-70">{editModalHolding.name}</div>
+									</div>
+
+									<div class="space-y-4">
+										<!-- Total Minted (read-only) -->
+										<div>
+											<div class="block text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-2">
+												Total Minted (Deposited)
+											</div>
+											<div class="w-full px-4 py-3 border border-light-gray bg-gray-50 text-black font-medium">
+												{formatCurrency(editModalHolding.totalMinted)}
+											</div>
+											<div class="text-xs text-black opacity-50 mt-1">From on-chain deposits</div>
+										</div>
+
+										<!-- Secondary Purchases (editable rows) -->
+										<div>
+											<div class="block text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-2">
+												Secondary Purchases
+											</div>
+											<div class="text-xs text-black opacity-50 mb-3">Update for more accurate returns data</div>
+
+											<!-- Header row -->
+											<div class="grid grid-cols-12 gap-2 mb-2 text-xs font-bold text-black opacity-70 uppercase">
+												<div class="col-span-4">Month</div>
+												<div class="col-span-3">Quantity</div>
+												<div class="col-span-4">Amount ($)</div>
+												<div class="col-span-1"></div>
+											</div>
+
+											<!-- Purchase rows -->
+											{#each editModalPurchases as purchase, index}
+												<div class="grid grid-cols-12 gap-2 mb-2">
+													<div class="col-span-4">
+														<input
+															type="month"
+															bind:value={purchase.month}
+															class="w-full px-2 py-2 border border-light-gray focus:border-primary focus:outline-none text-black text-sm"
+														/>
+													</div>
+													<div class="col-span-3">
+														<input
+															type="number"
+															min="0"
+															step="0.001"
+															bind:value={purchase.quantity}
+															class="w-full px-2 py-2 border border-light-gray focus:border-primary focus:outline-none text-black text-sm"
+															placeholder="0"
+														/>
+													</div>
+													<div class="col-span-4">
+														<input
+															type="number"
+															min="0"
+															step="0.01"
+															bind:value={purchase.amount}
+															class="w-full px-2 py-2 border border-light-gray focus:border-primary focus:outline-none text-black text-sm"
+															placeholder="0.00"
+														/>
+													</div>
+													<div class="col-span-1 flex items-center justify-center">
+														<button
+															type="button"
+															on:click={() => removePurchaseRow(index)}
+															class="text-red-500 hover:text-red-700 text-lg font-bold"
+															aria-label="Remove row"
+														>
+															×
+														</button>
+													</div>
+												</div>
+											{/each}
+
+											<!-- Add row button -->
+											<button
+												type="button"
+												on:click={addPurchaseRow}
+												class="text-sm text-primary hover:underline mt-2"
+											>
+												+ Add another purchase
+											</button>
+										</div>
+
+										<!-- Total -->
+										<div class="pt-4 border-t border-light-gray">
+											<div class="flex justify-between items-center">
+												<span class="text-sm font-bold text-black opacity-70 uppercase tracking-wider">Total Invested</span>
+												<span class="text-xl font-extrabold text-black">
+													{formatCurrency(editModalHolding.totalMinted + editModalPurchases.reduce((sum, p) => sum + (p.amount || 0), 0))}
+												</span>
+											</div>
+										</div>
+									</div>
+
+									<div class="flex gap-3 pt-4">
+										<SecondaryButton fullWidth on:click={closeEditModal}>
+											Cancel
+										</SecondaryButton>
+										<PrimaryButton fullWidth on:click={saveEditModal}>
+											Save
+										</PrimaryButton>
+									</div>
+								</div>
+							</Modal>
+						{/if}
 					{/if}
 				</div>
-				
+
 			{:else if activeTab === 'performance'}
 				{@const capitalWalkData = (() => {
 					// Aggregate mints (deposits) and payouts by month
 					const monthlyMints: Record<string, number> = {};
 					const monthlyPayoutsTotals: Record<string, number> = {};
-					let maxDeficit = 0;
 					let houseMoneyCrossDate: string | null = null;
-					
-					// Process real monthly payouts data from trades
-					monthlyPayouts.forEach(payout => {
-						const date = new Date(payout.date);
-						const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-						monthlyPayoutsTotals[monthKey] = (monthlyPayoutsTotals[monthKey] ?? 0) + payout.amount;
-					});
-					
-					// Use holdings data for mints (since we no longer track individual deposits)
-					if (holdings.length > 0) {
-						// Place holdings at the first payout date, or current month if no payouts
-						const monthKey = monthlyPayouts.length > 0
-							? (() => {
-								const firstPayout = monthlyPayouts[0];
-								const investmentDate = new Date(firstPayout.date);
-								return `${investmentDate.getFullYear()}-${String(investmentDate.getMonth() + 1).padStart(2, '0')}`;
-							})()
-							: (() => {
-								const currentDate = new Date();
-								return `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
-							})();
-						const totalHoldingsAmount = holdings.reduce((sum, holding) => sum + holding.totalInvested, 0);
-						monthlyMints[monthKey] = totalHoldingsAmount;
+
+					// Process payouts from metadata payoutData (source of truth for when payouts were distributed)
+					// Apply 2-month offset: e.g., August payout is received in October
+					const addMonths = (monthStr: string, offset: number): string => {
+						const [year, month] = monthStr.split('-').map(Number);
+						const date = new Date(year, month - 1 + offset, 1);
+						return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+					};
+
+					for (const holding of holdings) {
+						const payoutData = holding.pinnedMetadata?.payoutData;
+						if (Array.isArray(payoutData) && holding.tokensOwned > 0) {
+							for (const payout of payoutData) {
+								const month = payout.month;
+								const payoutPerToken = payout.tokenPayout?.payoutPerToken ?? 0;
+								if (month && payoutPerToken > 0) {
+									const receivedMonth = addMonths(month, 2); // 2-month offset
+									const userPayout = payoutPerToken * holding.tokensOwned;
+									monthlyPayoutsTotals[receivedMonth] = (monthlyPayoutsTotals[receivedMonth] ?? 0) + userPayout;
+								}
+							}
+						}
+					}
+
+					// Process actual deposits with timestamps
+					for (const deposit of allDepositsData) {
+						const timestamp = deposit.transaction?.timestamp;
+						if (timestamp) {
+							const date = new Date(Number(timestamp) * 1000); // Unix timestamp to JS Date
+							const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+							const amount = Number(formatEther(BigInt(deposit.amount)));
+							monthlyMints[monthKey] = (monthlyMints[monthKey] ?? 0) + amount;
+						}
+					}
+
+					// Add secondary purchases from localStorage (by their month)
+					for (const [_tokenAddress, purchases] of Object.entries(secondaryPurchases)) {
+						if (Array.isArray(purchases)) {
+							for (const purchase of purchases) {
+								if (purchase.month && purchase.amount > 0) {
+									monthlyMints[purchase.month] = (monthlyMints[purchase.month] ?? 0) + purchase.amount;
+								}
+							}
+						}
 					}
 					
 					// Create chart data from all months
@@ -1118,17 +1433,20 @@ function percentageDisplay(value: number): string {
 					
 					let runningCumulativeMints = 0;
 					let runningCumulativePayouts = 0;
-					
+					let peakNegativePosition = 0; // Track the most negative net position
+
 					sortedMonths.forEach(monthKey => {
 						const monthlyMint = monthlyMints[monthKey] ?? 0;
 						const monthlyPayout = monthlyPayoutsTotals[monthKey] ?? 0;
-						
+
 						runningCumulativeMints += monthlyMint;
 						runningCumulativePayouts += monthlyPayout;
-						
+
 						const netPosition = runningCumulativePayouts - runningCumulativeMints;
-						maxDeficit = Math.max(maxDeficit, Math.abs(netPosition));
-						
+
+						// Track the most negative position reached
+						peakNegativePosition = Math.min(peakNegativePosition, netPosition);
+
 						if (netPosition >= 0 && !houseMoneyCrossDate && runningCumulativeMints > 0) {
 							houseMoneyCrossDate = `${monthKey}-01`;
 						}
@@ -1156,10 +1474,10 @@ function percentageDisplay(value: number): string {
 						? totalPayoutsEarned
 						: claimHistory.reduce((sum, claim) => sum + Number(claim.amount), 0));
 				const currentNetPosition = grossPayout - grossDeployed;
-					
+
 				return {
 					chartData: dataArray,
-					totalExternalCapital: maxDeficit,
+					peakNegativePosition,
 					houseMoneyCrossDate,
 					grossDeployed,
 					grossPayout,
@@ -1193,6 +1511,8 @@ function percentageDisplay(value: number): string {
 										showGrid={true}
 										series1Name="Mints"
 										series2Name="Payouts"
+										showSmallValueLabels={true}
+										smallBarThreshold={0.1}
 									/>
 								{:else}
 									<div class="text-center py-20 text-black opacity-70">
@@ -1229,94 +1549,30 @@ function percentageDisplay(value: number): string {
 
 					<!-- Metrics Cards -->
 					<div class="space-y-4">
-						<div class="bg-white border border-light-gray rounded-none p-4 relative overflow-visible">
-							<div class="text-sm font-bold text-black opacity-70 uppercase tracking-wider mb-2">Total External Capital</div>
-							<div class="text-xl font-extrabold text-black mb-1 break-all">{currencyDisplay(capitalWalkData.totalExternalCapital)}</div>
-							<div class="text-xs text-black opacity-70">Peak cash required</div>
-							<div
-								class="absolute top-4 right-4 w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold flex items-center justify-center cursor-help hover:bg-gray-400 transition-colors"
-								on:mouseenter={() => showTooltipWithDelay('external-capital')}
-								on:mouseleave={hideTooltip}
-								on:focus={() => showTooltipWithDelay('external-capital')}
-								on:blur={hideTooltip}
-								role="button"
-								tabindex="0"
-							>
-								?
-							</div>
-							{#if isTooltipVisible('external-capital')}
-								<div class="absolute right-0 top-10 bg-black text-white p-4 rounded-none text-xs z-[1000] w-56">
-									Max cash you ever had to supply from outside, assuming payouts were available for reinvestment
-								</div>
-							{/if}
+						<div class="bg-white border border-light-gray rounded-none p-4">
+							<div class="text-sm font-bold text-black opacity-70 uppercase tracking-wider mb-2">External Capital</div>
+							<div class="text-xl font-extrabold text-black mb-1 break-all">{currencyDisplay(capitalWalkData.peakNegativePosition)}</div>
+							<div class="text-xs text-black opacity-70">Max negative net position</div>
 						</div>
 
-						<div class="bg-white border border-light-gray rounded-none p-4 relative overflow-visible">
-							<div class="text-sm font-bold text-black opacity-70 uppercase tracking-wider mb-2">Total Holdings</div>
+						<div class="bg-white border border-light-gray rounded-none p-4">
+							<div class="text-sm font-bold text-black opacity-70 uppercase tracking-wider mb-2">Gross Capital Deployed</div>
 							<div class="text-xl font-extrabold text-black mb-1 break-all">{formatCurrency(capitalWalkData.grossDeployed)}</div>
-							<div class="text-xs text-black opacity-70">Current value</div>
-							<div
-								class="absolute top-4 right-4 w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold flex items-center justify-center cursor-help hover:bg-gray-400 transition-colors"
-								on:mouseenter={() => showTooltipWithDelay('gross-deployed')}
-								on:mouseleave={hideTooltip}
-								on:focus={() => showTooltipWithDelay('gross-deployed')}
-								on:blur={hideTooltip}
-								role="button"
-								tabindex="0"
-							>
-								?
-							</div>
-							{#if isTooltipVisible('gross-deployed')}
-								<div class="absolute right-0 top-10 bg-black text-white p-3 rounded-none text-xs z-[1000] w-48">
-									Total value of tokens held across all assets
-								</div>
-							{/if}
+							<div class="text-xs text-black opacity-70">Total invested</div>
 						</div>
 
-						<div class="bg-white border border-light-gray rounded-none p-4 relative overflow-visible">
+						<div class="bg-white border border-light-gray rounded-none p-4">
 							<div class="text-sm font-bold text-black opacity-70 uppercase tracking-wider mb-2">Gross Payout</div>
 							<div class="text-xl font-extrabold text-primary mb-1 break-all">{currencyDisplay(capitalWalkData.grossPayout)}</div>
 							<div class="text-xs text-black opacity-70">Total distributions</div>
-							<div
-								class="absolute top-4 right-4 w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold flex items-center justify-center cursor-help hover:bg-gray-400 transition-colors"
-								on:mouseenter={() => showTooltipWithDelay('gross-payout')}
-								on:mouseleave={hideTooltip}
-								on:focus={() => showTooltipWithDelay('gross-payout')}
-								on:blur={hideTooltip}
-								role="button"
-								tabindex="0"
-							>
-								?
-							</div>
-							{#if isTooltipVisible('gross-payout')}
-								<div class="absolute right-0 top-10 bg-black text-white p-3 rounded-none text-xs z-[1000] w-48">
-									Total distributions received from all assets
-								</div>
-							{/if}
 						</div>
 
-						<div class="bg-white border border-light-gray rounded-none p-4 relative overflow-visible">
+						<div class="bg-white border border-light-gray rounded-none p-4">
 							<div class="text-sm font-bold text-black opacity-70 uppercase tracking-wider mb-2">Current Net Position</div>
 							<div class="text-xl font-extrabold {capitalWalkData.currentNetPosition >= 0 ? 'text-green-600' : 'text-red-600'} mb-1 break-all">
 								{currencyDisplay(capitalWalkData.currentNetPosition)}
 							</div>
-							<div class="text-xs text-black opacity-70">Total Payouts - Total Holdings</div>
-							<div
-								class="absolute top-4 right-4 w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold flex items-center justify-center cursor-help hover:bg-gray-400 transition-colors"
-								on:mouseenter={() => showTooltipWithDelay('realised-profit')}
-								on:mouseleave={hideTooltip}
-								on:focus={() => showTooltipWithDelay('realised-profit')}
-								on:blur={hideTooltip}
-								role="button"
-								tabindex="0"
-							>
-								?
-							</div>
-							{#if isTooltipVisible('realised-profit')}
-								<div class="absolute right-0 top-10 bg-black text-white p-3 rounded-none text-xs z-[1000] w-48">
-									Your current profit/loss position accounting for holdings and payouts received
-								</div>
-							{/if}
+							<div class="text-xs text-black opacity-70">Total Payouts - Total Invested</div>
 						</div>
 					</div>
 				</div>

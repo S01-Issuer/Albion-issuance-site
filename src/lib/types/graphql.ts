@@ -69,6 +69,9 @@ export interface DepositWithReceipt {
   offchainAssetReceiptVault: {
     id: string;
   };
+  transaction?: {
+    timestamp: string;
+  };
 }
 
 export interface MetaV1S {

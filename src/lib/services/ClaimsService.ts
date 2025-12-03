@@ -221,6 +221,7 @@ export class ClaimsService {
       fieldName,
       undefined,
       tokenAddress,
+      claim.orderHash, // Pass orderHash so caller can look up payout date from metadata
     )) as SortedClaimsData;
 
     // Generate proofs for holdings

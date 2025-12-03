@@ -171,11 +171,14 @@ export class SftRepository {
               { offchainAssetReceiptVault_: { id_in: $sftIds } }
             ]
           }
+          orderBy: transaction__timestamp
+          orderDirection: asc
         ) {
           id
           caller { address }
           amount
           offchainAssetReceiptVault { id }
+          transaction { timestamp }
         }
       }
     `;

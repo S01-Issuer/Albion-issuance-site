@@ -145,9 +145,8 @@
 				attempts++;
 				try {
 					// Dynamic import to avoid CommonJS module resolution issues
-					// @ts-ignore - CommonJS module type definition issue
-					const orderbookModule = await import('@rainlanguage/orderbook') as any;
-					const getTransaction = orderbookModule.getTransaction as (url: string, hash: string) => Promise<{ value?: unknown }>;
+					const orderbookModule = await import('@rainlanguage/orderbook') as { getTransaction: (url: string, hash: string) => Promise<{ value?: unknown }> };
+					const getTransaction = orderbookModule.getTransaction;
 					const result = await getTransaction(BASE_ORDERBOOK_SUBGRAPH_URL, hash);
 
 					if (result?.value) {
@@ -229,7 +228,7 @@
 			// Wait for transaction to be indexed in subgraph
 			try {
 				await waitForTransactionInSubgraph(hash);
-			} catch (error) {
+			} catch {
 				// Transaction not yet indexed, continuing anyway
 			}
 
@@ -307,7 +306,7 @@
 			// Wait for transaction to be indexed in subgraph
 			try {
 				await waitForTransactionInSubgraph(hash);
-			} catch (error) {
+			} catch {
 				// Transaction not yet indexed, continuing anyway
 			}
 

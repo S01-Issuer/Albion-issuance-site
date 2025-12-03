@@ -225,7 +225,7 @@
 
 			const balance = await retryRpcCall(() => readContract($wagmiConfig, {
 				abi: erc20Abi,
-				address: paymentToken,
+				address: paymentToken as Hex,
 				functionName: 'balanceOf',
 				args: [$signerAddress as Hex]
 			})) as bigint;
@@ -277,7 +277,7 @@
 			// Check current allowance with retry
 			const currentAllowance = await retryRpcCall(() => readContract($wagmiConfig, {
 				abi: erc20Abi,
-				address: paymentToken,
+				address: paymentToken as Hex,
 				functionName: 'allowance',
 				args: [$signerAddress as Hex, authorizerAddress as Hex]
 			}));
@@ -291,7 +291,7 @@
 				// Simulate approval first with retry
 				const { request: approvalRequest } = await retryRpcCall(() => simulateContract($wagmiConfig, {
 					abi: erc20Abi,
-					address: paymentToken,
+					address: paymentToken as Hex,
 					functionName: 'approve',
 					args: [authorizerAddress as Hex, requiredAmount]
 				}));
@@ -349,7 +349,7 @@
 		}
 	}
 
-	function resetForm() {
+	function _resetForm() {
 		investmentAmount = 5000;
 		agreedToTerms = false;
 		txStatus = TxStatus.IDLE;
@@ -435,12 +435,12 @@
 	const orderSummaryClasses = 'border border-light-gray p-6';
 	const termsCheckboxClasses = 'flex items-start gap-3 text-sm leading-relaxed cursor-pointer';
 	const checkboxInputClasses = 'mt-1';
-	const formActionsClasses = 'flex gap-4 mt-4';
-	const successStateClasses = 'text-center p-8';
+	const _formActionsClasses = 'flex gap-4 mt-4';
+	const _successStateClasses = 'text-center p-8';
 	const successIconClasses = 'w-16 h-16 bg-green-500 text-white rounded-full flex items-center justify-center text-2xl mx-auto mb-4';
-	const errorStateClasses = 'text-center p-8';
+	const _errorStateClasses = 'text-center p-8';
 	const successTitleClasses = 'text-xl font-bold text-black mb-4 m-0';
-	const successTextClasses = 'text-gray-600 m-0';
+	const _successTextClasses = 'text-gray-600 m-0';
 	const errorTitleClasses = 'text-xl font-bold text-black mb-4 m-0';
 	const errorTextClasses = 'text-gray-600 mb-4 m-0';
 	const tokenDetailsTitleClasses = 'text-base font-medium text-black mb-4 m-0';
@@ -724,9 +724,11 @@
 						</svg>
 						Track in Wallet
 					</button>
-					<SecondaryButton on:click={closeWidget} fullWidth className="mt-4">
-						Close
-					</SecondaryButton>
+					<div class="mt-4">
+						<SecondaryButton on:click={closeWidget} fullWidth>
+							Close
+						</SecondaryButton>
+					</div>
 				</div>
 			{:else if purchaseError}
 				<!-- Error State -->
