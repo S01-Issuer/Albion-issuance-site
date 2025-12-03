@@ -20,7 +20,6 @@
 	} from '$lib/components/components';
 	import { PageLayout, HeroSection, ContentSection, FullWidthSection } from '$lib/components/layout';
 	import { formatCurrency, formatPercentage, formatNumber } from '$lib/utils/formatters';
-	import { sftRepository } from '$lib/data/repositories/sftRepository';
 	import { sfts, sftMetadata } from '$lib/stores';
 	import { formatEther } from 'viem';
 	import { goto } from '$app/navigation';
@@ -30,7 +29,6 @@
 import type { ClaimsResult, ClaimsHoldingsGroup } from '$lib/services/ClaimsService';
 import type { ClaimHistory as ClaimsHistoryItem } from '$lib/utils/claims';
 import type { PinnedMetadata } from '$lib/types/PinnedMetadata';
-import type { DepositWithReceipt } from '$lib/types/graphql';
 
 const isDev = import.meta.env.DEV;
 const logDev = (...messages: unknown[]) => {
@@ -47,12 +45,6 @@ interface ClaimGroupSummary {
 	totalEarned: number;
 	holdings: ClaimsHoldingsGroup['holdings'];
 }
-
-type EnrichedDeposit = DepositWithReceipt & {
-	sftAddress?: string;
-	sftName?: string;
-	timestamp?: string;
-};
 
 interface MonthlyPayout {
 	month: string;
@@ -131,7 +123,6 @@ let activeTab: PortfolioTab = 'overview';
 	let claimHistory: ClaimsHistoryItem[] = [];
 	let monthlyPayouts: MonthlyPayout[] = [];
 	let tokenAllocations: TokenAllocationEntry[] = [];
-let allDepositsData: EnrichedDeposit[] = [];
 let claimsHoldings: ClaimGroupSummary[] = [];
 let hasPortfolioHistory = false;
 let catalogRef: ReturnType<typeof useCatalogService> | null = null;
@@ -158,7 +149,7 @@ $: historyModalCumulativeData = historyModalPayoutData.reduce<CumulativeHistoryP
 	[],
 );
 
-$: hasPortfolioHistory = (Array.isArray(allDepositsData) && allDepositsData.length > 0) || (Array.isArray(claimHistory) && claimHistory.length > 0);
+$: hasPortfolioHistory = holdings.length > 0 || (Array.isArray(claimHistory) && claimHistory.length > 0);
 
 	function openHistoryModal(holding: PortfolioHolding) {
 		historyModalHolding = holding;
@@ -299,7 +290,7 @@ function percentageDisplay(value: number): string {
 			'allocation_percent',
 			'status',
 			'location',
-			'total_invested_usdc',
+			'total_holdings_usdc',
 			'total_earned_usdc',
 			'claimed_usdc',
 			'unclaimed_usdc',
@@ -340,7 +331,7 @@ function percentageDisplay(value: number): string {
 				allocation_percent: toPercent(allocationPercent),
 				status: holding.status || '',
 				location,
-				total_invested_usdc: toCurrency(holding.totalInvested),
+				total_holdings_usdc: toCurrency(holding.totalInvested),
 				total_earned_usdc: toCurrency(holding.totalPayoutsEarned),
 				claimed_usdc: toCurrency(holding.claimedAmount),
 				unclaimed_usdc: toCurrency(holding.unclaimedAmount),
@@ -474,9 +465,6 @@ function percentageDisplay(value: number): string {
 				});
 			}
 
-			// Get deposits data
-			allDepositsData = await sftRepository.getDepositsForOwner($signerAddress);
-
 			if (!$sfts || !$sftMetadata || $sfts.length === 0 || $sftMetadata.length === 0) {
 				pageLoading = false;
 				isLoadingData = false;
@@ -487,31 +475,6 @@ function percentageDisplay(value: number): string {
 			const decodedMeta = $sftMetadata
 				.map((metaV1) => decodeSftInformation(metaV1))
 				.filter((meta): meta is PinnedMetadata => Boolean(meta));
-
-			// Process deposit data with timestamps
-			const enrichedDeposits: EnrichedDeposit[] = [];
-			if (allDepositsData && allDepositsData.length > 0) {
-				for(const sft of $sfts) {
-					const sftDeposits = allDepositsData.filter(
-						(deposit) =>
-							deposit.offchainAssetReceiptVault?.id?.toLowerCase() ===
-							sft.id.toLowerCase(),
-					);
-					
-					for(const deposit of sftDeposits) {
-						enrichedDeposits.push({
-							...deposit,
-							sftAddress: sft.id,
-							sftName: sft.name || sft.id,
-							timestamp: new Date().toISOString()
-						});
-					}
-				}
-				// Only replace if we have enriched deposits
-				if (enrichedDeposits.length > 0) {
-					allDepositsData = enrichedDeposits;
-				}
-			}
 
 			// Deduplicate SFTs by ID
 			const uniqueSftsMap: Record<string, typeof $sfts[number]> = {};
@@ -552,42 +515,18 @@ function percentageDisplay(value: number): string {
 						continue;
 					}
 
-					// Get ALL deposits for this specific SFT and sum them
-					const sftDeposits = allDepositsData.filter(
-						(deposit) =>
-							deposit.offchainAssetReceiptVault?.id?.toLowerCase() ===
-							sft.id.toLowerCase(),
-					);
-					
-					// Sum all deposits for this SFT
-					let totalInvestedInSft = 0;
+					// Get token balance directly from tokenHolders (source of truth)
 					let tokensOwned = 0;
 
-					if (sftDeposits.length > 0) {
-						for (const deposit of sftDeposits) {
-							const amountRaw = deposit.amount ?? '0';
-							const amountWei =
-								typeof amountRaw === 'bigint' ? amountRaw : BigInt(amountRaw);
-							const depositAmount = Number(formatEther(amountWei));
-							totalInvestedInSft += depositAmount;
-							tokensOwned += depositAmount;
-						}
-					}
-
-					if (tokensOwned === 0 && Array.isArray(sft.tokenHolders)) {
+					if (Array.isArray(sft.tokenHolders)) {
 						const tokenHolder = sft.tokenHolders.find(
 							(holder) =>
 								holder.address?.toLowerCase() === $signerAddress.toLowerCase(),
 						);
 						if (tokenHolder) {
-							// Fallback to on-chain balance when the subgraph has no deposit records
-							const holderBalance = Number(
+							tokensOwned = Number(
 								formatEther(BigInt(tokenHolder.balance)),
 							);
-							tokensOwned = holderBalance;
-							if (totalInvestedInSft === 0) {
-								totalInvestedInSft = holderBalance;
-							}
 						}
 					}
 					
@@ -698,11 +637,11 @@ function percentageDisplay(value: number): string {
 					
 					// Only add to holdings if user actually owns tokens
 					if (tokensOwned > 0) {
-						const capitalReturned = totalInvestedInSft > 0 
-							? (totalEarnedForSft / totalInvestedInSft) * 100 
+						const capitalReturned = tokensOwned > 0
+							? (totalEarnedForSft / tokensOwned) * 100
 							: 0;
 
-						const unrecoveredCapital = Math.max(0, totalInvestedInSft - totalEarnedForSft);
+						const unrecoveredCapital = Math.max(0, tokensOwned - totalEarnedForSft);
 
 						const lastClaim = sftClaims
 							.filter((claim) => !claim.status || claim.status === 'completed')
@@ -719,7 +658,7 @@ function percentageDisplay(value: number): string {
 								: asset.location
 									? `${asset.location.state || 'Unknown'}, ${asset.location.country || 'Unknown'}`
 									: 'Unknown',
-							totalInvested: totalInvestedInSft,
+							totalInvested: tokensOwned,
 							totalPayoutsEarned: totalEarnedForSft,
 							unclaimedAmount: unclaimedAmountForSft,
 							claimedAmount: claimedAmountForSft,
@@ -790,19 +729,8 @@ function percentageDisplay(value: number): string {
 				};
 			});
 
-			// Calculate portfolio stats
-			if (allDepositsData.length > 0) {
-				totalInvested = allDepositsData.reduce((sum, deposit) => {
-					const amountRaw = deposit?.amount ?? '0';
-					const amountWei = typeof amountRaw === 'bigint' ? amountRaw : BigInt(amountRaw);
-							const amount = Number(formatEther(amountWei));
-					return sum + (Number.isFinite(amount) ? amount : 0);
-				}, 0);
-			} else if (holdings.length > 0) {
-				totalInvested = holdings.reduce((sum, holding) => sum + holding.totalInvested, 0);
-			} else {
-				totalInvested = 0;
-			}
+			// Calculate portfolio stats from holdings (based on token balances)
+			totalInvested = holdings.reduce((sum, holding) => sum + holding.totalInvested, 0);
 
 			if (holdings.length > 0) {
 				totalPayoutsEarned = holdings.reduce((sum, holding) => sum + holding.totalPayoutsEarned, 0);
@@ -870,7 +798,7 @@ function percentageDisplay(value: number): string {
 				</div>
 			{:else}
 				<div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 lg:gap-8 text-center max-w-6xl mx-auto mt-6">
-					<StatsCard title="Total Invested" value={formatCurrency(totalInvested, { compact: true })} subtitle="Capital Deployed" size="small" />
+					<StatsCard title="Total Holdings" value={formatCurrency(totalInvested, { compact: true })} subtitle="Current Value" size="small" />
 					<StatsCard title="Total Earned" value={claimsDataUnavailable ? 'N/A' : formatCurrency(totalPayoutsEarned, { compact: true })} subtitle="All Payouts" size="small" />
 					<StatsCard title="Unclaimed" value={claimsDataUnavailable ? 'N/A' : formatCurrency(unclaimedPayout, { compact: true })} subtitle="Ready to Claim" size="small" />
 					<StatsCard title="Active Assets" value={activeAssetsCount.toString()} subtitle="Assets Held" size="small" />
@@ -1089,7 +1017,7 @@ function percentageDisplay(value: number): string {
 												<div class="text-lg font-extrabold text-black">{formatNumber(historyModalHolding.tokensOwned, { decimals: 3 })}</div>
 											</div>
 											<div>
-												<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-1">Total Invested</div>
+												<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-1">Total Holdings</div>
 												<div class="text-lg font-extrabold text-black">{formatCurrency(historyModalHolding.totalInvested)}</div>
 											</div>
 										</div>
@@ -1160,30 +1088,21 @@ function percentageDisplay(value: number): string {
 						monthlyPayoutsTotals[monthKey] = (monthlyPayoutsTotals[monthKey] ?? 0) + payout.amount;
 					});
 					
-					// Process deposits (mints) from deposits data
-					if (allDepositsData.length > 0) {
-						for (const deposit of allDepositsData) {
-							const timestamp = deposit.timestamp ?? new Date().toISOString();
-							const date = new Date(timestamp);
-							const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-						const amount = Number(formatEther(BigInt(deposit.amount)));
-							monthlyMints[monthKey] =
-								(monthlyMints[monthKey] ?? 0) + (Number.isFinite(amount) ? amount : 0);
-						}
-					} else if (holdings.length > 0) {
-						// Fallback: use holdings data if no deposits available
-						if (monthlyPayouts.length > 0) {
-							const firstPayout = monthlyPayouts[0];
-							const investmentDate = new Date(firstPayout.date);
-							const monthKey = `${investmentDate.getFullYear()}-${String(investmentDate.getMonth() + 1).padStart(2, '0')}`;
-							const totalInvestedAmount = holdings.reduce((sum, holding) => sum + holding.totalInvested, 0);
-							monthlyMints[monthKey] = totalInvestedAmount;
-						} else {
-							const currentDate = new Date();
-							const monthKey = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
-							const totalInvestedAmount = holdings.reduce((sum, holding) => sum + holding.totalInvested, 0);
-							monthlyMints[monthKey] = totalInvestedAmount;
-						}
+					// Use holdings data for mints (since we no longer track individual deposits)
+					if (holdings.length > 0) {
+						// Place holdings at the first payout date, or current month if no payouts
+						const monthKey = monthlyPayouts.length > 0
+							? (() => {
+								const firstPayout = monthlyPayouts[0];
+								const investmentDate = new Date(firstPayout.date);
+								return `${investmentDate.getFullYear()}-${String(investmentDate.getMonth() + 1).padStart(2, '0')}`;
+							})()
+							: (() => {
+								const currentDate = new Date();
+								return `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+							})();
+						const totalHoldingsAmount = holdings.reduce((sum, holding) => sum + holding.totalInvested, 0);
+						monthlyMints[monthKey] = totalHoldingsAmount;
 					}
 					
 					// Create chart data from all months
@@ -1224,9 +1143,9 @@ function percentageDisplay(value: number): string {
 						});
 					});
 					
-					// Calculate real metrics from deposits and trades data
-				const grossDeployed = allDepositsData.reduce(
-				(sum, deposit) => sum + Number(formatEther(BigInt(deposit.amount))),
+					// Calculate real metrics from holdings
+				const grossDeployed = holdings.reduce(
+					(sum, holding) => sum + holding.totalInvested,
 					0,
 				);
 				
@@ -1333,9 +1252,9 @@ function percentageDisplay(value: number): string {
 						</div>
 
 						<div class="bg-white border border-light-gray rounded-none p-4 relative overflow-visible">
-							<div class="text-sm font-bold text-black opacity-70 uppercase tracking-wider mb-2">Gross Deployed</div>
+							<div class="text-sm font-bold text-black opacity-70 uppercase tracking-wider mb-2">Total Holdings</div>
 							<div class="text-xl font-extrabold text-black mb-1 break-all">{formatCurrency(capitalWalkData.grossDeployed)}</div>
-							<div class="text-xs text-black opacity-70">Total invested</div>
+							<div class="text-xs text-black opacity-70">Current value</div>
 							<div
 								class="absolute top-4 right-4 w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold flex items-center justify-center cursor-help hover:bg-gray-400 transition-colors"
 								on:mouseenter={() => showTooltipWithDelay('gross-deployed')}
@@ -1349,7 +1268,7 @@ function percentageDisplay(value: number): string {
 							</div>
 							{#if isTooltipVisible('gross-deployed')}
 								<div class="absolute right-0 top-10 bg-black text-white p-3 rounded-none text-xs z-[1000] w-48">
-									Total amount invested across all assets
+									Total value of tokens held across all assets
 								</div>
 							{/if}
 						</div>
@@ -1381,7 +1300,7 @@ function percentageDisplay(value: number): string {
 							<div class="text-xl font-extrabold {capitalWalkData.currentNetPosition >= 0 ? 'text-green-600' : 'text-red-600'} mb-1 break-all">
 								{currencyDisplay(capitalWalkData.currentNetPosition)}
 							</div>
-							<div class="text-xs text-black opacity-70">Total Payouts - Total Invested</div>
+							<div class="text-xs text-black opacity-70">Total Payouts - Total Holdings</div>
 							<div
 								class="absolute top-4 right-4 w-3 h-3 rounded-full bg-gray-300 text-black text-[8px] font-bold flex items-center justify-center cursor-help hover:bg-gray-400 transition-colors"
 								on:mouseenter={() => showTooltipWithDelay('realised-profit')}
@@ -1395,7 +1314,7 @@ function percentageDisplay(value: number): string {
 							</div>
 							{#if isTooltipVisible('realised-profit')}
 								<div class="absolute right-0 top-10 bg-black text-white p-3 rounded-none text-xs z-[1000] w-48">
-									Your current profit/loss position accounting for all investments and payouts received
+									Your current profit/loss position accounting for holdings and payouts received
 								</div>
 							{/if}
 						</div>
