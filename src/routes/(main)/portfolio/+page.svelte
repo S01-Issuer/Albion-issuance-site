@@ -514,19 +514,24 @@ function percentageDisplay(value: number): string {
 		// Prevent duplicate loads for the same address
 		if (isLoadingData && loadingForAddress === $signerAddress) return;
 		isLoadingData = true;
+
+		// Only reset data if wallet address changed (prevents UI flicker on refresh)
+		const addressChanged = loadingForAddress !== $signerAddress;
 		loadingForAddress = $signerAddress;
 		pageLoading = true;
 
-		// Reset all portfolio variables
-		totalInvested = 0;
-		totalPayoutsEarned = 0;
-		unclaimedPayout = 0;
-		activeAssetsCount = 0;
-		monthlyPayouts = [];
-		tokenAllocations = [];
-		holdings = [];
-		claimsHoldings = [];
-		claimHistory = [];
+		if (addressChanged) {
+			// Reset all portfolio variables only when switching wallets
+			totalInvested = 0;
+			totalPayoutsEarned = 0;
+			unclaimedPayout = 0;
+			activeAssetsCount = 0;
+			monthlyPayouts = [];
+			tokenAllocations = [];
+			holdings = [];
+			claimsHoldings = [];
+			claimHistory = [];
+		}
 
 		try {
 			// Build catalog to populate stores

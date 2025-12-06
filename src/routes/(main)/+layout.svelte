@@ -10,6 +10,11 @@
 	
 	$: currentPath = $page.url.pathname;
 	let mobileMenuOpen = false;
+
+	// Close mobile menu on route change
+	$: if (currentPath) {
+		mobileMenuOpen = false;
+	}
     // Newsletter subscription state
     let newsletterSubmitting = false;
     let newsletterStatus: 'idle' | 'success' | 'error' = 'idle';

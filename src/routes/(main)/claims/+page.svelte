@@ -113,13 +113,11 @@
 				totalEarned = result.totals.earned;
 				totalClaimed = result.totals.claimed;
 				unclaimedPayout = result.totals.unclaimed;
-			} else {
-				resetClaimsState();
 			}
+			// On partial error (hasCsvLoadError), preserve any existing data rather than wiping
 		} catch (error) {
 			console.error('Error loading claims:', error);
-			// Set defaults on error
-			resetClaimsState();
+			// Preserve existing data on error - only set error flag, don't wipe state
 			dataLoadError = true;
 		} finally {
 			pageLoading = false;
@@ -381,18 +379,36 @@
 				<p>Loading your claims data...</p>
 			</div>
 		</ContentSection>
-	{:else if dataLoadError}
+	{:else if dataLoadError && holdings.length === 0 && claimHistory.length === 0}
 		<ContentSection background="white" padding="standard" centered>
 			<div class="text-center py-16 px-4" role="alert" aria-live="assertive">
 				<p class="text-3xl font-black text-black mb-4">Unable to load data.</p>
-				<p class="text-lg text-black opacity-80 max-w-2xl mx-auto">
-					This might be due to unusually high IPFS traffic. Please try again later.
+				<p class="text-lg text-black opacity-80 max-w-2xl mx-auto mb-6">
+					This might be due to unusually high IPFS traffic. Please try again.
 				</p>
+				<PrimaryButton on:click={() => loadClaimsData($signerAddress ?? '', true)}>
+					Retry
+				</PrimaryButton>
 			</div>
 		</ContentSection>
 	{:else}
+		<!-- Error banner when we have existing data but refresh failed -->
+		{#if dataLoadError}
+			<div class="bg-orange-100 border-b border-orange-300 px-4 py-3">
+				<div class="max-w-6xl mx-auto flex items-center justify-between gap-4">
+					<p class="text-orange-800 text-sm">Unable to refresh data. Showing previously loaded data.</p>
+					<button
+						class="text-orange-800 hover:text-orange-900 text-sm font-medium underline"
+						on:click={() => loadClaimsData($signerAddress ?? '', true)}
+					>
+						Retry
+					</button>
+				</div>
+			</div>
+		{/if}
+
 		<!-- Header -->
-		<HeroSection 
+		<HeroSection
 			title="Claims & Payouts"
 			subtitle="Claim your energy asset payouts and track your claims history"
 			showBorder={false}
@@ -440,7 +456,12 @@
 			{/if}
 
 			{#if claimSuccess && claimingTarget === null && confirmingTarget === null}
-				<div class="text-center mt-4 p-4 bg-green-100 text-green-800 rounded-none max-w-md mx-auto">
+				<div class="text-center mt-4 p-4 bg-green-100 text-green-800 rounded-none max-w-md mx-auto relative">
+					<button
+						class="absolute top-2 right-2 text-green-600 hover:text-green-800 text-lg leading-none"
+						on:click={() => claimSuccess = false}
+						aria-label="Dismiss"
+					>×</button>
 					✅ Claim successful! Tokens have been sent to your wallet.
 				</div>
 			{/if}

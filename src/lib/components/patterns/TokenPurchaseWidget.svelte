@@ -378,6 +378,7 @@
 	}
 
 	function closeWidget() {
+		_resetForm();
 		isOpen = false;
 		dispatch('close');
 	}
@@ -665,7 +666,15 @@
 
 <!-- Separate Transaction Status Modal (centered) -->
 {#if purchasing || purchaseSuccess || purchaseError}
-	<div class={confirmationOverlayClasses} role="dialog" aria-modal="true" transition:fade={{ duration: 200 }}>
+	<div
+		class={confirmationOverlayClasses}
+		role="dialog"
+		aria-modal="true"
+		tabindex="-1"
+		transition:fade={{ duration: 200 }}
+		on:pointerdown={(e) => { if (e.target === e.currentTarget && !purchasing) closeWidget(); }}
+		on:keydown={(e) => { if (e.key === 'Escape' && !purchasing) closeWidget(); }}
+	>
 		<div class="bg-white w-full max-w-sm p-8 shadow-2xl" transition:fly={{ y: 20, duration: 200 }}>
 			{#if purchasing}
 				<!-- Transaction Pending State -->
