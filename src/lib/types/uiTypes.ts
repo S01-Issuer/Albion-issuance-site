@@ -11,6 +11,7 @@ import type {
   ISODateOnlyString,
   ISOYearMonthString,
 } from "./sharedTypes";
+import type { Document } from "./MetaboardTypes";
 
 // Asset Terms for display
 export interface AssetTerms {
@@ -120,6 +121,8 @@ export interface Asset {
   productionHistory?: ProductionHistoryRecord[]; // Historical production data without financial details
   plannedProduction?: PlannedProduction;
   operationalMetrics?: OperationalMetrics;
+  documents?: Document[]; // Legal documents, reports, etc.
+  cashflowStartDate?: string; // YYYY-MM format - when royalty payments begin accruing
   metadata?: Metadata;
 }
 

@@ -14,7 +14,9 @@
 	export let showGrid: boolean = true;
 	export let series1Name: string = '';
 	export let series2Name: string = '';
-	
+	export let showSmallValueLabels: boolean = false; // Show labels above small bars
+	export let smallBarThreshold: number = 0.05; // Bars smaller than 5% of range get labels
+
 	// Helper to determine which labels to show based on data density
 	function getLabelsToShow(
 		points: Array<{ label: string; value: number }>,
@@ -267,15 +269,69 @@
 			{/each}
 		{/if}
 		
+		<!-- Labels for small bars (series 1) -->
+		{#if showSmallValueLabels && validData.length > 0}
+			{#each validData as item, i (item.label + '-label1-' + i)}
+				{@const barHeightRatio = Math.abs(item.value) / valueRange}
+				{#if barHeightRatio < smallBarThreshold && item.value !== 0}
+					{@const x = validData2.length > 0
+						? padding.left + i * barSpacing + (barSpacing - barWidth * 2) / 2 + barWidth / 2
+						: padding.left + i * barSpacing + barSpacing / 2}
+					{@const y = item.value >= 0
+						? zeroY - Math.abs((item.value - 0) / valueRange) * chartHeight - 8
+						: zeroY + Math.abs((item.value - 0) / valueRange) * chartHeight + 14}
+					{@const displayValue = Math.abs(item.value) >= 1000
+						? `${valuePrefix}${(item.value / 1000).toFixed(1)}k`
+						: `${valuePrefix}${Math.round(item.value)}`}
+					<text
+						{x}
+						{y}
+						text-anchor="middle"
+						font-size="10"
+						font-weight="bold"
+						fill={barColor}
+					>
+						{displayValue}
+					</text>
+				{/if}
+			{/each}
+		{/if}
+
+		<!-- Labels for small bars (series 2) -->
+		{#if showSmallValueLabels && validData2.length > 0}
+			{#each validData2 as item, i (item.label + '-label2-' + i)}
+				{@const barHeightRatio = Math.abs(item.value) / valueRange}
+				{#if barHeightRatio < smallBarThreshold && item.value !== 0}
+					{@const x = padding.left + i * barSpacing + (barSpacing - barWidth * 2) / 2 + barWidth * 1.5}
+					{@const y = item.value >= 0
+						? zeroY - Math.abs((item.value - 0) / valueRange) * chartHeight - 8
+						: zeroY + Math.abs((item.value - 0) / valueRange) * chartHeight + 14}
+					{@const displayValue = Math.abs(item.value) >= 1000
+						? `${valuePrefix}${(item.value / 1000).toFixed(1)}k`
+						: `${valuePrefix}${Math.round(item.value)}`}
+					<text
+						{x}
+						{y}
+						text-anchor="middle"
+						font-size="10"
+						font-weight="bold"
+						fill={barColor2}
+					>
+						{displayValue}
+					</text>
+				{/if}
+			{/each}
+		{/if}
+
 		<!-- Zero line if chart has negative values -->
 		{#if minValue < 0}
-			<line 
-				x1={padding.left} 
-				y1={zeroY} 
-				x2={padding.left + chartWidth} 
-				y2={zeroY} 
-				stroke="#000000" 
-				stroke-width="1" 
+			<line
+				x1={padding.left}
+				y1={zeroY}
+				x2={padding.left + chartWidth}
+				y2={zeroY}
+				stroke="#000000"
+				stroke-width="1"
 				opacity="0.3"
 			/>
 		{/if}

@@ -2,6 +2,7 @@
 	import { base } from '@wagmi/core/chains';
 
 	let isOpen = false;
+	let containerElement: HTMLDivElement;
 
 	// Network configuration
 	const networks = [
@@ -30,9 +31,17 @@
 		// For now, just close the dropdown as Base is the only supported network
 		closeDropdown();
 	}
+
+	function handleClickOutside(event: MouseEvent) {
+		if (isOpen && containerElement && !containerElement.contains(event.target as Node)) {
+			closeDropdown();
+		}
+	}
 </script>
 
-<div class="relative">
+<svelte:window on:click={handleClickOutside} />
+
+<div class="relative" bind:this={containerElement}>
 	<button
 		class="flex items-center gap-2 px-2 sm:px-3 py-2 text-xs sm:text-sm bg-white border border-light-gray rounded-none hover:bg-light-gray hover:border-secondary transition-all duration-200 flex-shrink-0"
 		on:click={toggleDropdown}

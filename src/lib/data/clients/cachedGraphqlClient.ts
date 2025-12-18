@@ -8,6 +8,14 @@ interface CacheEntry<T> {
   promise?: Promise<T>;
 }
 
+interface ExecuteOptions {
+  ttl?: number;
+  skipCache?: boolean;
+  fallbackUrls?: string[];
+  retries?: number;
+  timeoutMs?: number;
+}
+
 class GraphQLCache {
   private cache = new Map<string, CacheEntry<unknown>>();
   private readonly DEFAULT_TTL = 5 * 60 * 1000; // 5 minutes
@@ -16,8 +24,9 @@ class GraphQLCache {
     url: string,
     query: string,
     variables?: Record<string, unknown>,
+    fallbackUrls?: string[],
   ): string {
-    return JSON.stringify({ url, query, variables });
+    return JSON.stringify({ url, query, variables, fallbackUrls });
   }
 
   private isExpired(
@@ -31,9 +40,10 @@ class GraphQLCache {
     url: string,
     query: string,
     variables?: Record<string, unknown>,
-    options?: { ttl?: number; skipCache?: boolean },
+    options?: ExecuteOptions,
   ): Promise<T> {
-    const cacheKey = this.getCacheKey(url, query, variables);
+    const fallbackUrls = options?.fallbackUrls?.filter(Boolean) ?? [];
+    const cacheKey = this.getCacheKey(url, query, variables, fallbackUrls);
 
     // Skip cache if requested
     if (!options?.skipCache) {
@@ -55,7 +65,11 @@ class GraphQLCache {
     }
 
     // Create new request promise
-    const promise = this.fetchGraphQL<T>(url, query, variables);
+    const promise = this.fetchWithFallback<T>(url, query, variables, {
+      retries: options?.retries,
+      timeoutMs: options?.timeoutMs,
+      fallbackUrls,
+    });
 
     // Store promise for deduplication
     this.cache.set(cacheKey, {
@@ -80,10 +94,68 @@ class GraphQLCache {
     }
   }
 
+  private async fetchWithFallback<T>(
+    url: string,
+    query: string,
+    variables: Record<string, unknown> | undefined,
+    options?: Pick<ExecuteOptions, "fallbackUrls" | "retries" | "timeoutMs">,
+  ): Promise<T> {
+    const urlsToTry = [url, ...(options?.fallbackUrls ?? [])].filter(Boolean);
+    let lastError: unknown;
+
+    for (const candidate of urlsToTry) {
+      try {
+        return await this.fetchWithRetries<T>(
+          candidate,
+          query,
+          variables,
+          options,
+        );
+      } catch (error) {
+        lastError = error;
+        if (import.meta.env?.DEV) {
+          console.warn(`[GraphQL] Failed against ${candidate}:`, error);
+        }
+      }
+    }
+
+    throw lastError ?? new Error("GraphQL request failed");
+  }
+
+  private async fetchWithRetries<T>(
+    url: string,
+    query: string,
+    variables: Record<string, unknown> | undefined,
+    options?: Pick<ExecuteOptions, "retries" | "timeoutMs">,
+  ): Promise<T> {
+    const maxAttempts = (options?.retries ?? 2) + 1;
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.fetchGraphQL<T>(
+          url,
+          query,
+          variables,
+          options?.timeoutMs,
+        );
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxAttempts) {
+          const delayMs = 200 * 2 ** (attempt - 1);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+
+    throw lastError ?? new Error("GraphQL request failed");
+  }
+
   private async fetchGraphQL<T>(
     url: string,
     query: string,
     variables?: Record<string, unknown>,
+    timeoutMs = 15_000,
   ): Promise<T> {
     const isDev = import.meta.env?.DEV ?? false;
     if (isDev) {
@@ -92,11 +164,23 @@ class GraphQLCache {
       console.warn(`[GraphQL] Variables:`, variables);
     }
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, variables }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, variables }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      clearTimeout(timeout);
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     const json = await response.json();
 
@@ -151,6 +235,7 @@ export async function executeGraphQL<T>(
   url: string,
   query: string,
   variables?: Record<string, unknown>,
+  options?: ExecuteOptions,
 ): Promise<T> {
-  return graphQLCache.execute<T>(url, query, variables);
+  return graphQLCache.execute<T>(url, query, variables, options);
 }

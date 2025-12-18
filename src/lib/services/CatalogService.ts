@@ -16,6 +16,62 @@ import { getMaxSharesSupplyMap } from "$lib/data/clients/onchain";
 
 type DecodedMetadata = ReturnType<typeof decodeSftInformation>;
 
+interface SftWithMetadata {
+  sft: OffchainAssetReceiptVault;
+  pinnedMetadata: DecodedMetadata;
+  maxSupply: string;
+}
+
+/**
+ * Get the most recent month from receiptsData array
+ * Returns empty string if no valid receiptsData
+ */
+function getLatestReceiptsMonth(metadata: DecodedMetadata): string {
+  const receiptsData = metadata?.asset?.receiptsData;
+  if (!Array.isArray(receiptsData) || receiptsData.length === 0) {
+    return "";
+  }
+
+  let latestMonth = "";
+  for (const record of receiptsData) {
+    const month = record?.month;
+    if (typeof month === "string" && month > latestMonth) {
+      latestMonth = month;
+    }
+  }
+  return latestMonth;
+}
+
+/**
+ * Select the SFT with the most recent receiptsData from a group
+ * If multiple have the same latest month, pick randomly
+ */
+function selectSftWithMostRecentReceipts(
+  group: SftWithMetadata[],
+): SftWithMetadata {
+  if (group.length === 1) {
+    return group[0];
+  }
+
+  // Find the latest month across all metadata in the group
+  let maxMonth = "";
+  for (const item of group) {
+    const latestMonth = getLatestReceiptsMonth(item.pinnedMetadata);
+    if (latestMonth > maxMonth) {
+      maxMonth = latestMonth;
+    }
+  }
+
+  // Filter to only those with the most recent month
+  const candidates = group.filter(
+    (item) => getLatestReceiptsMonth(item.pinnedMetadata) === maxMonth,
+  );
+
+  // Pick randomly from candidates
+  const randomIndex = Math.floor(Math.random() * candidates.length);
+  return candidates[randomIndex];
+}
+
 export interface CatalogData {
   assets: Record<string, Asset>;
   tokens: Record<string, TokenMetadata>;
@@ -134,6 +190,10 @@ export class CatalogService {
     const tokens: Record<string, TokenMetadata> = {};
     const maxSupplyByToken: Record<string, string> = {};
 
+    // First pass: collect all SFT+metadata pairs grouped by asset ID
+    const assetGroups: Record<string, SftWithMetadata[]> = {};
+    const sftToAssetId: Record<string, string> = {};
+
     for (const sft of $sfts) {
       const targetAddress = `0x000000000000000000000000${sft.id.slice(2)}`;
       const pinnedMetadata = decodedMeta.find(
@@ -152,48 +212,76 @@ export class CatalogService {
         maxSupply = sft.totalShares;
       }
 
-      // Use transformers to create instances
+      // Asset ID canonicalization via ENERGY_FIELDS name → kebab-case
+      const field = ENERGY_FIELDS.find((f) =>
+        f.sftTokens.some(
+          (t) => t.address.toLowerCase() === sft.id.toLowerCase(),
+        ),
+      );
+      const assetId = field
+        ? field.name
+            .toLowerCase()
+            .replace(/\s+/g, "-")
+            .replace(/[^a-z0-9-]/g, "")
+        : sft.id.toLowerCase();
+
+      // Group by asset ID
+      if (!assetGroups[assetId]) {
+        assetGroups[assetId] = [];
+      }
+      assetGroups[assetId].push({ sft, pinnedMetadata, maxSupply });
+      sftToAssetId[sft.id.toLowerCase()] = assetId;
+    }
+
+    // Second pass: for each asset group, select the SFT with the most recent receiptsData
+    // and create the asset from that metadata
+    for (const [assetId, group] of Object.entries(assetGroups)) {
+      const selected = selectSftWithMostRecentReceipts(group);
+
+      if (!selected.pinnedMetadata) {
+        console.warn(`[CatalogService] No metadata for asset ${assetId}`);
+        continue;
+      }
+
       try {
-        const tokenInstance = tokenMetadataTransformer.transform(
-          sft,
-          pinnedMetadata,
-          maxSupply,
+        // Create asset from the selected SFT's metadata
+        const assetInstance = assetTransformer.transform(
+          selected.sft,
+          selected.pinnedMetadata,
         );
-        tokens[sft.id.toLowerCase()] = tokenInstance;
-        maxSupplyByToken[sft.id.toLowerCase()] = maxSupply;
-
-        // Asset ID canonicalization via ENERGY_FIELDS name → kebab-case
-        const field = ENERGY_FIELDS.find((f) =>
-          f.sftTokens.some(
-            (t) => t.address.toLowerCase() === sft.id.toLowerCase(),
-          ),
-        );
-        const assetId = field
-          ? field.name
-              .toLowerCase()
-              .replace(/\s+/g, "-")
-              .replace(/[^a-z0-9-]/g, "")
-          : sft.id.toLowerCase();
-
-        // Check if asset already exists (multiple tokens for same field)
-        const existingAsset = assets[assetId];
-        if (existingAsset) {
-          // Add this token to the existing asset's tokenContracts
-          existingAsset.tokenContracts = existingAsset.tokenContracts || [];
-          if (!existingAsset.tokenContracts.includes(sft.id)) {
-            existingAsset.tokenContracts.push(sft.id);
-          }
-        } else {
-          // Create new asset instance
-          const assetInstance = assetTransformer.transform(sft, pinnedMetadata);
-          assets[assetId] = assetInstance;
-        }
+        // Collect all token contracts for this asset
+        assetInstance.tokenContracts = group.map((item) => item.sft.id);
+        assets[assetId] = assetInstance;
       } catch (error) {
         console.error(
-          `[CatalogService] Failed to process SFT ${sft.id}:`,
+          `[CatalogService] Failed to create asset ${assetId}:`,
           error,
         );
-        continue;
+      }
+    }
+
+    // Third pass: create all tokens
+    for (const group of Object.values(assetGroups)) {
+      for (const { sft, pinnedMetadata, maxSupply } of group) {
+        if (!pinnedMetadata) {
+          console.warn(`[CatalogService] No metadata for token ${sft.id}`);
+          continue;
+        }
+
+        try {
+          const tokenInstance = tokenMetadataTransformer.transform(
+            sft,
+            pinnedMetadata,
+            maxSupply,
+          );
+          tokens[sft.id.toLowerCase()] = tokenInstance;
+          maxSupplyByToken[sft.id.toLowerCase()] = maxSupply;
+        } catch (error) {
+          console.error(
+            `[CatalogService] Failed to process SFT ${sft.id}:`,
+            error,
+          );
+        }
       }
     }
 
@@ -238,6 +326,30 @@ export class CatalogService {
   getTokenMaxSupply(tokenAddress: string): string | null {
     if (!this.catalog) return null;
     return this.catalog.maxSupplyByToken[tokenAddress.toLowerCase()] || null;
+  }
+
+  /**
+   * Get the shared Asset for a given token address
+   */
+  getAssetByTokenAddress(tokenAddress: string): Asset | null {
+    if (!this.catalog) return null;
+
+    const normalizedAddress = tokenAddress.toLowerCase();
+
+    // Find the energy field that contains this token
+    const field = ENERGY_FIELDS.find((f) =>
+      f.sftTokens.some((t) => t.address.toLowerCase() === normalizedAddress),
+    );
+
+    if (!field) return null;
+
+    // Convert field name to asset ID (kebab-case)
+    const assetId = field.name
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-]/g, "");
+
+    return this.catalog.assets[assetId] || null;
   }
 }
 

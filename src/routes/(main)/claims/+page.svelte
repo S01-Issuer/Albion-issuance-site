@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { writeContract, simulateContract } from '@wagmi/core';
+	import { writeContract, simulateContract, waitForTransactionReceipt } from '@wagmi/core';
 	import { derived, get } from 'svelte/store';
 	import { onMount, onDestroy } from 'svelte';
 	import { web3Modal, signerAddress, connected, wagmiConfig, chainId } from 'svelte-wagmi';
@@ -19,16 +19,13 @@
 	import type { ClaimHistory } from '$lib/utils/claims';
 
 	const claimsService = useClaimsService();
-	const isDev = import.meta.env.DEV;
-	const logDev = (...messages: unknown[]) => {
-		if (isDev) console.warn('[Claims]', ...messages);
-	};
 
 	let totalEarned = 0;
 	let totalClaimed = 0;
 	let unclaimedPayout = 0;
 	let pageLoading = true;
-	let claiming = false;
+	let claimingTarget: 'all' | string | null = null; // 'all' for claim all, field name for single, null for none
+	let confirmingTarget: 'all' | string | null = null;
 	let claimSuccess = false;
 	let dataLoadError = false;
 
@@ -47,22 +44,8 @@
 	function invalidateClaimData() {
 		// Force subsequent loads to re-fetch orderbook data after a claim
 		graphQLCache.invalidate(BASE_ORDERBOOK_SUBGRAPH_URL);
-	}
-
-	function updateClaimsCacheSnapshot() {
-		if (dataLoadError) return;
-		const address = get(signerAddress) ?? '';
-		if (!address) return;
-		claimsCache.set(address, {
-			holdings,
-			claimHistory,
-			totals: {
-				earned: totalEarned,
-				claimed: totalClaimed,
-				unclaimed: unclaimedPayout
-			},
-			hasCsvLoadError: false
-		});
+		// Clear CSV cache so fresh data is fetched on next load
+		claimsService.clearCache();
 	}
 
 	function resetClaimsState() {
@@ -73,34 +56,8 @@
 		unclaimedPayout = 0;
 	}
 
-	function applyClaimOptimisticUpdate(claimGroup?: ClaimsHoldingsGroup) {
-		if (claimGroup) {
-			const claimedAmount = claimGroup.totalAmount ?? 0;
-			if (claimedAmount > 0) {
-				totalClaimed += claimedAmount;
-				unclaimedPayout = Math.max(unclaimedPayout - claimedAmount, 0);
-			}
-			holdings = holdings
-				.map((group) =>
-					group.fieldName === claimGroup.fieldName
-						? { ...group, totalAmount: 0, holdings: [] }
-						: group
-				)
-				.filter((group) => group.totalAmount > 0 && group.holdings.length > 0);
-			updateClaimsCacheSnapshot();
-			return;
-		}
-
-		const claimedAmount = unclaimedPayout;
-		if (claimedAmount > 0) {
-			totalClaimed += claimedAmount;
-		}
-		unclaimedPayout = 0;
-		holdings = [];
-		updateClaimsCacheSnapshot();
-	}
-
 	onMount(() => {
+		claimSuccess = false;
 		subscribeToWallet();
 	});
 
@@ -127,7 +84,6 @@
 			}
 			const cached = forceFresh ? null : claimsCache.get(cacheKey);
 			if (cached) {
-				logDev('Using cached data');
 				dataLoadError = !!cached.hasCsvLoadError;
 				if (dataLoadError) {
 					resetClaimsState();
@@ -143,7 +99,6 @@
 				return;
 			}
 
-			logDev('Loading fresh data');
 			const result = await claimsService.loadClaimsForWallet(cacheKey);
 			
 			// Store in cache
@@ -158,14 +113,11 @@
 				totalEarned = result.totals.earned;
 				totalClaimed = result.totals.claimed;
 				unclaimedPayout = result.totals.unclaimed;
-				updateClaimsCacheSnapshot();
-			} else {
-				resetClaimsState();
 			}
+			// On partial error (hasCsvLoadError), preserve any existing data rather than wiping
 		} catch (error) {
 			console.error('Error loading claims:', error);
-			// Set defaults on error
-			resetClaimsState();
+			// Preserve existing data on error - only set error flag, don't wipe state
 			dataLoadError = true;
 		} finally {
 			pageLoading = false;
@@ -184,8 +136,40 @@
 		if ($web3Modal) $web3Modal.open();
 	}
 
+	async function waitForTransactionInSubgraph(hash: string, maxAttempts = 30): Promise<void> {
+		return new Promise((resolve, reject) => {
+			let attempts = 0;
+			const interval = setInterval(async () => {
+				attempts++;
+				try {
+					// Dynamic import to avoid CommonJS module resolution issues
+					const orderbookModule = await import('@rainlanguage/orderbook') as { getTransaction: (url: string, hash: string) => Promise<{ value?: unknown }> };
+					const getTransaction = orderbookModule.getTransaction;
+					const result = await getTransaction(BASE_ORDERBOOK_SUBGRAPH_URL, hash);
+
+					if (result?.value) {
+						clearInterval(interval);
+						resolve();
+						return;
+					}
+					
+					if (attempts >= maxAttempts) {
+						clearInterval(interval);
+						reject(new Error(`Transaction not found in subgraph after ${maxAttempts} attempts`));
+					}
+				} catch (error) {
+					// Don't fail on individual polling errors, just continue
+					if (attempts >= maxAttempts) {
+						clearInterval(interval);
+						reject(error);
+					}
+				}
+			}, 2000);
+		});
+	}
+
 	async function claimAllPayouts() {
-		claiming = true;
+		claimingTarget = 'all';
 		try {
 			if (holdings.length === 0 || holdings[0].holdings.length === 0) {
 				throw new Error('No holdings available to claim');
@@ -230,28 +214,43 @@
 			});
 
 			// Execute transaction after successful simulation
-			await writeContract($wagmiConfig, request);
+			const hash = await writeContract($wagmiConfig, request);
+
+			// Wait for transaction confirmation
+			confirmingTarget = 'all';
+			await waitForTransactionReceipt($wagmiConfig, {
+				hash,
+				confirmations: 2
+			});
+
+			// Wait for transaction to be indexed in subgraph
+			try {
+				await waitForTransactionInSubgraph(hash);
+			} catch {
+				// Transaction not yet indexed, continuing anyway
+			}
+
+			confirmingTarget = null;
+
 			claimSuccess = true;
-			
-			applyClaimOptimisticUpdate();
 			// Invalidate caches and reload claims data after successful claim
 			invalidateClaimData();
-			setTimeout(() => {
-				const address = get(signerAddress) ?? '';
-				if (!address) return;
-				loadClaimsData(address, true);
-			}, 2000);
+			const address = get(signerAddress) ?? '';
+			if (address) {
+				await loadClaimsData(address, true);
+			}
 
 		} catch (error) {
 			console.error('Claim all failed:', error);
 			claimSuccess = false;
 		} finally {
-			claiming = false;
+			claimingTarget = null;
+			confirmingTarget = null;
 		}
 	}
 
 	async function handleClaimSingle(group: ClaimsHoldingsGroup) {
-		claiming = true;
+		claimingTarget = group.fieldName;
 		try {
 			if (!group.holdings.length) {
 				throw new Error('No orders available for this claim group');
@@ -293,23 +292,38 @@
 			});
 
 			// Execute transaction after successful simulation
-			await writeContract($wagmiConfig, request);
+			const hash = await writeContract($wagmiConfig, request);
+
+			// Wait for transaction confirmation
+			confirmingTarget = group.fieldName;
+			await waitForTransactionReceipt($wagmiConfig, {
+				hash,
+				confirmations: 2
+			});
+
+			// Wait for transaction to be indexed in subgraph
+			try {
+				await waitForTransactionInSubgraph(hash);
+			} catch {
+				// Transaction not yet indexed, continuing anyway
+			}
+
+			confirmingTarget = null;
+
 			claimSuccess = true;
-			
-			applyClaimOptimisticUpdate(group);
-				// Invalidate caches and reload claims data after successful claim
+			// Invalidate caches and reload claims data after successful claim
 			invalidateClaimData();
-			setTimeout(() => {
-				const address = get(signerAddress) ?? '';
-				if (!address) return;
-				loadClaimsData(address, true);
-			}, 2000);
+			const address = get(signerAddress) ?? '';
+			if (address) {
+				await loadClaimsData(address, true);
+			}
 
 		} catch (error) {
 			console.error('Claim single failed:', error);
 			claimSuccess = false;
 		} finally {
-			claiming = false;
+			claimingTarget = null;
+			confirmingTarget = null;
 		}
 	}
 
@@ -365,18 +379,36 @@
 				<p>Loading your claims data...</p>
 			</div>
 		</ContentSection>
-	{:else if dataLoadError}
+	{:else if dataLoadError && holdings.length === 0 && claimHistory.length === 0}
 		<ContentSection background="white" padding="standard" centered>
 			<div class="text-center py-16 px-4" role="alert" aria-live="assertive">
 				<p class="text-3xl font-black text-black mb-4">Unable to load data.</p>
-				<p class="text-lg text-black opacity-80 max-w-2xl mx-auto">
-					This might be due to unusually high IPFS traffic. Please try again later.
+				<p class="text-lg text-black opacity-80 max-w-2xl mx-auto mb-6">
+					This might be due to unusually high IPFS traffic. Please try again.
 				</p>
+				<PrimaryButton on:click={() => loadClaimsData($signerAddress ?? '', true)}>
+					Retry
+				</PrimaryButton>
 			</div>
 		</ContentSection>
 	{:else}
+		<!-- Error banner when we have existing data but refresh failed -->
+		{#if dataLoadError}
+			<div class="bg-orange-100 border-b border-orange-300 px-4 py-3">
+				<div class="max-w-6xl mx-auto flex items-center justify-between gap-4">
+					<p class="text-orange-800 text-sm">Unable to refresh data. Showing previously loaded data.</p>
+					<button
+						class="text-orange-800 hover:text-orange-900 text-sm font-medium underline"
+						on:click={() => loadClaimsData($signerAddress ?? '', true)}
+					>
+						Retry
+					</button>
+				</div>
+			</div>
+		{/if}
+
 		<!-- Header -->
-		<HeroSection 
+		<HeroSection
 			title="Claims & Payouts"
 			subtitle="Claim your energy asset payouts and track your claims history"
 			showBorder={false}
@@ -415,16 +447,21 @@
 				<div class="text-center mt-6 lg:mt-8">
 					<PrimaryButton
 						on:click={claimAllPayouts}
-						disabled={claiming}
+						disabled={claimingTarget !== null || confirmingTarget !== null}
 						size="large"
 					>
-						{claiming ? 'Processing...' : `Claim All (${formatCurrency(unclaimedPayout)})`}
+						{claimingTarget === 'all' ? 'Submitting transaction...' : confirmingTarget === 'all' ? 'Waiting for confirmation...' : `Claim All (${formatCurrency(unclaimedPayout)})`}
 					</PrimaryButton>
 				</div>
 			{/if}
 
-			{#if claimSuccess}
-				<div class="text-center mt-4 p-4 bg-green-100 text-green-800 rounded-none max-w-md mx-auto">
+			{#if claimSuccess && claimingTarget === null && confirmingTarget === null}
+				<div class="text-center mt-4 p-4 bg-green-100 text-green-800 rounded-none max-w-md mx-auto relative">
+					<button
+						class="absolute top-2 right-2 text-green-600 hover:text-green-800 text-lg leading-none"
+						on:click={() => claimSuccess = false}
+						aria-label="Dismiss"
+					>×</button>
 					✅ Claim successful! Tokens have been sent to your wallet.
 				</div>
 			{/if}
@@ -458,13 +495,13 @@
 										<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wide">Available</div>
 									</div>
 									<div class="text-center">
-										<SecondaryButton 
-											size="small" 
-											disabled={claiming || group.totalAmount <= 0}
+										<SecondaryButton
+											size="small"
+											disabled={claimingTarget !== null || confirmingTarget !== null || group.totalAmount <= 0}
 											on:click={() => handleClaimSingle(group)}
 											fullWidth
 										>
-											{claiming ? 'Processing...' : 'Claim'}
+											{claimingTarget === group.fieldName ? 'Submitting...' : confirmingTarget === group.fieldName ? 'Confirming...' : 'Claim'}
 										</SecondaryButton>
 									</div>
 								</div>

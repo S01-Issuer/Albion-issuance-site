@@ -10,6 +10,11 @@
 	
 	$: currentPath = $page.url.pathname;
 	let mobileMenuOpen = false;
+
+	// Close mobile menu on route change
+	$: if (currentPath) {
+		mobileMenuOpen = false;
+	}
     // Newsletter subscription state
     let newsletterSubmitting = false;
     let newsletterStatus: 'idle' | 'success' | 'error' = 'idle';
@@ -91,8 +96,7 @@
 	$: if ($vaultQuery && $vaultQuery.data) {
 		sfts.set($vaultQuery.data);
 	} else if ($vaultQuery && $vaultQuery.isError) {
-		// Set to empty array on error to indicate "loaded but failed"
-		sfts.set([]);
+		// Keep existing store value on error to avoid wiping last-known-good data
 	}
 	
 

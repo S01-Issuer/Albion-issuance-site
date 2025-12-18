@@ -334,8 +334,8 @@
 				style="transform: translateX(-{currentIndex * 100}%)"
 			>
 				{#each featuredTokensWithAssets as item, index (item.token.contractAddress)}
-					{@const sft = $sfts?.find(s => s.id.toLowerCase() === item.token.contractAddress.toLowerCase())}
-					{@const maxSupply = catalogService.getTokenMaxSupply(item.token.contractAddress) ?? undefined}
+					{@const _sft = $sfts?.find(s => s.id.toLowerCase() === item.token.contractAddress.toLowerCase())}
+					{@const _maxSupply = catalogService.getTokenMaxSupply(item.token.contractAddress) ?? undefined}
 					{@const supplyValues = getTokenSupplyValues(item.token)}
 					{@const remainingCashflows = calculateMonthlyTokenCashflows(item.token, 65, supplyValues.mintedSupply, 1).map(m => m.cashflow)}
 					{@const monthlyIRR = remainingCashflows.length > 1 ? calculateIRR(remainingCashflows) : 0}

@@ -12,7 +12,7 @@
 	import TabButton from '$lib/components/components/TabButton.svelte';
 	import { PageLayout, ContentSection } from '$lib/components/layout';
 	import { getImageUrl } from '$lib/utils/imagePath';
-	import { formatCurrency, formatSmartReturn, formatHash, formatEndDate, formatAccrualStartDate, formatEstFirstPayout } from '$lib/utils/formatters';
+	import { formatCurrency, formatSmartReturn, formatHash, formatAccrualStartDate, formatEstFirstPayout } from '$lib/utils/formatters';
 	import { hasIncompleteReleases } from '$lib/utils/futureReleases';
 	import { useAssetDetailData, useDataExport } from '$lib/composables';
 	import AssetDetailHeader from '$lib/components/patterns/assets/AssetDetailHeader.svelte';
@@ -24,6 +24,7 @@ import { PINATA_GATEWAY } from '$lib/network';
 import { catalogService } from '$lib/services';
 import { getTokenTermsPath } from '$lib/utils/tokenTerms';
 import { getTxUrl, getAddressUrl } from '$lib/utils/explorer';
+import { addTokenToWallet } from '$lib/utils/walletUtils';
 import { Chart as ChartJS, registerables } from 'chart.js';
 import { onDestroy } from 'svelte';
 import { useQueryClient } from '@tanstack/svelte-query';
@@ -147,6 +148,36 @@ function parseYearMonth(value: string | null | undefined): Date | null {
 	);
 }
 
+// Normalize date string to YYYY-MM format
+// Handles both "YYYY-MM" and "Month YYYY" formats
+function normalizeToYearMonth(value: string | null | undefined): string {
+	if (!value) return '';
+
+	// Already in YYYY-MM format
+	if (/^\d{4}-\d{2}$/.test(value)) {
+		return value;
+	}
+
+	// Try "Month YYYY" format (e.g., "January 2025")
+	const monthNames = ['january', 'february', 'march', 'april', 'may', 'june',
+		'july', 'august', 'september', 'october', 'november', 'december'];
+	const monthMatch = value.toLowerCase().match(/^([a-z]+)\s+(\d{4})$/);
+	if (monthMatch) {
+		const monthIndex = monthNames.indexOf(monthMatch[1]);
+		if (monthIndex >= 0) {
+			return `${monthMatch[2]}-${String(monthIndex + 1).padStart(2, '0')}`;
+		}
+	}
+
+	// Try parsing as date
+	const parsed = parseYearMonth(value);
+	if (parsed) {
+		return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}`;
+	}
+
+	return '';
+}
+
 function chartLabelFromMonth(value: string): string {
 	if (!value) {
 		return '';
@@ -258,7 +289,15 @@ let loadedAssetId: string | null = null;
 	// Tokens to display: available tokens, plus sold out if toggle is on
 	$: visibleTokens = showSoldOutTokens ? [...availableTokens, ...soldOutTokens] : availableTokens;
 	$: receiptsData = primaryToken?.asset?.receiptsData ?? [];
-$: revenueReports = buildRevenueReports(receiptsData, assetData?.monthlyReports ?? []);
+// Use asset-level monthlyReports as primary source (selected from token with most recent receiptsData)
+// Fall back to primaryToken's receiptsData for backwards compatibility
+$: revenueReportsRaw = buildRevenueReports(assetData?.monthlyReports ?? [], receiptsData);
+// Filter out months before cashflowStartDate
+// Normalize the date to YYYY-MM format for proper comparison
+$: revenueStartDate = normalizeToYearMonth(assetData?.cashflowStartDate);
+$: revenueReports = revenueStartDate
+	? revenueReportsRaw.filter((report) => report.month >= revenueStartDate)
+	: revenueReportsRaw;
 $: revenueReportsWithIncome = revenueReports.filter((report) => report.revenue > 0);
 $: revenueHasData = revenueReportsWithIncome.length > 0;
 $: revenueAverage = revenueReportsWithIncome.length
@@ -288,7 +327,7 @@ $: nextReportDueLabel = (() => {
 	}
 
 	// Fall back to cashflowStartDate if available, otherwise firstPaymentDate
-	const fallbackDate = primaryToken?.asset?.cashflowStartDate || primaryToken?.firstPaymentDate;
+	const fallbackDate = assetData?.cashflowStartDate || primaryToken?.firstPaymentDate;
 	if (fallbackDate) {
 		const label = labelFromMonth(fallbackDate, 1);
 		if (label) return label;
@@ -428,8 +467,8 @@ function createRevenueChart() {
 	// Get months from actual revenue reports
 	const months = revenueReports.map(r => r.month);
 
-	// Get projections data
-	const projections = primaryToken.asset?.plannedProduction?.projections || [];
+	// Get projections data from shared Asset
+	const projections = assetData?.plannedProduction?.projections || [];
 
 	// Calculate projected revenue for months where we have actuals
 	const projectedRevenue = months.map(month => {
@@ -437,8 +476,8 @@ function createRevenueChart() {
 		if (!projection) return 0;
 
 		// Get oil price from asset technical data or use default
-		const benchmarkPremiumStr = primaryToken.asset?.technical?.pricing?.benchmarkPremium;
-		const transportCostsStr = primaryToken.asset?.technical?.pricing?.transportCosts;
+		const benchmarkPremiumStr = assetData?.technical?.pricing?.benchmarkPremium;
+		const transportCostsStr = assetData?.technical?.pricing?.transportCosts;
 		const benchmarkPremium = benchmarkPremiumStr ? (parseFloat(String(benchmarkPremiumStr).replace(/[^-\d.]/g, '')) || 0) : 0;
 		const transportCosts = transportCostsStr ? (parseFloat(String(transportCostsStr).replace(/[^-\d.]/g, '')) || 0) : 0;
 		const defaultOilPrice = 65; // Default assumption
@@ -758,10 +797,28 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 	event?.stopPropagation();
 	openHistoryModal(tokenAddress);
 }
+
+async function handleAddToWallet(token: TokenMetadata, event?: Event) {
+	event?.stopPropagation();
+
+	if (!$connected) {
+		await $web3Modal.open();
+		return;
+	}
+
+	const success = await addTokenToWallet({
+		address: token.contractAddress,
+		symbol: token.symbol,
+		decimals: 18
+	});
+
+	if (success) {
+		alert('Token is now tracked in your wallet!');
+	}
+}
 	
-	async function handlePurchaseSuccess() {
-		showPurchaseWidget = false;
-		selectedTokenAddress = null;
+async function handlePurchaseSuccess() {
+		// Don't close the widget - let user see the confirmation and close manually
 		// Refresh SFT data to update token availability
 		await queryClient.invalidateQueries({ queryKey: ['getSfts'] });
 	}
@@ -965,9 +1022,9 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
         		
         		<CollapsibleSection title="Documents" isOpenByDefault={false} alwaysOpenOnDesktop={false}>
         			<div class="space-y-3">
-						{#if assetTokens[0]?.asset?.documents && assetTokens[0].asset.documents.length > 0}
+						{#if assetData?.documents && assetData.documents.length > 0}
 							<!-- Legal Documents -->
-							{#each assetTokens[0].asset.documents as document (document.ipfs ?? document.name ?? document.type)}
+							{#each assetData.documents as document (document.ipfs ?? document.name ?? document.type)}
 								<div class="flex items-center justify-between p-4 border-b border-light-gray last:border-b-0">
 									<div class="flex items-center space-x-3">
 										<div class="w-8 h-8 bg-secondary rounded-none flex items-center justify-center">
@@ -1212,8 +1269,8 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 						</div>
 					</div>
 				{:else if activeTab === 'documents'}
-					{#if assetTokens[0]?.asset?.documents && assetTokens[0].asset.documents.length > 0}
-						{#each assetTokens[0].asset.documents as document (document.ipfs ?? document.name ?? document.type)}
+					{#if assetData?.documents && assetData.documents.length > 0}
+						{#each assetData.documents as document (document.ipfs ?? document.name ?? document.type)}
 							<div class="grid md:grid-cols-2 grid-cols-1 gap-8">
 								<div class="space-y-4">
 									<div class="flex items-center justify-between p-4 bg-white border border-light-gray hover:bg-white transition-colors duration-200">
@@ -1269,9 +1326,19 @@ function handleHistoryButtonClick(tokenAddress: string, event?: Event) {
 									<div class="flex-1 mt-6 overflow-visible">
 										<div class="flex justify-between items-start mb-3 gap-4">
 											<h4 class="text-2xl font-extrabold text-black font-figtree flex-1">{token.releaseName}</h4>
-											<div class="text-sm font-extrabold text-white bg-secondary px-3 py-1 tracking-wider rounded-none whitespace-nowrap">
-												{token.sharePercentage || 25}% of Asset
-											</div>
+											<!-- Track in Wallet button -->
+											<button
+												class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-secondary border border-light-gray hover:text-primary hover:bg-light-gray hover:border-secondary transition-colors duration-200 whitespace-nowrap"
+												on:click={(event) => handleAddToWallet(token, event)}
+												title="Track in Wallet"
+											>
+												<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+													<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/>
+													<path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/>
+													<path d="M18 12a2 2 0 0 0 0 4h4v-4h-4z"/>
+												</svg>
+												Track in Wallet
+											</button>
 										</div>
 										<a
 											href={getAddressUrl(token.contractAddress, $chainId)}

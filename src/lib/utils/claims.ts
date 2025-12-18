@@ -120,6 +120,8 @@ export type ClaimHistory = {
   txHash: string;
   status: string;
   fieldName?: string;
+  tokenAddress?: string;
+  orderHash?: string; // Used to look up payout date from metadata
 };
 
 export type ClaimSignedContext = {
@@ -150,6 +152,31 @@ export type IPFSValidationResult = {
   contentHash?: string;
   expectedHash?: string;
 };
+
+const IPFS_FETCH_RETRIES = 2;
+const IPFS_FETCH_TIMEOUT_MS = 15_000;
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchWithRetry(url: string): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= IPFS_FETCH_RETRIES + 1; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), IPFS_FETCH_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+      return response;
+    } catch (error) {
+      lastError = error;
+      clearTimeout(timeout);
+      if (attempt <= IPFS_FETCH_RETRIES) {
+        await delay(200 * 2 ** (attempt - 1));
+      }
+    }
+  }
+  throw lastError ?? new Error("Failed to fetch IPFS content");
+}
 
 /**
  * Validates CSV data integrity against on-chain merkle root
@@ -259,15 +286,6 @@ export async function validateIPFSContent(
       };
     }
 
-    // Fetch and validate content is accessible
-    const response = await fetch(ipfsUrl);
-    if (!response.ok) {
-      return {
-        isValid: false,
-        error: `Failed to fetch IPFS content: ${response.status}`,
-      };
-    }
-
     return {
       isValid: true,
       contentHash: cidFromUrl,
@@ -303,8 +321,8 @@ export async function fetchAndValidateCSV(
       return null;
     }
 
-    // Step 2: Fetch CSV data
-    const response = await fetch(csvLink);
+    // Step 2: Fetch CSV data (server route provides gateway fallback)
+    const response = await fetchWithRetry(csvLink);
     if (!response.ok) {
       return null;
     }
@@ -368,6 +386,8 @@ export async function sortClaimsData(
   ownerAddress: string,
   fieldName: string,
   orderTimestamp?: string,
+  tokenAddress?: string,
+  orderHash?: string, // OrderHash to include in claims for date lookup from metadata
 ): Promise<SortedClaimsResult> {
   const blockRange = getBlockRangeFromTrades(trades);
 
@@ -447,6 +467,7 @@ export async function sortClaimsData(
   const totalEarned = totalClaimedAmount + totalUnclaimedAmount;
 
   // Create claims array with the same structure as the claims page
+  // Include orderHash so caller can look up payout date from metadata
   const claims: ClaimHistory[] = claimedCsv.map((claim) => {
     // Find the original log data to get the transaction hash
     const originalLog = logs.find((log) => {
@@ -460,7 +481,7 @@ export async function sortClaimsData(
       );
     });
 
-    // Try to get timestamp from various sources
+    // Default to current date - caller should update using orderHash lookup from metadata
     let claimDate = new Date().toISOString();
     if (claim.decodedLog?.timestamp) {
       claimDate = claim.decodedLog.timestamp;
@@ -493,8 +514,10 @@ export async function sortClaimsData(
       date: claimDate,
       amount: formatAmountWei(claim.amount),
       asset: fieldName || "Unknown Field",
-      txHash: trades[0].tradeEvent?.transaction?.id || "N/A",
+      txHash: trades[0]?.tradeEvent?.transaction?.id || "N/A",
       status: "completed",
+      tokenAddress,
+      orderHash, // Include for metadata lookup
     };
   });
 
@@ -515,7 +538,7 @@ export async function sortClaimsData(
   return {
     claimedCsv,
     unclaimedCsv,
-    claims,
+    claims, // Only claimed items - for history display
     holdings,
     totalClaims: filteredCsvClaims.length,
     claimedCount: claimedCsv.length,
@@ -564,9 +587,8 @@ async function fetchLogs(
             ],
             block: ["number", "timestamp"],
           },
-        }
+        },
       );
-      
 
       // Concatenate logs if there are any
       const responseData = queryResponse.data;

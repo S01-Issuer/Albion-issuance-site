@@ -4,8 +4,8 @@
 
 import { executeGraphQL } from "../clients/cachedGraphqlClient";
 import {
-  BASE_SFT_SUBGRAPH_URL,
-  BASE_METADATA_SUBGRAPH_URL,
+  BASE_SFT_SUBGRAPH_URLS,
+  BASE_METADATA_SUBGRAPH_URLS,
   ENERGY_FIELDS,
   ACTIVE_METABOARD_ADMIN,
 } from "$lib/network";
@@ -47,6 +47,7 @@ export class SftRepository {
   private async getTokenHoldersForSft(
     sftId: string,
   ): Promise<Array<{ address: string; balance: string }>> {
+    const [primaryUrl, ...fallbackUrls] = BASE_SFT_SUBGRAPH_URLS;
     const query = `
       query GetTokenHolders($sftId: String!, $first: Int!, $skip: Int!) {
         offchainAssetReceiptVault(id: $sftId) {
@@ -76,11 +77,18 @@ export class SftRepository {
             id: string;
             tokenHolders: Array<{ address: string; balance: string }>;
           };
-        }>(BASE_SFT_SUBGRAPH_URL, query, {
-          sftId: sftId.toLowerCase(),
-          first: pageSize,
-          skip,
-        });
+        }>(
+          primaryUrl,
+          query,
+          {
+            sftId: sftId.toLowerCase(),
+            first: pageSize,
+            skip,
+          },
+          {
+            fallbackUrls,
+          },
+        );
 
         const tokenHolders =
           data?.offchainAssetReceiptVault?.tokenHolders || [];
@@ -115,6 +123,7 @@ export class SftRepository {
    * Implements pagination to fetch all SFTs and all token holders
    */
   async getAllSfts(): Promise<OffchainAssetReceiptVault[]> {
+    const [primaryUrl, ...fallbackUrls] = BASE_SFT_SUBGRAPH_URLS;
     const sftAddresses = ENERGY_FIELDS.flatMap((field) =>
       field.sftTokens.map((token) => token.address),
     );
@@ -149,19 +158,22 @@ export class SftRepository {
     let hasMore = true;
 
     try {
-      logDev("Fetching SFTs from:", BASE_SFT_SUBGRAPH_URL, {
+      logDev("Fetching SFTs from:", primaryUrl, {
         sftAddressesCount: sftAddresses.length,
         sftAddresses: sftAddresses,
       });
 
       while (hasMore) {
         const data = await executeGraphQL<GetSftsResponse>(
-          BASE_SFT_SUBGRAPH_URL,
+          primaryUrl,
           query,
           {
             sftIds: sftAddresses.map((s) => s.toLowerCase()),
             first: pageSize,
             skip,
+          },
+          {
+            fallbackUrls,
           },
         );
 
@@ -219,6 +231,7 @@ export class SftRepository {
    * Fetch SFT metadata from the metadata subgraph
    */
   async getSftMetadata(): Promise<MetaV1S[]> {
+    const [primaryUrl, ...fallbackUrls] = BASE_METADATA_SUBGRAPH_URLS;
     // Extract all SFT addresses from ENERGY_FIELDS
     const sftAddresses = ENERGY_FIELDS.flatMap((field) =>
       field.sftTokens.map((token) => token.address),
@@ -251,8 +264,12 @@ export class SftRepository {
 
     try {
       const data = await executeGraphQL<GetMetadataResponse>(
-        BASE_METADATA_SUBGRAPH_URL,
+        primaryUrl,
         query,
+        undefined,
+        {
+          fallbackUrls,
+        },
       );
 
       if (!data || !data.metaV1S) {
@@ -276,6 +293,7 @@ export class SftRepository {
   ): Promise<DepositWithReceipt[]> {
     if (!ownerAddress) return [];
 
+    const [primaryUrl, ...fallbackUrls] = BASE_SFT_SUBGRAPH_URLS;
     const sftAddresses = ENERGY_FIELDS.flatMap((field) =>
       field.sftTokens.map((token) => token.address),
     );
@@ -308,7 +326,7 @@ export class SftRepository {
     try {
       while (hasMore) {
         const data = await executeGraphQL<GetDepositsResponse>(
-          BASE_SFT_SUBGRAPH_URL,
+          primaryUrl,
           query,
           {
             owner: ownerAddress.toLowerCase(),
@@ -316,15 +334,18 @@ export class SftRepository {
             first: pageSize,
             skip,
           },
+          {
+            fallbackUrls,
+          },
         );
 
         const deposits = data.depositWithReceipts || [];
-        
+
         if (deposits.length === 0) {
           hasMore = false;
         } else {
           allDeposits.push(...deposits);
-          
+
           // If we got fewer results than the page size, we've reached the end
           if (deposits.length < pageSize) {
             hasMore = false;

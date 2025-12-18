@@ -3,7 +3,7 @@
  */
 
 import { executeGraphQL } from "../clients/cachedGraphqlClient";
-import { BASE_ORDERBOOK_SUBGRAPH_URL } from "$lib/network";
+import { BASE_ORDERBOOK_SUBGRAPH_URLS } from "$lib/network";
 import type {
   Trade,
   GetTradesResponse,
@@ -30,6 +30,7 @@ export class ClaimsRepository {
     orderHash: string,
     ownerAddress: string,
   ): Promise<Trade[]> {
+    const [primaryUrl, ...fallbackUrls] = BASE_ORDERBOOK_SUBGRAPH_URLS;
     const cleanOrderHash = this.validateOrderHash(orderHash);
     if (!cleanOrderHash) return [];
 
@@ -53,20 +54,18 @@ export class ClaimsRepository {
       }
     `;
 
-    try {
-      const data = await executeGraphQL<GetTradesResponse>(
-        BASE_ORDERBOOK_SUBGRAPH_URL,
-        query,
-        {
-          orderHash: cleanOrderHash,
-          sender: ownerAddress.toLowerCase(),
-        },
-      );
-      return data?.trades || [];
-    } catch (error) {
-      console.error("Error fetching trades:", error);
-      return [];
-    }
+    const data = await executeGraphQL<GetTradesResponse>(
+      primaryUrl,
+      query,
+      {
+        orderHash: cleanOrderHash,
+        sender: ownerAddress.toLowerCase(),
+      },
+      {
+        fallbackUrls,
+      },
+    );
+    return data?.trades || [];
   }
 
   /**
@@ -86,6 +85,7 @@ export class ClaimsRepository {
       }>;
     }>
   > {
+    const [primaryUrl, ...fallbackUrls] = BASE_ORDERBOOK_SUBGRAPH_URLS;
     const cleanOrderHash = this.validateOrderHash(orderHash);
     if (!cleanOrderHash) return [];
 
@@ -106,17 +106,15 @@ export class ClaimsRepository {
       }
     `;
 
-    try {
-      const data = await executeGraphQL<GetOrdersResponse>(
-        BASE_ORDERBOOK_SUBGRAPH_URL,
-        query,
-        { orderHash: cleanOrderHash },
-      );
-      return data?.orders || [];
-    } catch (error) {
-      console.error("Error fetching order:", error);
-      return [];
-    }
+    const data = await executeGraphQL<GetOrdersResponse>(
+      primaryUrl,
+      query,
+      { orderHash: cleanOrderHash },
+      {
+        fallbackUrls,
+      },
+    );
+    return data?.orders || [];
   }
 }
 
