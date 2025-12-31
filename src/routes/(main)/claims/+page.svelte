@@ -6,7 +6,8 @@
 	import { Card, CardContent, PrimaryButton, SecondaryButton, StatusBadge, StatsCard, SectionTitle, CollapsibleSection, FormattedNumber } from '$lib/components/components';
 	import { PageLayout, HeroSection, ContentSection } from '$lib/components/layout';
 	import { graphQLCache } from '$lib/data/clients/cachedGraphqlClient';
-	import { formatCurrency } from '$lib/utils/formatters';
+	import { formatCurrency, calculateExpectedNextPayout, formatExpectedNextPayout } from '$lib/utils/formatters';
+	import { useCatalogService } from '$lib/services';
 	import { dateUtils } from '$lib/utils/dateHelpers';
 	import { arrayUtils } from '$lib/utils/arrayHelpers';
 	import { BASE_ORDERBOOK_SUBGRAPH_URL } from '$lib/network';
@@ -33,6 +34,31 @@
 	let claimHistory: ClaimHistory[] = [];
 	let currentPage = 1;
 	const itemsPerPage = 20;
+	let catalogRef: ReturnType<typeof useCatalogService> | null = null;
+
+	// Helper to get expected next payout for a token
+	function getExpectedNextPayoutForToken(tokenAddress: string): Date | null {
+		if (!catalogRef) return null;
+		const token = catalogRef.getTokenByAddress(tokenAddress);
+		if (!token) return null;
+
+		// Get latest revenue month from receipts data
+		const receiptsData = token.asset?.receiptsData;
+		let latestRevenueMonth: string | undefined;
+		if (Array.isArray(receiptsData) && receiptsData.length > 0) {
+			const months = receiptsData
+				.map(r => r.month)
+				.filter((m): m is string => typeof m === 'string' && m.length > 0)
+				.sort();
+			latestRevenueMonth = months.length > 0 ? months[months.length - 1] : undefined;
+		}
+
+		return calculateExpectedNextPayout(
+			token.firstPaymentDate,
+			latestRevenueMonth,
+			token.asset?.cashflowStartDate
+		);
+	}
 
 	const walletState = derived([connected, signerAddress], ([$connected, $signerAddress]) => ({
 		connected: $connected,
@@ -77,6 +103,13 @@
 		pageLoading = true;
 		dataLoadError = false;
 		try {
+			// Build catalog to get token metadata for expected next payout
+			if (!catalogRef) {
+				const catalog = useCatalogService();
+				await catalog.build();
+				catalogRef = catalog;
+			}
+
 			const cacheKey = addressOverride ?? $signerAddress ?? '';
 			if (!cacheKey) {
 				pageLoading = false;
@@ -474,19 +507,26 @@
 				
 				<div class="grid grid-cols-1 gap-4 lg:gap-6">
 						{#each holdings as group (group.fieldName)}
+							{@const expectedNextPayout = getExpectedNextPayoutForToken(group.tokenAddress)}
 							<Card hoverable={false}>
 							<CardContent paddingClass="p-4 lg:p-6">
-								<div class="grid grid-cols-1 sm:grid-cols-4 lg:grid-cols-5 gap-4 items-center">
+								<div class="grid grid-cols-1 sm:grid-cols-4 lg:grid-cols-6 gap-4 items-center">
 									<div class="sm:col-span-2">
 										<div class="font-extrabold text-black text-sm lg:text-base">{group.fieldName}</div>
 										<div class="text-xs lg:text-sm text-black opacity-70">{group.holdings.length} claims</div>
 									</div>
 									<div class="text-center sm:text-left lg:text-center">
-										<StatusBadge 
+										<StatusBadge
 											status="PRODUCING"
 											size="small"
 											showIcon={true}
 										/>
+									</div>
+									<div class="text-center hidden lg:block">
+										<div class="text-base font-extrabold text-black mb-1">
+											{formatExpectedNextPayout(expectedNextPayout)}
+										</div>
+										<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wide">Next Payout</div>
 									</div>
 									<div class="text-center">
 										<div class="text-lg lg:text-xl font-extrabold text-primary mb-1">

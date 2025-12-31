@@ -323,6 +323,36 @@ export function getLifetimeCashflows(
 }
 
 /**
+ * Calculate fully diluted returns - returns if all remaining tokens are purchased today
+ * Uses remaining cashflows (sliced and pro-rated from current month)
+ * @param token Token metadata with asset data
+ * @param oilPrice Oil price assumption in USD per barrel
+ * @param mintedSupply Number of tokens currently minted
+ * @param availableSupply Number of tokens available to purchase
+ * @returns Annualized IRR as percentage
+ */
+export function calculateFullyDilutedReturns(
+  token: TokenMetadata,
+  oilPrice: number,
+  mintedSupply: number,
+  availableSupply: number,
+): number {
+  const cashflows = calculateMonthlyTokenCashflows(
+    token,
+    oilPrice,
+    mintedSupply,
+    availableSupply,
+  ).map((m) => m.cashflow);
+
+  if (cashflows.length <= 1) return 0;
+
+  const monthlyIRR = calculateIRR(cashflows);
+  if (monthlyIRR <= -0.99) return -99;
+
+  return (Math.pow(1 + monthlyIRR, 12) - 1) * 100;
+}
+
+/**
  * Calculate lifetime IRR - includes all months from cashflow start date without slicing or pro-rating
  * @param token Token metadata with asset data
  * @param oilPrice Oil price assumption in USD per barrel

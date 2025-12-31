@@ -329,6 +329,14 @@ export class CatalogService {
   }
 
   /**
+   * Get token metadata by address
+   */
+  getTokenByAddress(tokenAddress: string): TokenMetadata | null {
+    if (!this.catalog) return null;
+    return this.catalog.tokens[tokenAddress.toLowerCase()] || null;
+  }
+
+  /**
    * Get the shared Asset for a given token address
    */
   getAssetByTokenAddress(tokenAddress: string): Asset | null {

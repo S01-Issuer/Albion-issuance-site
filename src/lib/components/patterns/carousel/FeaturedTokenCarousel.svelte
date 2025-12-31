@@ -10,7 +10,7 @@
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import { getEnergyFieldId } from '$lib/utils/energyFieldGrouping';
 	import { getAddressUrl } from '$lib/utils/explorer';
-	import { calculateLifetimeIRR, calculateMonthlyTokenCashflows, calculateIRR } from '$lib/utils/returnsEstimatorHelpers';
+	import { calculateFullyDilutedReturns, calculateMonthlyTokenCashflows, calculateIRR } from '$lib/utils/returnsEstimatorHelpers';
 	import ReturnsEstimatorModal from '$lib/components/patterns/ReturnsEstimatorModal.svelte';
 
 	export let autoPlay = true;
@@ -340,18 +340,18 @@
 					{@const remainingCashflows = calculateMonthlyTokenCashflows(item.token, 65, supplyValues.mintedSupply, 1).map(m => m.cashflow)}
 					{@const monthlyIRR = remainingCashflows.length > 1 ? calculateIRR(remainingCashflows) : 0}
 					{@const currentReturns = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99}
-					{@const fullyDilutedReturns = calculateLifetimeIRR(item.token, 65, supplyValues.maxSupply, 1)}
+					{@const fullyDilutedReturns = calculateFullyDilutedReturns(item.token, 65, supplyValues.mintedSupply, supplyValues.availableSupply)}
 					<div class={`${carouselSlideClasses} ${index === currentIndex ? activeSlideClasses : inactiveSlideClasses}`}>
 						<div class={bannerCardClasses}>
 							<!-- Token Section -->
 							<div class={tokenSectionClasses}>
 								<!-- Mobile: Image at the top -->
 								{#if item.asset.coverImage}
-									<div class="lg:hidden mb-4 -mx-4 -mt-4">
-										<img 
-											src={item.asset.coverImage} 
+									<div class="lg:hidden mb-4 -mx-4 sm:-mx-6 -mt-4 sm:-mt-6">
+										<img
+											src={item.asset.coverImage}
 											alt={item.asset.name}
-											class="w-full h-40 object-cover"
+											class="w-full h-40 sm:h-48 object-cover"
 											loading="lazy"
 										/>
 									</div>

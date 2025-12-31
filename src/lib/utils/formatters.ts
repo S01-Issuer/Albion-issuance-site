@@ -490,6 +490,146 @@ export function formatEstFirstPayout(dateStr: string): string {
   return `${firstMondayDay}${ordinalSuffix(firstMondayDay)} ${monthNames[payoutMonth]} ${payoutYear}`;
 }
 
+/**
+ * Get the first Monday of a given month
+ */
+function getFirstMondayOfMonth(year: number, month: number): Date {
+  const firstOfMonth = new Date(year, month, 1);
+  const dayOfWeek = firstOfMonth.getDay();
+  let firstMondayDay: number;
+  if (dayOfWeek === 0) {
+    firstMondayDay = 2; // Sunday -> Monday is next day
+  } else if (dayOfWeek === 1) {
+    firstMondayDay = 1; // Already Monday
+  } else {
+    firstMondayDay = 1 + (8 - dayOfWeek); // Days until next Monday
+  }
+  return new Date(year, month, firstMondayDay);
+}
+
+/**
+ * Get the Monday on or after a given date
+ */
+function getMondayOnOrAfter(date: Date): Date {
+  const dayOfWeek = date.getDay();
+  if (dayOfWeek === 1) return new Date(date); // Already Monday
+  const daysUntilMonday = dayOfWeek === 0 ? 1 : 8 - dayOfWeek;
+  const result = new Date(date);
+  result.setDate(result.getDate() + daysUntilMonday);
+  return result;
+}
+
+/**
+ * Calculate the expected next payout date for a token
+ * Returns the later of:
+ * 1. First payout date (first Monday, 2 months after firstPaymentDate)
+ * 2. Monday after the next revenue report due date
+ *
+ * @param firstPaymentDate - Token's first payment date in YYYY-MM format
+ * @param latestRevenueMonth - Most recent revenue report month in YYYY-MM format
+ * @param cashflowStartDate - Asset's cashflow start date in YYYY-MM format (fallback)
+ * @returns Date object or null if unable to calculate
+ */
+export function calculateExpectedNextPayout(
+  firstPaymentDate: string | undefined,
+  latestRevenueMonth: string | undefined,
+  cashflowStartDate: string | undefined,
+): Date | null {
+  const now = new Date();
+
+  // Calculate first payout date (first Monday, 2 months after firstPaymentDate)
+  let firstPayoutDate: Date | null = null;
+  if (firstPaymentDate) {
+    const parts = firstPaymentDate.split("-");
+    if (parts.length >= 2) {
+      const year = parseInt(parts[0]);
+      const monthIndex = parseInt(parts[1]) - 1;
+      if (!isNaN(year) && monthIndex >= 0 && monthIndex < 12) {
+        let payoutMonth = monthIndex + 2;
+        let payoutYear = year;
+        if (payoutMonth >= 12) {
+          payoutMonth -= 12;
+          payoutYear += 1;
+        }
+        firstPayoutDate = getFirstMondayOfMonth(payoutYear, payoutMonth);
+      }
+    }
+  }
+
+  // Calculate next revenue report payout date
+  // Use latest revenue month, or fall back to cashflowStartDate, or firstPaymentDate
+  let nextReportPayoutDate: Date | null = null;
+  const baseMonth = latestRevenueMonth || cashflowStartDate || firstPaymentDate;
+  if (baseMonth) {
+    const parts = baseMonth.split("-");
+    if (parts.length >= 2) {
+      const year = parseInt(parts[0]);
+      const monthIndex = parseInt(parts[1]) - 1;
+      if (!isNaN(year) && monthIndex >= 0 && monthIndex < 12) {
+        // If we have a latest revenue month, add 2 months; otherwise add 1 month
+        const offsetMonths = latestRevenueMonth ? 2 : 1;
+        // Get end of target month (day 0 of month X gives last day of month X-1)
+        // So month + offset + 0 days = last day of (month + offset - 1)
+        const endOfTargetMonth = new Date(year, monthIndex + offsetMonths, 0);
+        // Add 30 days to get past the report due date
+        endOfTargetMonth.setDate(endOfTargetMonth.getDate() + 30);
+        // Get the Monday on or after
+        nextReportPayoutDate = getMondayOnOrAfter(endOfTargetMonth);
+      }
+    }
+  }
+
+  // Return the later of the two dates (but must be in the future)
+  let result: Date | null = null;
+
+  if (firstPayoutDate && nextReportPayoutDate) {
+    result = firstPayoutDate > nextReportPayoutDate ? firstPayoutDate : nextReportPayoutDate;
+  } else {
+    result = firstPayoutDate || nextReportPayoutDate;
+  }
+
+  // If the calculated date is in the past, return null (or we could calculate the next one)
+  if (result && result < now) {
+    // The first payout has already happened, so next payout is based on revenue reports
+    if (nextReportPayoutDate && nextReportPayoutDate >= now) {
+      return nextReportPayoutDate;
+    }
+    return null;
+  }
+
+  return result;
+}
+
+/**
+ * Format an expected next payout date
+ * @param date - Date object or null
+ * @returns Formatted string like "5th Jan 2026" or "TBD"
+ */
+export function formatExpectedNextPayout(date: Date | null): string {
+  if (!date) return "TBD";
+
+  const monthNames = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+
+  const day = date.getDate();
+  const month = date.getMonth();
+  const year = date.getFullYear();
+
+  const ordinalSuffix = (n: number): string => {
+    if (n > 3 && n < 21) return "th";
+    switch (n % 10) {
+      case 1: return "st";
+      case 2: return "nd";
+      case 3: return "rd";
+      default: return "th";
+    }
+  };
+
+  return `${day}${ordinalSuffix(day)} ${monthNames[month]} ${year}`;
+}
+
 export function formatSmartReturn(
   returnPercentage: number | undefined,
   options: {

@@ -18,7 +18,7 @@
 		Modal
 	} from '$lib/components/components';
 	import { PageLayout, HeroSection, ContentSection, FullWidthSection } from '$lib/components/layout';
-	import { formatCurrency, formatPercentage, formatNumber } from '$lib/utils/formatters';
+	import { formatCurrency, formatPercentage, formatNumber, calculateExpectedNextPayout, formatExpectedNextPayout } from '$lib/utils/formatters';
 	import { sftRepository } from '$lib/data/repositories/sftRepository';
 	import { sfts, sftMetadata } from '$lib/stores';
 	import { formatEther } from 'viem';
@@ -30,6 +30,9 @@ import type { ClaimsResult, ClaimsHoldingsGroup } from '$lib/services/ClaimsServ
 import type { ClaimHistory as ClaimsHistoryItem } from '$lib/utils/claims';
 import type { PinnedMetadata } from '$lib/types/PinnedMetadata';
 import type { DepositWithReceipt } from '$lib/types/graphql';
+import type { Hex } from 'viem';
+import { getTokenBalancesOnchain } from '$lib/data/clients/onchain';
+import { ENERGY_FIELDS } from '$lib/network';
 
 const isDev = import.meta.env.DEV;
 const logDev = (...messages: unknown[]) => {
@@ -108,6 +111,7 @@ interface PortfolioHolding {
 	sftAddress: string;
 	claimHistory: ClaimsHistoryItem[];
 	pinnedMetadata: PinnedMetadata;
+	expectedNextPayout: Date | null;
 }
 
 // Tab state
@@ -131,6 +135,7 @@ let catalogRef: ReturnType<typeof useCatalogService> | null = null;
 let latestClaimsSnapshot: ClaimsResult | null = null;
 let claimsDataUnavailable = false;
 let allDepositsData: DepositWithReceipt[] = [];
+let onchainBalances: Record<string, string> = {}; // token address -> balance (wei string)
 
 // Secondary purchase entry type
 interface SecondaryPurchaseEntry {
@@ -539,6 +544,13 @@ function percentageDisplay(value: number): string {
 			await catalog.build();
 			catalogRef = catalog;
 
+			// DEBUG: Log initial state
+			console.log('[Portfolio DEBUG] Wallet address:', $signerAddress);
+			console.log('[Portfolio DEBUG] $sfts store:', $sfts);
+			console.log('[Portfolio DEBUG] $sfts length:', $sfts?.length ?? 0);
+			console.log('[Portfolio DEBUG] $sftMetadata store:', $sftMetadata);
+			console.log('[Portfolio DEBUG] $sftMetadata length:', $sftMetadata?.length ?? 0);
+
 			// Load all claims data using ClaimsService
 			const claimsResult = await loadAllClaimsData();
 			
@@ -582,7 +594,21 @@ function percentageDisplay(value: number): string {
 			// Get deposits data for calculating totalMinted
 			allDepositsData = await sftRepository.getDepositsForOwner($signerAddress);
 
+			// Query on-chain balances directly (fallback for stale subgraph data)
+			const allTokenAddresses = ENERGY_FIELDS.flatMap(field =>
+				field.sftTokens.map(token => token.address.toLowerCase() as Hex)
+			);
+			console.log('[Portfolio DEBUG] Querying on-chain balances for tokens:', allTokenAddresses);
+			onchainBalances = await getTokenBalancesOnchain(allTokenAddresses, $signerAddress as Hex);
+			console.log('[Portfolio DEBUG] On-chain balances:', onchainBalances);
+
 			if (!$sfts || !$sftMetadata || $sfts.length === 0 || $sftMetadata.length === 0) {
+				console.log('[Portfolio DEBUG] Early return - missing data:', {
+					hasSfts: !!$sfts,
+					hasSftMetadata: !!$sftMetadata,
+					sftsLength: $sfts?.length ?? 0,
+					sftMetadataLength: $sftMetadata?.length ?? 0
+				});
 				pageLoading = false;
 				isLoadingData = false;
 				return;
@@ -592,6 +618,9 @@ function percentageDisplay(value: number): string {
 			const decodedMeta = $sftMetadata
 				.map((metaV1) => decodeSftInformation(metaV1))
 				.filter((meta): meta is PinnedMetadata => Boolean(meta));
+
+			console.log('[Portfolio DEBUG] Decoded metadata count:', decodedMeta.length);
+			console.log('[Portfolio DEBUG] Decoded metadata addresses:', decodedMeta.map(m => m.contractAddress));
 
 			// Build orderHash -> month lookup from metadata payoutData
 			const orderHashToMonth: Record<string, string> = {};
@@ -628,10 +657,36 @@ function percentageDisplay(value: number): string {
 					uniqueSftsMap[sft.id.toLowerCase()] = sft;
 				}
 			}
+
+			// Ensure all ENERGY_FIELDS tokens are in the map (even if subgraph didn't return them)
+			for (const field of ENERGY_FIELDS) {
+				for (const token of field.sftTokens) {
+					const tokenId = token.address.toLowerCase();
+					if (!uniqueSftsMap[tokenId]) {
+						// Create a minimal SFT entry for tokens not in subgraph
+						console.log('[Portfolio DEBUG] Adding missing ENERGY_FIELDS token:', tokenId);
+						uniqueSftsMap[tokenId] = {
+							id: tokenId,
+							totalShares: '0',
+							address: tokenId,
+							name: field.name,
+							symbol: '',
+							deployTimestamp: '0',
+							activeAuthorizer: null,
+							tokenHolders: [],
+						} as typeof $sfts[number];
+					}
+				}
+			}
+
 			const uniqueSfts = Object.values(uniqueSftsMap);
+
+			console.log('[Portfolio DEBUG] Unique SFTs to process:', uniqueSfts.length);
+			console.log('[Portfolio DEBUG] Unique SFT IDs:', uniqueSfts.map(s => s.id));
 
 			// Process each individual SFT token
 			for (const sft of uniqueSfts) {
+				console.log('[Portfolio DEBUG] Processing SFT:', sft.id);
 				// Find metadata for this SFT
 				const pinnedMetadata = decodedMeta.find((meta) => {
 					if (!meta.contractAddress) return false;
@@ -650,30 +705,48 @@ function percentageDisplay(value: number): string {
 					return unpaddedMetaAddress === sftAddress;
 				});
 				
+				console.log('[Portfolio DEBUG] SFT', sft.id, '- metadata found:', !!pinnedMetadata);
+
 				if (pinnedMetadata) {
 					const asset = pinnedMetadata.asset;
+					console.log('[Portfolio DEBUG] SFT', sft.id, '- has asset:', !!asset);
 					if (!asset) {
+						console.log('[Portfolio DEBUG] SFT', sft.id, '- SKIPPED: no asset in metadata');
 						continue;
 					}
 					const assetFieldName = asset.assetName ?? '';
+					console.log('[Portfolio DEBUG] SFT', sft.id, '- assetFieldName:', assetFieldName);
 					if (!assetFieldName) {
+						console.log('[Portfolio DEBUG] SFT', sft.id, '- SKIPPED: no assetFieldName');
 						continue;
 					}
 
-					// Get token balance directly from tokenHolders (source of truth)
+					// Get token balance - prefer on-chain query (more reliable than subgraph)
 					let tokensOwned = 0;
+					const normalizedSftId = sft.id.toLowerCase();
 
-					if (Array.isArray(sft.tokenHolders)) {
-						const tokenHolder = sft.tokenHolders.find(
-							(holder) =>
-								holder.address?.toLowerCase() === $signerAddress.toLowerCase(),
-						);
-						if (tokenHolder) {
-							tokensOwned = Number(
-								formatEther(BigInt(tokenHolder.balance)),
+					// First try on-chain balance (most accurate)
+					const onchainBalance = onchainBalances[normalizedSftId];
+					if (onchainBalance && onchainBalance !== '0') {
+						tokensOwned = Number(formatEther(BigInt(onchainBalance)));
+						console.log('[Portfolio DEBUG] SFT', sft.id, '- using on-chain balance:', tokensOwned);
+					} else {
+						// Fallback to tokenHolders from subgraph
+						console.log('[Portfolio DEBUG] SFT', sft.id, '- no on-chain balance, checking tokenHolders');
+						if (Array.isArray(sft.tokenHolders)) {
+							const tokenHolder = sft.tokenHolders.find(
+								(holder) =>
+									holder.address?.toLowerCase() === $signerAddress.toLowerCase(),
 							);
+							if (tokenHolder) {
+								tokensOwned = Number(
+									formatEther(BigInt(tokenHolder.balance)),
+								);
+								console.log('[Portfolio DEBUG] SFT', sft.id, '- using tokenHolders balance:', tokensOwned);
+							}
 						}
 					}
+					console.log('[Portfolio DEBUG] SFT', sft.id, '- final tokensOwned:', tokensOwned);
 					
 				let totalEarnedForSft = 0;
 				let unclaimedAmountForSft = 0;
@@ -782,6 +855,7 @@ function percentageDisplay(value: number): string {
 					
 					// Only add to holdings if user actually owns tokens
 					if (tokensOwned > 0) {
+						console.log('[Portfolio DEBUG] SFT', sft.id, '- ADDING to holdings');
 						// Calculate totalMinted from deposits only (not transfers/gifts)
 						const sftDeposits = allDepositsData.filter(
 							(deposit) =>
@@ -814,6 +888,18 @@ function percentageDisplay(value: number): string {
 						// Look up the shared Asset for display purposes
 						const sharedAsset = catalogRef?.getAssetByTokenAddress(sft.id) ?? undefined;
 
+						// Calculate expected next payout
+						const revenueMonths = receiptsRecords
+							.map((entry) => normalizeMonth(entry?.month))
+							.filter((month: string) => month.length > 0)
+							.sort();
+						const latestRevenueMonth = revenueMonths.length > 0 ? revenueMonths[revenueMonths.length - 1] : undefined;
+						const expectedNextPayout = calculateExpectedNextPayout(
+							pinnedMetadata.firstPaymentDate,
+							latestRevenueMonth,
+							asset.cashflowStartDate
+						);
+
 						holdings.push({
 							id: sft.id.toLowerCase(),
 							name: assetFieldName || `SFT ${sft.id.slice(0, 8)}...`,
@@ -839,11 +925,19 @@ function percentageDisplay(value: number): string {
 							sharedAsset,
 							sftAddress: sft.id,
 							claimHistory: sftClaims,
-							pinnedMetadata: pinnedMetadata
+							pinnedMetadata: pinnedMetadata,
+							expectedNextPayout
 						});
+					} else {
+						console.log('[Portfolio DEBUG] SFT', sft.id, '- SKIPPED: tokensOwned is 0');
 					}
+				} else {
+					console.log('[Portfolio DEBUG] SFT', sft.id, '- SKIPPED: no metadata found');
 				}
 			}
+
+			console.log('[Portfolio DEBUG] Final holdings count:', holdings.length);
+			console.log('[Portfolio DEBUG] Final holdings:', holdings.map(h => ({ id: h.id, name: h.name, tokens: h.tokensOwned })));
 
 			// Populate monthlyPayouts from claim history
 			monthlyPayouts = [];
@@ -1069,7 +1163,7 @@ function percentageDisplay(value: number): string {
 													</div>
 												</div>
 
-												<div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mt-4">
+												<div class="grid grid-cols-2 lg:grid-cols-7 gap-3 mt-4">
 													<!-- Tokens -->
 													<div class="flex flex-col">
 														<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-2 h-8">
@@ -1109,6 +1203,17 @@ function percentageDisplay(value: number): string {
 															{currencyDisplay(holding.totalPayoutsEarned)}
 														</div>
 														<div class="text-xs lg:text-sm text-black opacity-70">Cumulative</div>
+													</div>
+
+													<!-- Expected Next Payout -->
+													<div class="flex flex-col">
+														<div class="text-xs font-bold text-black opacity-70 uppercase tracking-wider mb-2 h-8">
+															Next Payout
+														</div>
+														<div class="text-lg lg:text-xl font-extrabold text-black">
+															{formatExpectedNextPayout(holding.expectedNextPayout)}
+														</div>
+														<div class="text-xs lg:text-sm text-black opacity-70">Expected</div>
 													</div>
 
 													<!-- Capital Returned -->

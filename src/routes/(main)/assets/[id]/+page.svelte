@@ -19,7 +19,7 @@
 	import AssetOverviewTab from '$lib/components/patterns/assets/AssetOverviewTab.svelte';
 	import ReturnsEstimatorModal from '$lib/components/patterns/ReturnsEstimatorModal.svelte';
 import { calculateTokenReturns, getTokenPayoutHistory, getTokenSupply } from '$lib/utils/returnCalculations';
-import { calculateLifetimeIRR, calculateMonthlyTokenCashflows, calculateIRR } from '$lib/utils/returnsEstimatorHelpers';
+import { calculateLifetimeIRR, calculateFullyDilutedReturns, calculateMonthlyTokenCashflows, calculateIRR } from '$lib/utils/returnsEstimatorHelpers';
 import { PINATA_GATEWAY } from '$lib/network';
 import { catalogService } from '$lib/services';
 import { getTokenTermsPath } from '$lib/utils/tokenTerms';
@@ -983,7 +983,7 @@ async function handlePurchaseSuccess() {
 		</CollapsibleSection>
         		
         		<CollapsibleSection title="Gallery" isOpenByDefault={false} alwaysOpenOnDesktop={false}>
-        			<div class="grid grid-cols-2 gap-4">
+        			<div class="grid grid-cols-2 gap-4 mt-4">
 						{#if assetData?.galleryImages && assetData.galleryImages.length > 0}
 							{#each assetData.galleryImages.slice(0, 4) as image (image.url)}
 								<div
@@ -1422,10 +1422,7 @@ async function handlePurchaseSuccess() {
 										{@const cashflows = monthlyCashflows.map(m => m.cashflow)}
 										{@const monthlyIRR = calculateIRR(cashflows)}
 										{@const remainingIRR = monthlyIRR > -0.99 ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : -99}
-										{@const fullyDilutedCashflows = calculateMonthlyTokenCashflows(token, defaultOilPrice, supply?.mintedSupply ?? 0, supply?.availableSupply ?? 0)}
-										{@const fullyDilutedCashflowsArray = fullyDilutedCashflows.map(m => m.cashflow)}
-										{@const fullyDilutedMonthlyIRR = calculateIRR(fullyDilutedCashflowsArray)}
-										{@const fullyDilutedRemainingIRR = fullyDilutedMonthlyIRR > -0.99 ? (Math.pow(1 + fullyDilutedMonthlyIRR, 12) - 1) * 100 : -99}
+										{@const fullyDilutedRemainingIRR = calculateFullyDilutedReturns(token, defaultOilPrice, supply?.mintedSupply ?? 0, supply?.availableSupply ?? 0)}
 
 										<h5 class="text-sm font-extrabold text-black uppercase tracking-wider mb-4 pt-6">
 											Returns @${defaultOilPrice} {crudeBenchmark} Oil Price

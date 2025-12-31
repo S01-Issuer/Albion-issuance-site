@@ -2,6 +2,7 @@ import { multicall } from "@wagmi/core";
 import { wagmiConfig } from "svelte-wagmi";
 import { get } from "svelte/store";
 import type { Abi, Hex } from "viem";
+import { erc20Abi } from "viem";
 
 const isDev = import.meta.env?.DEV ?? false;
 
@@ -75,6 +76,74 @@ export async function getMaxSharesSupplyMap(
     return resultMap;
   } catch (error) {
     console.error("Multicall failed:", error);
+    return {};
+  }
+}
+
+/**
+ * Query ERC20 token balances directly from the blockchain using multicall.
+ * This is a fallback for when subgraph data is stale or missing.
+ *
+ * @param tokenAddresses - Array of token contract addresses
+ * @param ownerAddress - The wallet address to check balances for
+ * @returns Record mapping token address (lowercase) to balance as bigint string
+ */
+export async function getTokenBalancesOnchain(
+  tokenAddresses: Array<Hex>,
+  ownerAddress: Hex,
+): Promise<Record<string, string>> {
+  if (typeof window === "undefined") {
+    log("Skipping balance query - server-side rendering");
+    return {};
+  }
+
+  const cfg = get(wagmiConfig);
+
+  if (!cfg || !cfg.getClient) {
+    log("Wagmi config not initialized yet");
+    return {};
+  }
+
+  if (tokenAddresses.length === 0 || !ownerAddress) {
+    log("No token addresses or owner address to query");
+    return {};
+  }
+
+  log(
+    `Querying balances for ${tokenAddresses.length} tokens for owner ${ownerAddress}`,
+  );
+
+  const contracts = tokenAddresses.map((addr) => ({
+    address: addr,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: [ownerAddress],
+  }));
+
+  try {
+    const results = await multicall(cfg, {
+      contracts,
+      allowFailure: true,
+    });
+
+    const balanceMap: Record<string, string> = {};
+
+    for (let i = 0; i < tokenAddresses.length; i++) {
+      const addr = tokenAddresses[i];
+      const result = results[i];
+
+      if (result.status === "success" && result.result !== undefined) {
+        balanceMap[addr.toLowerCase()] = result.result.toString();
+      } else {
+        log(`Failed to get balance for token ${addr}`);
+        balanceMap[addr.toLowerCase()] = "0";
+      }
+    }
+
+    log("Balance query completed:", balanceMap);
+    return balanceMap;
+  } catch (error) {
+    console.error("Balance multicall failed:", error);
     return {};
   }
 }

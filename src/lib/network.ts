@@ -67,7 +67,7 @@ const DEV_ENERGY_FIELDS: EnergyField[] = [
     name: "Bakken Horizon Field",
     sftTokens: [
       {
-        address: "0xd5316ca888491575befc0273a00de2186c53f760",
+        address: "0xbcAd416434984Cca2b4a950dCd95f47C4126E980",
         claims: [
           {
             orderHash:
