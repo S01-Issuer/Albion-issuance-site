@@ -147,12 +147,29 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
             expectedContentHash:
               "bafkreibqzcxpbdkxm6whawbpi47ngiemn77rmbmpswfbabhuogxos3ywbi",
           },
+          {
+            orderHash:
+              "0xf397fbbe7470d6b0499e1f1e257ba8b7d029b142b97dfef821923222d75fd975",
+            csvLink: `${PINATA_GATEWAY}/bafkreihfhawtskpagogkfpcaqbk3rte2ljbagq7idk54sg3h5mhj2z7cma`,
+            expectedMerkleRoot:
+              "0x4d1389ac0048d2166b27572994da00a61945f45771f70ee0afb6a8af0c5bd7ba",
+            expectedContentHash:
+              "bafkreihfhawtskpagogkfpcaqbk3rte2ljbagq7idk54sg3h5mhj2z7cma",
+          },
         ],
       },
       {
         address: "0x1d57246fd0ba134d7cc78ddf3ed829379d95f4b7",
         claims: [
-          // Future claims
+          {
+            orderHash:
+              "0xca9ebf6d282d24a63d6892c0a888d3604b17ddfca69a035b2a6c06b769fc84f7",
+            csvLink: `${PINATA_GATEWAY}/bafkreibygxsf3zvkhif6qr6psa2lz6jjny3grdivi7tj3bucastc2hnetq`,
+            expectedMerkleRoot:
+              "0x8f28680dc0da6dd6780d912fa67a16864cb49b70c8861b05802e720f6bac4143",
+            expectedContentHash:
+              "bafkreibygxsf3zvkhif6qr6psa2lz6jjny3grdivi7tj3bucastc2hnetq",
+          }
         ],
       },
     ],
