@@ -25,7 +25,7 @@
 	let totalClaimed = 0;
 	let unclaimedPayout = 0;
 	let pageLoading = true;
-	let claimingTarget: 'all' | string | null = null; // 'all' for claim all, field name for single, null for none
+	let claimingTarget: 'all' | string | null = null; // 'all' for claim all, token address for single, null for none
 	let confirmingTarget: 'all' | string | null = null;
 	let claimSuccess = false;
 	let dataLoadError = false;
@@ -283,7 +283,7 @@
 	}
 
 	async function handleClaimSingle(group: ClaimsHoldingsGroup) {
-		claimingTarget = group.fieldName;
+		claimingTarget = group.tokenAddress;
 		try {
 			if (!group.holdings.length) {
 				throw new Error('No orders available for this claim group');
@@ -328,7 +328,7 @@
 			const hash = await writeContract($wagmiConfig, request);
 
 			// Wait for transaction confirmation
-			confirmingTarget = group.fieldName;
+			confirmingTarget = group.tokenAddress;
 			await waitForTransactionReceipt($wagmiConfig, {
 				hash,
 				confirmations: 2
@@ -506,13 +506,13 @@
 				<SectionTitle level="h2" size="section" className="mb-6">Claims by Asset</SectionTitle>
 				
 				<div class="grid grid-cols-1 gap-4 lg:gap-6">
-						{#each holdings as group (group.fieldName)}
+						{#each holdings as group (group.tokenAddress)}
 							{@const expectedNextPayout = getExpectedNextPayoutForToken(group.tokenAddress)}
 							<Card hoverable={false}>
 							<CardContent paddingClass="p-4 lg:p-6">
 								<div class="grid grid-cols-1 sm:grid-cols-4 lg:grid-cols-6 gap-4 items-center">
 									<div class="sm:col-span-2">
-										<div class="font-extrabold text-black text-sm lg:text-base">{group.fieldName}</div>
+										<div class="font-extrabold text-black text-sm lg:text-base">{group.fieldName} {group.symbol}</div>
 										<div class="text-xs lg:text-sm text-black opacity-70">{group.holdings.length} claims</div>
 									</div>
 									<div class="text-center sm:text-left lg:text-center">
@@ -541,7 +541,7 @@
 											on:click={() => handleClaimSingle(group)}
 											fullWidth
 										>
-											{claimingTarget === group.fieldName ? 'Submitting...' : confirmingTarget === group.fieldName ? 'Confirming...' : 'Claim'}
+											{claimingTarget === group.tokenAddress ? 'Submitting...' : confirmingTarget === group.tokenAddress ? 'Confirming...' : 'Claim'}
 										</SecondaryButton>
 									</div>
 								</div>

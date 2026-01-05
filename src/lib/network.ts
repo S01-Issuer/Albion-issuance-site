@@ -44,6 +44,7 @@ export type Claim = {
 
 export type SftToken = {
   address: string;
+  symbol: string;
   claims: Claim[];
 };
 
@@ -68,6 +69,7 @@ const DEV_ENERGY_FIELDS: EnergyField[] = [
     sftTokens: [
       {
         address: "0xbcAd416434984Cca2b4a950dCd95f47C4126E980",
+        symbol: "BHF",
         claims: [
           {
             orderHash:
@@ -87,6 +89,7 @@ const DEV_ENERGY_FIELDS: EnergyField[] = [
     sftTokens: [
       {
         address: "0xae69a129b626b1e8fce196ef8e7d5faea3be753f",
+        symbol: "GOM4",
         claims: [
           {
             orderHash:
@@ -110,6 +113,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
     sftTokens: [
       {
         address: "0xf836a500910453A397084ADe41321ee20a5AAde1",
+        symbol: "ALB-WR1-R1",
         claims: [
           {
             orderHash:
@@ -160,6 +164,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
       },
       {
         address: "0x1d57246fd0ba134d7cc78ddf3ed829379d95f4b7",
+        symbol: "ALB-WR1-R2",
         claims: [
           {
             orderHash:
