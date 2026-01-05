@@ -150,6 +150,7 @@ export class ClaimsService {
               ownerAddress,
               field.name,
               token.address,
+              token.symbol,
             ),
           );
         }
@@ -212,6 +213,7 @@ export class ClaimsService {
     ownerAddress: string,
     fieldName: string,
     tokenAddress: string,
+    symbol: string,
   ): Promise<PendingClaim | null> {
     if (!claim.csvLink) return null;
 
@@ -244,6 +246,7 @@ export class ClaimsService {
       undefined,
       tokenAddress,
       claim.orderHash, // Pass orderHash so caller can look up payout date from metadata
+      symbol,
     )) as SortedClaimsData;
 
     // Generate proofs for holdings

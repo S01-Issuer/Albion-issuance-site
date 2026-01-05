@@ -630,7 +630,7 @@
 												{formatDate(claim.date)}
 											</td>
 											<td class="p-4 text-sm text-black font-medium">
-												{claim.asset}
+												{claim.asset} {claim.symbol}
 											</td>
 											<td class="p-4 text-sm text-right text-black font-extrabold">
 												{formatCurrency(Number(claim.amount))}
