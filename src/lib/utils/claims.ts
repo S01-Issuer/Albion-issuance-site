@@ -121,6 +121,7 @@ export type ClaimHistory = {
   status: string;
   fieldName?: string;
   tokenAddress?: string;
+  symbol?: string;
   orderHash?: string; // Used to look up payout date from metadata
 };
 
@@ -388,6 +389,7 @@ export async function sortClaimsData(
   orderTimestamp?: string,
   tokenAddress?: string,
   orderHash?: string, // OrderHash to include in claims for date lookup from metadata
+  symbol?: string,
 ): Promise<SortedClaimsResult> {
   const blockRange = getBlockRangeFromTrades(trades);
 
@@ -517,6 +519,7 @@ export async function sortClaimsData(
       txHash: trades[0]?.tradeEvent?.transaction?.id || "N/A",
       status: "completed",
       tokenAddress,
+      symbol,
       orderHash, // Include for metadata lookup
     };
   });

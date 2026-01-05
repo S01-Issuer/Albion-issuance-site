@@ -59,6 +59,7 @@ interface PendingClaim {
 export interface ClaimsHoldingsGroup {
   fieldName: string;
   tokenAddress: string;
+  symbol: string;
   totalAmount: number;
   holdings: HoldingWithProof[];
 }
@@ -127,6 +128,7 @@ export class ClaimsService {
     const claimMetadata: {
       fieldName: string;
       tokenAddress: string;
+      symbol: string;
       claim: Claim;
     }[] = [];
 
@@ -139,6 +141,7 @@ export class ClaimsService {
           claimMetadata.push({
             fieldName: field.name,
             tokenAddress: token.address,
+            symbol: token.symbol,
             claim,
           });
           claimPromises.push(
@@ -147,6 +150,7 @@ export class ClaimsService {
               ownerAddress,
               field.name,
               token.address,
+              token.symbol,
             ),
           );
         }
@@ -169,7 +173,7 @@ export class ClaimsService {
       const claimData = result.value;
       if (!claimData) continue;
 
-      const { fieldName, tokenAddress } = claimMetadata[index];
+      const { fieldName, tokenAddress, symbol } = claimMetadata[index];
 
       // Merge results
       claimHistory = [...claimHistory, ...claimData.claims];
@@ -179,6 +183,7 @@ export class ClaimsService {
         holdings,
         fieldName,
         tokenAddress,
+        symbol,
         claimData.holdings,
       );
 
@@ -208,6 +213,7 @@ export class ClaimsService {
     ownerAddress: string,
     fieldName: string,
     tokenAddress: string,
+    symbol: string,
   ): Promise<PendingClaim | null> {
     if (!claim.csvLink) return null;
 
@@ -240,6 +246,7 @@ export class ClaimsService {
       undefined,
       tokenAddress,
       claim.orderHash, // Pass orderHash so caller can look up payout date from metadata
+      symbol,
     )) as SortedClaimsData;
 
     // Generate proofs for holdings
@@ -285,6 +292,7 @@ export class ClaimsService {
     groups: ClaimsHoldingsGroup[],
     fieldName: string,
     tokenAddress: string,
+    symbol: string,
     newHoldings: HoldingWithProof[],
   ): void {
     // Group by token address (each SFT token has its own claims)
@@ -307,6 +315,7 @@ export class ClaimsService {
       groups.push({
         fieldName,
         tokenAddress,
+        symbol,
         totalAmount,
         holdings: newHoldings,
       });
