@@ -16,9 +16,55 @@ interface ExecuteOptions {
   timeoutMs?: number;
 }
 
+/**
+ * Simple request throttler to prevent rate limiting
+ * Limits concurrent requests and adds delay between them
+ */
+class RequestThrottler {
+  private queue: Array<() => void> = [];
+  private activeRequests = 0;
+  private readonly maxConcurrent: number;
+  private readonly delayBetweenRequests: number;
+  private lastRequestTime = 0;
+
+  constructor(maxConcurrent = 3, delayBetweenRequests = 100) {
+    this.maxConcurrent = maxConcurrent;
+    this.delayBetweenRequests = delayBetweenRequests;
+  }
+
+  async acquire(): Promise<void> {
+    // Wait for minimum delay since last request
+    const timeSinceLastRequest = Date.now() - this.lastRequestTime;
+    if (timeSinceLastRequest < this.delayBetweenRequests) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, this.delayBetweenRequests - timeSinceLastRequest),
+      );
+    }
+
+    // If at capacity, wait in queue
+    if (this.activeRequests >= this.maxConcurrent) {
+      await new Promise<void>((resolve) => {
+        this.queue.push(resolve);
+      });
+    }
+
+    this.activeRequests += 1;
+    this.lastRequestTime = Date.now();
+  }
+
+  release(): void {
+    this.activeRequests -= 1;
+    const next = this.queue.shift();
+    if (next) {
+      next();
+    }
+  }
+}
+
 class GraphQLCache {
   private cache = new Map<string, CacheEntry<unknown>>();
   private readonly DEFAULT_TTL = 5 * 60 * 1000; // 5 minutes
+  private throttler = new RequestThrottler(3, 150); // Max 3 concurrent, 150ms between requests
 
   private getCacheKey(
     url: string,
@@ -142,7 +188,8 @@ class GraphQLCache {
       } catch (error) {
         lastError = error;
         if (attempt < maxAttempts) {
-          const delayMs = 200 * 2 ** (attempt - 1);
+          // Use longer delays to handle rate limiting (500ms base, exponential backoff)
+          const delayMs = 500 * 2 ** (attempt - 1);
           await new Promise((resolve) => setTimeout(resolve, delayMs));
         }
       }
@@ -164,6 +211,9 @@ class GraphQLCache {
       console.warn(`[GraphQL] Variables:`, variables);
     }
 
+    // Acquire throttle slot before making request
+    await this.throttler.acquire();
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -177,15 +227,27 @@ class GraphQLCache {
       });
     } catch (error) {
       clearTimeout(timeout);
+      this.throttler.release();
+      // Check if error might be rate limiting (CORS errors from rate-limited responses)
+      if (error instanceof TypeError && error.message.includes("Failed to fetch")) {
+        throw new Error("Request failed - possible rate limiting");
+      }
       throw error;
     } finally {
       clearTimeout(timeout);
     }
 
+    // Release throttle slot after response received
+    this.throttler.release();
+
     const json = await response.json();
 
     if (!response.ok) {
       console.error(`[GraphQL] HTTP error! status: ${response.status}`, json);
+      // Provide more context for rate limiting
+      if (response.status === 429) {
+        throw new Error("Rate limited by API - please wait and try again");
+      }
       throw new Error(`GraphQL HTTP error! status: ${response.status}`);
     }
 
