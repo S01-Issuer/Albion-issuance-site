@@ -104,6 +104,30 @@ export class ClaimsService {
   }
 
   /**
+   * Process claims in batches to avoid rate limiting
+   */
+  private async processBatch<T>(
+    items: Array<() => Promise<T>>,
+    batchSize = 2,
+    delayBetweenBatches = 300,
+  ): Promise<PromiseSettledResult<T>[]> {
+    const results: PromiseSettledResult<T>[] = [];
+
+    for (let i = 0; i < items.length; i += batchSize) {
+      const batch = items.slice(i, i + batchSize);
+      const batchResults = await Promise.allSettled(batch.map((fn) => fn()));
+      results.push(...batchResults);
+
+      // Add delay between batches to avoid rate limiting
+      if (i + batchSize < items.length) {
+        await new Promise((resolve) => setTimeout(resolve, delayBetweenBatches));
+      }
+    }
+
+    return results;
+  }
+
+  /**
    * Load all claims data for a wallet address
    */
   async loadClaimsForWallet(ownerAddress: string): Promise<ClaimsResult> {
@@ -123,8 +147,8 @@ export class ClaimsService {
     let totalUnclaimed = 0;
     let csvLoadFailed = false;
 
-    // Collect all claim processing promises for parallel execution
-    const claimPromises: Array<Promise<PendingClaim | null>> = [];
+    // Collect all claim processing functions for batched execution
+    const claimProcessors: Array<() => Promise<PendingClaim | null>> = [];
     const claimMetadata: {
       fieldName: string;
       tokenAddress: string;
@@ -144,7 +168,7 @@ export class ClaimsService {
             symbol: token.symbol,
             claim,
           });
-          claimPromises.push(
+          claimProcessors.push(() =>
             this.processClaimForWallet(
               claim,
               ownerAddress,
@@ -157,8 +181,9 @@ export class ClaimsService {
       }
     }
 
-    // Process all claims in parallel
-    const results = await Promise.allSettled(claimPromises);
+    // Process claims in batches (2 at a time with 300ms delay between batches)
+    // This prevents overwhelming the subgraph API and triggering rate limits
+    const results = await this.processBatch(claimProcessors, 2, 300);
 
     for (let index = 0; index < results.length; index += 1) {
       const result = results[index];
