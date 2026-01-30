@@ -2,6 +2,8 @@ import type { Handle } from "@sveltejs/kit";
 import { verifySessionToken } from "$lib/server/auth";
 import { BASIC_AUTH_USER, BASIC_AUTH_PASS } from "$env/static/private";
 
+const BLOCKED_COUNTRIES = new Set(["US", "DE"]);
+
 const ALLOWLIST = new Set<string>([
   "/login",
   "/favicon.ico",
@@ -11,7 +13,7 @@ const ALLOWLIST = new Set<string>([
 ]);
 
 function isAllowlisted(path: string) {
-  if (path === "/login") return true;
+  if (path === "/login" || path === "/blocked") return true;
   if (path.startsWith("/_app/")) return true; // SvelteKit assets
   if (path.startsWith("/images/") || path.startsWith("/assets/")) return true;
   if (
@@ -25,12 +27,21 @@ function isAllowlisted(path: string) {
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
+  const { url, cookies } = event;
+  const path = url.pathname;
+
+  // Geo-blocking: redirect blocked countries to /blocked page
+  const country = event.request.headers.get("x-vercel-ip-country");
+  if (country && BLOCKED_COUNTRIES.has(country) && path !== "/blocked") {
+    return new Response(null, {
+      status: 303,
+      headers: { Location: "/blocked" },
+    });
+  }
+
   // Read credentials from env; still gate even if missing so misconfigurations are obvious.
   const user = BASIC_AUTH_USER || "";
   const pass = BASIC_AUTH_PASS || "";
-
-  const { url, cookies } = event;
-  const path = url.pathname;
 
   const debug = false; // DEBUG_LOGIN not available in static env
   const logDebug = (...messages: unknown[]) => {

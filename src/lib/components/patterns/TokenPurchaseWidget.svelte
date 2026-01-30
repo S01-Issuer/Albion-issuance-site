@@ -48,6 +48,7 @@
 	// Purchase form state
 	let investmentAmount = 5000;
 	let agreedToTerms = false;
+	let confirmedNotGerman = false;
 	let txStatus: TxStatusType = TxStatus.IDLE;
 	let purchaseError: string | null = null;
 	let canProceed = false;
@@ -100,6 +101,7 @@
 			: true;
 		canProceed =
 			agreedToTerms &&
+			confirmedNotGerman &&
 			normalizedInvestmentAmount > 0 &&
 			withinSupplyLimit &&
 			!purchasing &&
@@ -352,6 +354,7 @@
 	function _resetForm() {
 		investmentAmount = 5000;
 		agreedToTerms = false;
+		confirmedNotGerman = false;
 		txStatus = TxStatus.IDLE;
 		purchaseError = null;
 		transactionHash = null;
@@ -638,6 +641,10 @@
 									{/if}
 									and understand the risks involved in this investment.
 								</span>
+							</label>
+							<label class={termsCheckboxClasses}>
+								<input type="checkbox" bind:checked={confirmedNotGerman} class={checkboxInputClasses} />
+								<span>I am not a citizen of Germany.</span>
 							</label>
 						</div>
 
