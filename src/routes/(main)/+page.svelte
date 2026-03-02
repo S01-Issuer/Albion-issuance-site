@@ -1,20 +1,14 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { usePlatformStats } from '$lib/composables/usePlatformStats';
 	import FeaturedTokenCarousel from '$lib/components/patterns/carousel/FeaturedTokenCarousel.svelte';
 	import TokenPurchaseWidget from '$lib/components/patterns/TokenPurchaseWidget.svelte';
 	import { PrimaryButton, SecondaryButton, StatsCard } from '$lib/components/components';
 	import SectionTitle from '$lib/components/components/SectionTitle.svelte';
 	import { PageLayout, HeroSection, ContentSection } from '$lib/components/layout';
-	import { marketDataService, type MarketData } from '$lib/services/MarketDataService';
 	import { connected, web3Modal } from 'svelte-wagmi';
 
 	// Composables
 	const { platformStats, formattedStats: sftsFormattedStats } = usePlatformStats();
-	
-	// Market data state
-	let marketData: MarketData | null = null;
-	let marketDataLoading = true;
 	
 	// Token purchase widget state
 	let showPurchaseWidget = false;
@@ -44,16 +38,6 @@
 		selectedAssetId = null;
 	}
 
-	// Load market data on component mount
-	onMount(async () => {
-		try {
-			marketData = await marketDataService.getMarketData();
-		} catch (error) {
-			console.error('Failed to load market data:', error);
-		} finally {
-			marketDataLoading = false;
-		}
-	});
 </script>
 
 <svelte:head>
@@ -236,89 +220,12 @@
 		</div>
 	</ContentSection>
 
-	<!-- Market Insights - Hidden on mobile -->
-	<ContentSection background="secondary" padding="standard" centered className="hidden lg:block">
-		<div class="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 items-center">
-			<div class="space-y-4 lg:space-y-6">
-				<h3 class="text-2xl lg:text-3xl font-extrabold mb-4 lg:mb-6 text-white">Market Indicators</h3>
-				{#if marketDataLoading}
-					<div class="flex flex-col gap-3 lg:gap-4">
-						<div class="flex justify-between items-center font-semibold text-sm lg:text-base">
-							<span>WTI Crude Oil</span>
-							<span class="text-primary font-extrabold">Loading...</span>
-						</div>
-						<div class="flex justify-between items-center font-semibold text-sm lg:text-base">
-							<span>Brent Crude</span>
-							<span class="text-primary font-extrabold">Loading...</span>
-						</div>
-						<div class="flex justify-between items-center font-semibold text-sm lg:text-base">
-							<span>Henry Hub Natural Gas</span>
-							<span class="text-primary font-extrabold">Loading...</span>
-						</div>
-					</div>
-				{:else if marketData}
-					<div class="flex flex-col gap-3 lg:gap-4">
-						<div class="flex justify-between items-center font-semibold text-sm lg:text-base">
-							<span>WTI Crude Oil</span>
-							<span class="text-primary font-extrabold">
-								{marketData.oilPrices.wti.price > 0 ? `US$${marketDataService.formatPrice(marketData.oilPrices.wti.price)}` : 'N/A'}
-								{#if marketData.oilPrices.wti.price > 0}
-									<span class="text-xs font-semibold ml-2 {marketData.oilPrices.wti.change >= 0 ? 'text-primary' : 'text-red-500'}">
-										{marketDataService.formatChange(marketData.oilPrices.wti.change)}
-									</span>
-								{/if}
-							</span>
-						</div>
-						<div class="flex justify-between items-center font-semibold text-sm lg:text-base">
-							<span>Brent Crude</span>
-							<span class="text-primary font-extrabold">
-								{marketData.oilPrices.brent.price > 0 ? `US$${marketDataService.formatPrice(marketData.oilPrices.brent.price)}` : 'N/A'}
-								{#if marketData.oilPrices.brent.price > 0}
-									<span class="text-xs font-semibold ml-2 {marketData.oilPrices.brent.change >= 0 ? 'text-primary' : 'text-red-500'}">
-										{marketDataService.formatChange(marketData.oilPrices.brent.change)}
-									</span>
-								{/if}
-							</span>
-						</div>
-						<div class="flex justify-between items-center font-semibold text-sm lg:text-base">
-							<span>Henry Hub Natural Gas</span>
-							<span class="text-primary font-extrabold">
-								{marketData.oilPrices.naturalGas.price > 0 ? `US$${marketDataService.formatPrice(marketData.oilPrices.naturalGas.price)}` : 'N/A'}
-								{#if marketData.oilPrices.naturalGas.price > 0}
-									<span class="text-xs font-semibold ml-2 {marketData.oilPrices.naturalGas.change >= 0 ? 'text-primary' : 'text-red-500'}">
-										{marketDataService.formatChange(marketData.oilPrices.naturalGas.change)}
-									</span>
-								{/if}
-							</span>
-						</div>
-					</div>
-					<!-- Alpha Vantage Attribution -->
-					<div class="text-xs text-white/60 mt-4">
-						{marketData.attribution}
-					</div>
-				{:else}
-					<div class="flex flex-col gap-3 lg:gap-4">
-						<div class="flex justify-between items-center font-semibold text-sm lg:text-base">
-							<span>WTI Crude Oil</span>
-							<span class="text-primary font-extrabold">N/A</span>
-						</div>
-						<div class="flex justify-between items-center font-semibold text-sm lg:text-base">
-							<span>Brent Crude</span>
-							<span class="text-primary font-extrabold">N/A</span>
-						</div>
-						<div class="flex justify-between items-center font-semibold text-sm lg:text-base">
-							<span>Henry Hub Natural Gas</span>
-							<span class="text-primary font-extrabold">N/A</span>
-						</div>
-					</div>
-				{/if}
-			</div>
-			
-			<div class="text-center p-8 lg:p-12 bg-white/10 border border-white/20">
-				<h4 class="text-xl lg:text-2xl font-extrabold mb-3 lg:mb-4 text-white">Start Investing Today</h4>
-				<p class="mb-6 lg:mb-8 opacity-90 text-sm lg:text-base">Join {$sftsFormattedStats.activeInvestors} investors earning from real energy assets</p>
-				<SecondaryButton href="/assets">Get Started Now</SecondaryButton>
-			</div>
+	<!-- Start Investing CTA -->
+	<ContentSection background="secondary" padding="standard" centered>
+		<div class="text-center">
+			<h4 class="text-xl lg:text-2xl font-extrabold mb-3 lg:mb-4 text-white">Start Investing Today</h4>
+			<p class="mb-6 lg:mb-8 opacity-90 text-sm lg:text-base">Join {$sftsFormattedStats.activeInvestors} investors earning from real energy assets</p>
+			<SecondaryButton href="/assets">Get Started Now</SecondaryButton>
 		</div>
 	</ContentSection>
 </PageLayout>
