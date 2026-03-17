@@ -27,6 +27,7 @@
 	let pageLoading = true;
 	let claimingTarget: 'all' | string | null = null; // 'all' for claim all, token address for single, null for none
 	let confirmingTarget: 'all' | string | null = null;
+	let verifyingTarget: 'all' | string | null = null;
 	let claimSuccess = false;
 	let dataLoadError = false;
 
@@ -201,20 +202,48 @@
 		});
 	}
 
+	type OrderEntry = {
+		order: ClaimsHoldingsGroup['holdings'][number]['order'];
+		inputIOIndex: number;
+		outputIOIndex: number;
+		signedContext: readonly ClaimsHoldingsGroup['holdings'][number]['signedContext'][];
+	};
+
+	/**
+	 * Filter out already-claimed orders by simulating each one individually.
+	 * Returns only the orders that are actually claimable on-chain.
+	 */
+	async function filterClaimableOrders(orders: OrderEntry[], orderbookAddress: Hex): Promise<OrderEntry[]> {
+		const results = await Promise.allSettled(
+			orders.map(orderEntry =>
+				simulateContract($wagmiConfig, {
+					abi: orderbookAbi,
+					address: orderbookAddress,
+					functionName: 'takeOrders2',
+					args: [{
+						minimumInput: 0n,
+						maximumInput: 2n ** 256n - 1n,
+						maximumIORatio: 2n ** 256n - 1n,
+						orders: [orderEntry],
+						data: "0x"
+					}]
+				})
+			)
+		);
+
+		return orders.filter((_, i) => results[i].status === 'fulfilled');
+	}
+
 	async function claimAllPayouts() {
 		claimingTarget = 'all';
+		verifyingTarget = 'all';
 		try {
 			if (holdings.length === 0 || holdings[0].holdings.length === 0) {
 				throw new Error('No holdings available to claim');
 			}
 
-			const orders: Array<{
-				order: ClaimsHoldingsGroup['holdings'][number]['order'];
-				inputIOIndex: number;
-				outputIOIndex: number;
-				signedContext: readonly ClaimsHoldingsGroup['holdings'][number]['signedContext'][];
-			}> = [];
-			
+			const orders: OrderEntry[] = [];
+
 			// Collect all orders from all groups
 			for (const group of holdings) {
 				for (const holding of group.holdings) {
@@ -226,19 +255,27 @@
 					});
 				}
 			}
-			
-			const takeOrdersConfig = {
-				minimumInput: 0n,
-				maximumInput: 2n ** 256n - 1n,
-				maximumIORatio: 2n ** 256n - 1n,
-				orders,
-				data: "0x"
-			};
 
 			// Get the orderbook address from the first holding
 			const orderbookAddress = holdings[0].holdings[0].orderBookAddress as Hex;
 
-			// Simulate transaction first
+			// Pre-filter: simulate each order individually to skip already-claimed ones
+			const claimableOrders = await filterClaimableOrders(orders, orderbookAddress);
+			verifyingTarget = null;
+
+			if (claimableOrders.length === 0) {
+				throw new Error('All claims have already been processed');
+			}
+
+			const takeOrdersConfig = {
+				minimumInput: 0n,
+				maximumInput: 2n ** 256n - 1n,
+				maximumIORatio: 2n ** 256n - 1n,
+				orders: claimableOrders,
+				data: "0x"
+			};
+
+			// Simulate the batch to get the request object
 			const { request } = await simulateContract($wagmiConfig, {
 				abi: orderbookAbi,
 				address: orderbookAddress,
@@ -279,22 +316,19 @@
 		} finally {
 			claimingTarget = null;
 			confirmingTarget = null;
+			verifyingTarget = null;
 		}
 	}
 
 	async function handleClaimSingle(group: ClaimsHoldingsGroup) {
 		claimingTarget = group.tokenAddress;
+		verifyingTarget = group.tokenAddress;
 		try {
 			if (!group.holdings.length) {
 				throw new Error('No orders available for this claim group');
 			}
-			const orders: Array<{
-				order: ClaimsHoldingsGroup['holdings'][number]['order'];
-				inputIOIndex: number;
-				outputIOIndex: number;
-				signedContext: readonly ClaimsHoldingsGroup['holdings'][number]['signedContext'][];
-			}> = [];
-			
+			const orders: OrderEntry[] = [];
+
 			// Collect all orders from this group
 			for (const holding of group.holdings) {
 				orders.push({
@@ -304,19 +338,27 @@
 					signedContext: [holding.signedContext],
 				});
 			}
-			
-			const takeOrdersConfig = {
-				minimumInput: 0n,
-				maximumInput: 2n ** 256n - 1n,
-				maximumIORatio: 2n ** 256n - 1n,
-				orders,
-				data: "0x"
-			};
 
 			// Get the orderbook address
 			const orderbookAddress = group.holdings[0].orderBookAddress as Hex;
 
-			// Simulate transaction first
+			// Pre-filter: simulate each order individually to skip already-claimed ones
+			const claimableOrders = await filterClaimableOrders(orders, orderbookAddress);
+			verifyingTarget = null;
+
+			if (claimableOrders.length === 0) {
+				throw new Error('All claims for this asset have already been processed');
+			}
+
+			const takeOrdersConfig = {
+				minimumInput: 0n,
+				maximumInput: 2n ** 256n - 1n,
+				maximumIORatio: 2n ** 256n - 1n,
+				orders: claimableOrders,
+				data: "0x"
+			};
+
+			// Simulate the batch to get the request object
 			const { request } = await simulateContract($wagmiConfig, {
 				abi: orderbookAbi,
 				address: orderbookAddress,
@@ -357,6 +399,7 @@
 		} finally {
 			claimingTarget = null;
 			confirmingTarget = null;
+			verifyingTarget = null;
 		}
 	}
 
@@ -480,10 +523,10 @@
 				<div class="text-center mt-6 lg:mt-8">
 					<PrimaryButton
 						on:click={claimAllPayouts}
-						disabled={claimingTarget !== null || confirmingTarget !== null}
+						disabled={claimingTarget !== null || confirmingTarget !== null || verifyingTarget !== null}
 						size="large"
 					>
-						{claimingTarget === 'all' ? 'Submitting transaction...' : confirmingTarget === 'all' ? 'Waiting for confirmation...' : `Claim All (${formatCurrency(unclaimedPayout)})`}
+						{verifyingTarget === 'all' ? 'Verifying claims...' : claimingTarget === 'all' ? 'Submitting transaction...' : confirmingTarget === 'all' ? 'Waiting for confirmation...' : `Claim All (${formatCurrency(unclaimedPayout)})`}
 					</PrimaryButton>
 				</div>
 			{/if}
@@ -537,11 +580,11 @@
 									<div class="text-center">
 										<SecondaryButton
 											size="small"
-											disabled={claimingTarget !== null || confirmingTarget !== null || group.totalAmount <= 0}
+											disabled={claimingTarget !== null || confirmingTarget !== null || verifyingTarget !== null || group.totalAmount <= 0}
 											on:click={() => handleClaimSingle(group)}
 											fullWidth
 										>
-											{claimingTarget === group.tokenAddress ? 'Submitting...' : confirmingTarget === group.tokenAddress ? 'Confirming...' : 'Claim'}
+											{verifyingTarget === group.tokenAddress ? 'Verifying...' : claimingTarget === group.tokenAddress ? 'Submitting...' : confirmingTarget === group.tokenAddress ? 'Confirming...' : 'Claim'}
 										</SecondaryButton>
 									</div>
 								</div>

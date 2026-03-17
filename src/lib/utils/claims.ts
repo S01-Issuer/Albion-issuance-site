@@ -390,21 +390,25 @@ export async function sortClaimsData(
   tokenAddress?: string,
   orderHash?: string, // OrderHash to include in claims for date lookup from metadata
   symbol?: string,
+  orderStartBlock?: number, // Block when the order was created, for wider scan range
 ): Promise<SortedClaimsResult> {
-  const blockRange = getBlockRangeFromTrades(trades);
+  const tradeBlockRange = getBlockRangeFromTrades(trades);
 
-  const transactionIds = trades
-    .map((trade) => trade.tradeEvent?.transaction?.id)
-    .filter((id) => id)
-    .map((id) => id.toLowerCase());
+  // Use the order creation block as start if available, to catch claims
+  // that the subgraph may not have indexed yet
+  const startBlock = orderStartBlock
+    ? Math.min(orderStartBlock, tradeBlockRange.lowest || orderStartBlock)
+    : tradeBlockRange.lowest;
 
+  // Don't filter by transaction IDs - scan ALL Context events in the block range.
+  // This prevents missed claims when the subgraph hasn't indexed a trade.
+  // Cross-order contamination is handled by (index, amount) composite matching
+  // in filterClaimedAndUnclaimed.
   const logs = await fetchLogs(
     HYPERSYNC_URL,
     ORDERBOOK_CONTRACT_ADDRESS,
     CONTEXT_EVENT_TOPIC,
-    blockRange.lowest,
-    blockRange.highest,
-    transactionIds,
+    startBlock,
   );
 
   const decodedLogs = logs
@@ -558,14 +562,18 @@ async function fetchLogs(
   poolContract: string,
   eventTopic: string,
   startBlock: number,
-  endBlock: number,
-  transactionIds?: string[],
 ): Promise<HypersyncResult[]> {
-  let currentBlock = startBlock;
+  if (!startBlock || startBlock <= 0) {
+    return [];
+  }
 
+  let currentBlock = startBlock;
   let logs: HypersyncEntry[] = [];
 
-  while (currentBlock <= endBlock) {
+  // Scan from startBlock to the chain tip (no endBlock cap).
+  // Hypersync queries without to_block scan to the latest block.
+  // The loop continues until Hypersync indicates no more data.
+  while (true) {
     try {
       const queryResponse = await axios.post<HypersyncResponseData>(
         "/api/hypersync",
@@ -593,25 +601,31 @@ async function fetchLogs(
         },
       );
 
-      // Concatenate logs if there are any
       const responseData = queryResponse.data;
-      if (
-        responseData.data &&
-        responseData.data.length > 0 &&
-        currentBlock !== responseData.next_block
-      ) {
+
+      // Check for error responses from the proxy
+      if (!responseData?.data) {
+        console.warn("Hypersync returned no data, stopping scan");
+        break;
+      }
+
+      // Add logs if we got data
+      if (responseData.data.length > 0) {
         logs = logs.concat(responseData.data);
       }
 
-      // Update currentBlock for the next iteration
-      currentBlock = responseData.next_block;
-
-      // Exit the loop if nextBlock is invalid
-      if (!currentBlock || currentBlock > endBlock) {
+      // Exit if no progress (next_block not advancing)
+      if (
+        !responseData.next_block ||
+        responseData.next_block <= currentBlock
+      ) {
         break;
       }
-    } catch {
-      break; // Exit loop on error
+
+      currentBlock = responseData.next_block;
+    } catch (error) {
+      console.warn("Hypersync fetch error, returning partial results:", error);
+      break;
     }
   }
 
@@ -627,17 +641,9 @@ async function fetchLogs(
     // Map each log with the corresponding timestamp
     return entry.logs.map((log) => ({
       ...log,
-      timestamp: blockMap.get(log.block_number) ?? null, // Add timestamp if available
+      timestamp: blockMap.get(log.block_number) ?? null,
     }));
   });
-
-  // Filter logs by transaction IDs if provided
-  if (transactionIds && transactionIds.length > 0) {
-    const filteredLogs = allLogs.filter((log) =>
-      transactionIds.includes(log.transaction_hash?.toLowerCase()),
-    );
-    return filteredLogs;
-  }
 
   return allLogs;
 }
@@ -676,21 +682,41 @@ function decodeLogData(data: string): DecodedClaimLog | null {
     const logBytes = ethers.getBytes(data);
     const decodedData = abiCoder.decode(["address", "uint256[][]"], logBytes);
 
+    // The signed context is typically at column index 6 in the 2D context array.
+    // Search for it dynamically to handle varying context structures.
+    const contextColumns = decodedData[1];
+    let claimIndex: string | undefined;
+    let claimAmount: string | undefined;
+
+    // Try column 6 first (most common), then search other columns
+    const columnsToCheck = [6, 5, 7, 8];
+    for (const colIdx of columnsToCheck) {
+      const col = contextColumns[colIdx];
+      if (col && col.length >= 2) {
+        claimIndex = col[0].toString();
+        claimAmount = col[1].toString();
+        break;
+      }
+    }
+
+    if (claimIndex === undefined || claimAmount === undefined) {
+      return null;
+    }
+
     return {
-      index: decodedData[1][6][0].toString(),
+      index: claimIndex,
       address: decodedData[0],
-      amount: decodedData[1][6][1].toString(),
+      amount: claimAmount,
     };
   } catch {
-    return {
-      index: "0",
-      address: ZERO_ADDRESS,
-      amount: "0",
-    };
+    // Return null instead of a fake entry - don't mask real claim data
+    return null;
   }
 }
 
-// Function to filter CSV claims into claimed and unclaimed arrays
+// Function to filter CSV claims into claimed and unclaimed arrays.
+// Uses composite (index, amount) matching to prevent cross-order contamination
+// when multiple orders are claimed in the same transaction.
 function filterClaimedAndUnclaimed(
   csvClaims: CsvClaimRow[],
   decodedLogs: DecodedClaimLog[],
@@ -698,17 +724,32 @@ function filterClaimedAndUnclaimed(
   claimedCsv: ClaimedCsvRow[];
   unclaimedCsv: UnclaimedCsvRow[];
 } {
-  // Create a set of claimed indices for faster lookup
+  // Create a set of claimed (index, amount) pairs for accurate matching.
+  // Using both index AND amount prevents false matches from Context events
+  // that belong to different orders but share the same CSV index.
+  const claimedKeys = new Set(
+    decodedLogs.map((log) => `${log.index}:${log.amount}`),
+  );
+  // Also keep an index-only set as fallback for edge cases where
+  // the amount format might differ slightly
   const claimedIndices = new Set(decodedLogs.map((log) => log.index));
 
-  // Filter CSV claims
   const claimedCsv: ClaimedCsvRow[] = [];
   const unclaimedCsv: UnclaimedCsvRow[] = [];
 
   csvClaims.forEach((claim) => {
-    if (claimedIndices.has(claim.index)) {
-      // Find the corresponding decoded log for additional info
-      const decodedLog = decodedLogs.find((log) => log.index === claim.index);
+    // Primary match: composite (index, amount) key
+    const compositeKey = `${claim.index}:${claim.amount}`;
+    const isClaimedByComposite = claimedKeys.has(compositeKey);
+    // Fallback: index-only match (for backward compatibility)
+    const isClaimedByIndex = claimedIndices.has(claim.index);
+
+    if (isClaimedByComposite || isClaimedByIndex) {
+      const decodedLog = decodedLogs.find(
+        (log) =>
+          log.index === claim.index &&
+          (log.amount === claim.amount || isClaimedByIndex),
+      );
       claimedCsv.push({
         ...claim,
         claimed: true,

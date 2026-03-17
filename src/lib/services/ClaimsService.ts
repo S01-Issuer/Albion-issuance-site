@@ -261,6 +261,12 @@ export class ClaimsService {
     const orderBookAddress = orderDetails[0].orderbook.id;
     const decodedOrder = decodeOrder(orderDetails[0].orderBytes);
 
+    // Get the order creation block for wider Hypersync scan range
+    const orderStartBlock = orderDetails[0].addEvents?.[0]?.transaction
+      ?.blockNumber
+      ? parseInt(orderDetails[0].addEvents[0].transaction.blockNumber)
+      : undefined;
+
     // Build merkle tree and process claims
     const merkleTree = getMerkleTree(csvData);
     const sortedClaimsData = (await sortClaimsData(
@@ -272,6 +278,7 @@ export class ClaimsService {
       tokenAddress,
       claim.orderHash, // Pass orderHash so caller can look up payout date from metadata
       symbol,
+      orderStartBlock,
     )) as SortedClaimsData;
 
     // Generate proofs for holdings
