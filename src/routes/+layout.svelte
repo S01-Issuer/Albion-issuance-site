@@ -10,32 +10,27 @@
 	import { injectAnalytics } from '@vercel/analytics/sveltekit';
 	import { injectSpeedInsights } from '@vercel/speed-insights/sveltekit';
 
+	const publicRpcs = [
+		"https://mainnet.base.org",
+		"https://base-rpc.publicnode.com",
+		"https://base.llamarpc.com",
+		"https://base.meowrpc.com",
+		"https://base-mainnet.public.blastapi.io",
+		"https://gateway.tenderly.co/public/base"
+	];
+
+	// Inject Alchemy as the primary RPC if configured (avoids public RPC rate limits)
+	const alchemyKey = publicEnv.PUBLIC_ALCHEMY_API_KEY;
+	const rpcList = alchemyKey
+		? [`https://base-mainnet.g.alchemy.com/v2/${alchemyKey}`, ...publicRpcs]
+		: publicRpcs;
+
 	const baseNetworkFallbackRpcs = {
 		...base,
 		rpcUrls: {
 			...base.rpcUrls,
-			default: {
-				http: [
-					"https://mainnet.base.org",                    // Primary
-					"https://base-rpc.publicnode.com",
-					"https://mainnet.base.org",                    // Secondary explicit repeat per requested list
-					"https://base.llamarpc.com",
-					"https://base.meowrpc.com",
-					"https://base-mainnet.public.blastapi.io",
-					"https://gateway.tenderly.co/public/base"
-				]
-			},
-			public: {
-				http: [
-					"https://mainnet.base.org",
-					"https://base-rpc.publicnode.com",
-					"https://mainnet.base.org",
-					"https://base.llamarpc.com",
-					"https://base.meowrpc.com",
-					"https://base-mainnet.public.blastapi.io",
-					"https://gateway.tenderly.co/public/base"
-				]
-			}
+			default: { http: rpcList },
+			public: { http: rpcList }
 		}
 	};
 
