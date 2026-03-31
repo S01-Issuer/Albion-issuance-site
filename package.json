@@ -53,7 +53,7 @@
     "@vercel/speed-insights": "^1.2.0",
     "@wagmi/connectors": "^5.0.0",
     "@wagmi/core": "^2.0.0",
-    "axios": "^1.7.9",
+    "axios": "=1.11.0",
     "cbor-web": "^9.0.1",
     "chart.js": "^4.5.1",
     "ethers": "^6.10.0",
