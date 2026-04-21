@@ -553,6 +553,90 @@ export async function sortClaimsData(
   };
 }
 
+// Base chain: ~2s block time, genesis June 15 2023
+const BASE_GENESIS_TIMESTAMP = 1686789347;
+const BASE_BLOCK_TIME_SECONDS = 2;
+
+function estimateCurrentBlock(): number {
+  const elapsed = Math.floor(Date.now() / 1000) - BASE_GENESIS_TIMESTAMP;
+  return Math.floor(elapsed / BASE_BLOCK_TIME_SECONDS);
+}
+
+/**
+ * Fetch a single chunk of Hypersync logs (from_block to to_block).
+ * Paginates internally if the chunk has more data than one response.
+ */
+async function fetchLogsChunk(
+  client: string,
+  poolContract: string,
+  eventTopic: string,
+  fromBlock: number,
+  toBlock?: number,
+): Promise<HypersyncEntry[]> {
+  let currentBlock = fromBlock;
+  const logs: HypersyncEntry[] = [];
+
+  while (true) {
+    try {
+      const body: Record<string, unknown> = {
+        client,
+        from_block: currentBlock,
+        logs: [
+          {
+            address: [poolContract],
+            topics: [[eventTopic]],
+          },
+        ],
+        field_selection: {
+          log: [
+            "block_number",
+            "log_index",
+            "transaction_index",
+            "transaction_hash",
+            "data",
+            "address",
+            "topic0",
+          ],
+          block: ["number", "timestamp"],
+        },
+      };
+      if (toBlock !== undefined) {
+        body.to_block = toBlock;
+      }
+
+      const queryResponse = await axios.post<HypersyncResponseData>(
+        "/api/hypersync",
+        body,
+      );
+
+      const responseData = queryResponse.data;
+      if (!responseData?.data) break;
+
+      if (responseData.data.length > 0) {
+        logs.push(...responseData.data);
+      }
+
+      if (
+        !responseData.next_block ||
+        responseData.next_block <= currentBlock
+      ) {
+        break;
+      }
+      // Stop if we've reached or exceeded the chunk boundary
+      if (toBlock !== undefined && responseData.next_block >= toBlock) {
+        break;
+      }
+
+      currentBlock = responseData.next_block;
+    } catch (error) {
+      console.warn("Hypersync chunk fetch error:", error);
+      break;
+    }
+  }
+
+  return logs;
+}
+
 export async function fetchLogs(
   client: string,
   poolContract: string,
@@ -563,70 +647,42 @@ export async function fetchLogs(
     return [];
   }
 
-  let currentBlock = startBlock;
-  let logs: HypersyncEntry[] = [];
+  const estimatedTip = estimateCurrentBlock();
+  const totalBlocks = estimatedTip - startBlock;
 
-  // Scan from startBlock to the chain tip (no endBlock cap).
-  // Hypersync queries without to_block scan to the latest block.
-  // The loop continues until Hypersync indicates no more data.
-  while (true) {
-    try {
-      const queryResponse = await axios.post<HypersyncResponseData>(
-        "/api/hypersync",
-        {
-          client,
-          from_block: currentBlock,
-          logs: [
-            {
-              address: [poolContract],
-              topics: [[eventTopic]],
-            },
-          ],
-          field_selection: {
-            log: [
-              "block_number",
-              "log_index",
-              "transaction_index",
-              "transaction_hash",
-              "data",
-              "address",
-              "topic0",
-            ],
-            block: ["number", "timestamp"],
-          },
-        },
-      );
+  let allEntries: HypersyncEntry[];
 
-      const responseData = queryResponse.data;
+  // Split into parallel chunks if range is large enough
+  const NUM_CHUNKS = 4;
+  if (totalBlocks > 500_000) {
+    const chunkSize = Math.ceil(totalBlocks / NUM_CHUNKS);
+    const chunks: Array<{ from: number; to?: number }> = [];
 
-      // Check for error responses from the proxy
-      if (!responseData?.data) {
-        console.warn("Hypersync returned no data, stopping scan");
-        break;
-      }
-
-      // Add logs if we got data
-      if (responseData.data.length > 0) {
-        logs = logs.concat(responseData.data);
-      }
-
-      // Exit if no progress (next_block not advancing)
-      if (
-        !responseData.next_block ||
-        responseData.next_block <= currentBlock
-      ) {
-        break;
-      }
-
-      currentBlock = responseData.next_block;
-    } catch (error) {
-      console.warn("Hypersync fetch error, returning partial results:", error);
-      break;
+    for (let i = 0; i < NUM_CHUNKS; i++) {
+      const from = startBlock + i * chunkSize;
+      // Last chunk: no upper bound (scans to chain tip for safety)
+      const to =
+        i < NUM_CHUNKS - 1 ? startBlock + (i + 1) * chunkSize : undefined;
+      chunks.push({ from, to });
     }
+
+    const chunkResults = await Promise.all(
+      chunks.map((c) =>
+        fetchLogsChunk(client, poolContract, eventTopic, c.from, c.to),
+      ),
+    );
+    allEntries = chunkResults.flat();
+  } else {
+    // Small range: single sequential scan
+    allEntries = await fetchLogsChunk(
+      client,
+      poolContract,
+      eventTopic,
+      startBlock,
+    );
   }
 
-  const allLogs = logs.flatMap((entry) => {
-    // Create a map of block_number to timestamp
+  const allLogs = allEntries.flatMap((entry) => {
     const blockMap = new Map(
       entry.blocks.map((block) => [
         block.number,
@@ -634,7 +690,6 @@ export async function fetchLogs(
       ]),
     );
 
-    // Map each log with the corresponding timestamp
     return entry.logs.map((log) => ({
       ...log,
       timestamp: blockMap.get(log.block_number) ?? null,
