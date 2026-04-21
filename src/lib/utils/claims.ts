@@ -553,92 +553,14 @@ export async function sortClaimsData(
   };
 }
 
-// Base chain: ~2s block time, genesis June 15 2023
-const BASE_GENESIS_TIMESTAMP = 1686789347;
-const BASE_BLOCK_TIME_SECONDS = 2;
-
-function estimateCurrentBlock(): number {
-  const elapsed = Math.floor(Date.now() / 1000) - BASE_GENESIS_TIMESTAMP;
-  return Math.floor(elapsed / BASE_BLOCK_TIME_SECONDS);
-}
-
 /**
- * Fetch a single chunk of Hypersync logs (from_block to to_block).
- * Paginates internally if the chunk has more data than one response.
+ * Fetch Context event logs via the server-side cached endpoint.
+ * The server maintains a high-water-mark cache — first request does a full scan,
+ * subsequent requests only fetch new blocks (delta). This reduces ~24s scans to
+ * near-instant on repeat loads.
  */
-async function fetchLogsChunk(
-  client: string,
-  poolContract: string,
-  eventTopic: string,
-  fromBlock: number,
-  toBlock?: number,
-): Promise<HypersyncEntry[]> {
-  let currentBlock = fromBlock;
-  const logs: HypersyncEntry[] = [];
-
-  while (true) {
-    try {
-      const body: Record<string, unknown> = {
-        client,
-        from_block: currentBlock,
-        logs: [
-          {
-            address: [poolContract],
-            topics: [[eventTopic]],
-          },
-        ],
-        field_selection: {
-          log: [
-            "block_number",
-            "log_index",
-            "transaction_index",
-            "transaction_hash",
-            "data",
-            "address",
-            "topic0",
-          ],
-          block: ["number", "timestamp"],
-        },
-      };
-      if (toBlock !== undefined) {
-        body.to_block = toBlock;
-      }
-
-      const queryResponse = await axios.post<HypersyncResponseData>(
-        "/api/hypersync",
-        body,
-      );
-
-      const responseData = queryResponse.data;
-      if (!responseData?.data) break;
-
-      if (responseData.data.length > 0) {
-        logs.push(...responseData.data);
-      }
-
-      if (
-        !responseData.next_block ||
-        responseData.next_block <= currentBlock
-      ) {
-        break;
-      }
-      // Stop if we've reached or exceeded the chunk boundary
-      if (toBlock !== undefined && responseData.next_block >= toBlock) {
-        break;
-      }
-
-      currentBlock = responseData.next_block;
-    } catch (error) {
-      console.warn("Hypersync chunk fetch error:", error);
-      break;
-    }
-  }
-
-  return logs;
-}
-
 export async function fetchLogs(
-  client: string,
+  _client: string,
   poolContract: string,
   eventTopic: string,
   startBlock: number,
@@ -647,56 +569,21 @@ export async function fetchLogs(
     return [];
   }
 
-  const estimatedTip = estimateCurrentBlock();
-  const totalBlocks = estimatedTip - startBlock;
-
-  let allEntries: HypersyncEntry[];
-
-  // Split into parallel chunks if range is large enough
-  const NUM_CHUNKS = 4;
-  if (totalBlocks > 500_000) {
-    const chunkSize = Math.ceil(totalBlocks / NUM_CHUNKS);
-    const chunks: Array<{ from: number; to?: number }> = [];
-
-    for (let i = 0; i < NUM_CHUNKS; i++) {
-      const from = startBlock + i * chunkSize;
-      // Last chunk: no upper bound (scans to chain tip for safety)
-      const to =
-        i < NUM_CHUNKS - 1 ? startBlock + (i + 1) * chunkSize : undefined;
-      chunks.push({ from, to });
-    }
-
-    const chunkResults = await Promise.all(
-      chunks.map((c) =>
-        fetchLogsChunk(client, poolContract, eventTopic, c.from, c.to),
-      ),
-    );
-    allEntries = chunkResults.flat();
-  } else {
-    // Small range: single sequential scan
-    allEntries = await fetchLogsChunk(
-      client,
-      poolContract,
+  try {
+    const response = await axios.post<{
+      logs: HypersyncResult[];
+      fromCache: boolean;
+    }>("/api/context-events", {
+      contractAddress: poolContract,
       eventTopic,
-      startBlock,
-    );
+      fromBlock: startBlock,
+    });
+
+    return response.data?.logs || [];
+  } catch (error) {
+    console.warn("Context events fetch error, falling back to empty:", error);
+    return [];
   }
-
-  const allLogs = allEntries.flatMap((entry) => {
-    const blockMap = new Map(
-      entry.blocks.map((block) => [
-        block.number,
-        Number.parseInt(block.timestamp, 16),
-      ]),
-    );
-
-    return entry.logs.map((log) => ({
-      ...log,
-      timestamp: blockMap.get(log.block_number) ?? null,
-    }));
-  });
-
-  return allLogs;
 }
 
 // Function to get the lowest and highest block numbers from trades
