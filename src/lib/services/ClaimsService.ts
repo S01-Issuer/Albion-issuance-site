@@ -1,5 +1,12 @@
-import { claimsRepository } from "$lib/data/repositories/claimsRepository";
-import { ENERGY_FIELDS, type Claim } from "$lib/network";
+import {
+  claimsRepository,
+  type OrderDetail,
+} from "$lib/data/repositories/claimsRepository";
+import {
+  ENERGY_FIELDS,
+  ORDERBOOK_CONTRACT_ADDRESS,
+  type Claim,
+} from "$lib/network";
 import {
   fetchAndValidateCSV,
   getMerkleTree,
@@ -8,8 +15,12 @@ import {
   decodeOrder,
   signContext,
   sortClaimsData,
+  fetchLogs,
+  HYPERSYNC_URL,
+  CONTEXT_EVENT_TOPIC,
   type ClaimHistory,
   type CsvClaimRow,
+  type HypersyncResult,
 } from "$lib/utils/claims";
 import { formatEther, parseEther, type Hex } from "viem";
 import { wagmiConfig } from "svelte-wagmi";
@@ -140,15 +151,7 @@ export class ClaimsService {
       };
     }
 
-    let claimHistory: ClaimHistory[] = [];
-    const holdings: ClaimsHoldingsGroup[] = [];
-    let totalClaimed = 0;
-    let totalEarned = 0;
-    let totalUnclaimed = 0;
-    let csvLoadFailed = false;
-
-    // Collect all claim processing functions for batched execution
-    const claimProcessors: Array<() => Promise<PendingClaim | null>> = [];
+    // Collect all claims and their metadata
     const claimMetadata: {
       fieldName: string;
       tokenAddress: string;
@@ -156,11 +159,9 @@ export class ClaimsService {
       claim: Claim;
     }[] = [];
 
-    // Build list of all claims to process
     for (const field of ENERGY_FIELDS) {
       for (const token of field.sftTokens) {
         if (!token.claims || token.claims.length === 0) continue;
-
         for (const claim of token.claims as Claim[]) {
           claimMetadata.push({
             fieldName: field.name,
@@ -168,28 +169,79 @@ export class ClaimsService {
             symbol: token.symbol,
             claim,
           });
-          claimProcessors.push(() =>
-            this.processClaimForWallet(
-              claim,
-              ownerAddress,
-              field.name,
-              token.address,
-              token.symbol,
-            ),
-          );
         }
       }
     }
 
-    // Process claims in batches (2 at a time with 300ms delay between batches)
-    // This prevents overwhelming the subgraph API and triggering rate limits
-    const results = await this.processBatch(claimProcessors, 2, 300);
+    if (claimMetadata.length === 0) {
+      return {
+        holdings: [],
+        claimHistory: [],
+        totals: { earned: 0, claimed: 0, unclaimed: 0 },
+        hasCsvLoadError: false,
+      };
+    }
+
+    // Phase 1: Pre-fetch all orders in a single batch query (instead of 12+ individual queries)
+    const allOrderHashes = claimMetadata.map((m) => m.claim.orderHash);
+    const allOrders = await this.repository.getOrdersByHashes(allOrderHashes);
+
+    // Index orders by hash for O(1) lookup
+    const ordersByHash = new Map<string, OrderDetail>();
+    for (const order of allOrders) {
+      ordersByHash.set(order.orderHash.toLowerCase(), order);
+    }
+
+    // Phase 2: Determine earliest block across all orders for a single Hypersync scan
+    let earliestBlock = Infinity;
+    for (const order of allOrders) {
+      const blockNum = order.addEvents?.[0]?.transaction?.blockNumber;
+      if (blockNum) {
+        const parsed = parseInt(blockNum);
+        if (parsed < earliestBlock) earliestBlock = parsed;
+      }
+    }
+
+    // Phase 3: Fetch Hypersync logs ONCE from earliest block (instead of 12+ separate scans)
+    const sharedLogs: HypersyncResult[] =
+      earliestBlock < Infinity
+        ? await fetchLogs(
+            HYPERSYNC_URL,
+            ORDERBOOK_CONTRACT_ADDRESS,
+            CONTEXT_EVENT_TOPIC,
+            earliestBlock,
+          )
+        : [];
+
+    // Phase 4: Process each claim using pre-fetched data
+    let claimHistory: ClaimHistory[] = [];
+    const holdings: ClaimsHoldingsGroup[] = [];
+    let totalClaimed = 0;
+    let totalEarned = 0;
+    let totalUnclaimed = 0;
+    let csvLoadFailed = false;
+
+    const claimProcessors = claimMetadata.map(
+      ({ fieldName, tokenAddress, symbol, claim }) =>
+        () =>
+          this.processClaimForWallet(
+            claim,
+            ownerAddress,
+            fieldName,
+            tokenAddress,
+            symbol,
+            ordersByHash,
+            sharedLogs,
+          ),
+    );
+
+    // Process claims in batches (6 at a time with 100ms delay between batches)
+    const results = await this.processBatch(claimProcessors, 6, 100);
 
     for (let index = 0; index < results.length; index += 1) {
       const result = results[index];
 
       if (result.status === "rejected") {
-        // Log the error and set the flag - don't throw to allow partial results
         console.error("Error processing claim:", result.reason);
         csvLoadFailed = true;
         continue;
@@ -200,10 +252,8 @@ export class ClaimsService {
 
       const { fieldName, tokenAddress, symbol } = claimMetadata[index];
 
-      // Merge results
       claimHistory = [...claimHistory, ...claimData.claims];
 
-      // Group holdings by token address (each token has its own claims)
       this.mergeHoldingsGroup(
         holdings,
         fieldName,
@@ -212,7 +262,6 @@ export class ClaimsService {
         claimData.holdings,
       );
 
-      // Update totals
       totalClaimed += claimData.totalClaimed;
       totalEarned += claimData.totalEarned;
       totalUnclaimed += claimData.totalUnclaimed;
@@ -231,7 +280,7 @@ export class ClaimsService {
   }
 
   /**
-   * Process a single claim for a wallet
+   * Process a single claim for a wallet using pre-fetched order data and Hypersync logs
    */
   private async processClaimForWallet(
     claim: Claim,
@@ -239,35 +288,38 @@ export class ClaimsService {
     fieldName: string,
     tokenAddress: string,
     symbol: string,
+    ordersByHash: Map<string, OrderDetail>,
+    sharedLogs: HypersyncResult[],
   ): Promise<PendingClaim | null> {
     if (!claim.csvLink) return null;
 
-    // Fetch CSV data, trades and order details in parallel
-    const [csvData, trades, orderDetails] = await Promise.all([
+    // Look up pre-fetched order (no network call needed)
+    const orderDetail = ordersByHash.get(claim.orderHash.toLowerCase());
+    if (!orderDetail) return null;
+
+    // Fetch CSV data and trades in parallel (order is already available)
+    const [csvData, trades] = await Promise.all([
       this.fetchCsv(
         claim.csvLink,
         claim.expectedMerkleRoot,
         claim.expectedContentHash,
       ),
       this.repository.getTradesForClaims(claim.orderHash, ownerAddress),
-      this.repository.getOrderByHash(claim.orderHash),
     ]);
 
     if (!csvData) {
       throw new ClaimsCsvLoadError();
     }
-    if (!orderDetails || orderDetails.length === 0) return null;
 
-    const orderBookAddress = orderDetails[0].orderbook.id;
-    const decodedOrder = decodeOrder(orderDetails[0].orderBytes);
+    const orderBookAddress = orderDetail.orderbook.id;
+    const decodedOrder = decodeOrder(orderDetail.orderBytes);
 
-    // Get the order creation block for wider Hypersync scan range
-    const orderStartBlock = orderDetails[0].addEvents?.[0]?.transaction
+    const orderStartBlock = orderDetail.addEvents?.[0]?.transaction
       ?.blockNumber
-      ? parseInt(orderDetails[0].addEvents[0].transaction.blockNumber)
+      ? parseInt(orderDetail.addEvents[0].transaction.blockNumber)
       : undefined;
 
-    // Build merkle tree and process claims
+    // Build merkle tree and process claims (using shared pre-fetched Hypersync logs)
     const merkleTree = getMerkleTree(csvData);
     const sortedClaimsData = (await sortClaimsData(
       csvData,
@@ -276,9 +328,10 @@ export class ClaimsService {
       fieldName,
       undefined,
       tokenAddress,
-      claim.orderHash, // Pass orderHash so caller can look up payout date from metadata
+      claim.orderHash,
       symbol,
       orderStartBlock,
+      sharedLogs, // Pass shared logs to avoid per-claim Hypersync scan
     )) as SortedClaimsData;
 
     // Generate proofs for holdings

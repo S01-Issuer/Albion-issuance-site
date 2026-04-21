@@ -11,8 +11,8 @@ import { formatEther, parseEther } from "viem";
 // This works in both production and test environments
 const abiCoder = AbiCoder.defaultAbiCoder();
 
-const HYPERSYNC_URL = "https://8453.hypersync.xyz/query";
-const CONTEXT_EVENT_TOPIC =
+export const HYPERSYNC_URL = "https://8453.hypersync.xyz/query";
+export const CONTEXT_EVENT_TOPIC =
   "0x17a5c0f3785132a57703932032f6863e7920434150aa1dc940e567b440fdce1f";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
@@ -86,7 +86,7 @@ export interface HypersyncResponseData {
   next_block: number;
 }
 
-type HypersyncResult = HypersyncLog & {
+export type HypersyncResult = HypersyncLog & {
   timestamp: number | null;
 };
 
@@ -391,25 +391,21 @@ export async function sortClaimsData(
   orderHash?: string, // OrderHash to include in claims for date lookup from metadata
   symbol?: string,
   orderStartBlock?: number, // Block when the order was created, for wider scan range
+  prefetchedLogs?: HypersyncResult[], // Pre-fetched logs to avoid duplicate Hypersync scans
 ): Promise<SortedClaimsResult> {
-  const tradeBlockRange = getBlockRangeFromTrades(trades);
-
-  // Use the order creation block as start if available, to catch claims
-  // that the subgraph may not have indexed yet
-  const startBlock = orderStartBlock
-    ? Math.min(orderStartBlock, tradeBlockRange.lowest || orderStartBlock)
-    : tradeBlockRange.lowest;
-
-  // Don't filter by transaction IDs - scan ALL Context events in the block range.
-  // This prevents missed claims when the subgraph hasn't indexed a trade.
-  // Cross-order contamination is handled by (index, amount) composite matching
-  // in filterClaimedAndUnclaimed.
-  const logs = await fetchLogs(
-    HYPERSYNC_URL,
-    ORDERBOOK_CONTRACT_ADDRESS,
-    CONTEXT_EVENT_TOPIC,
-    startBlock,
-  );
+  // Use pre-fetched logs if available, otherwise fetch independently
+  const logs = prefetchedLogs ?? await (async () => {
+    const tradeBlockRange = getBlockRangeFromTrades(trades);
+    const startBlock = orderStartBlock
+      ? Math.min(orderStartBlock, tradeBlockRange.lowest || orderStartBlock)
+      : tradeBlockRange.lowest;
+    return fetchLogs(
+      HYPERSYNC_URL,
+      ORDERBOOK_CONTRACT_ADDRESS,
+      CONTEXT_EVENT_TOPIC,
+      startBlock,
+    );
+  })();
 
   const decodedLogs = logs
     .map((log) => {
@@ -557,8 +553,14 @@ export async function sortClaimsData(
   };
 }
 
-async function fetchLogs(
-  client: string,
+/**
+ * Fetch Context event logs via the server-side cached endpoint.
+ * The server maintains a high-water-mark cache — first request does a full scan,
+ * subsequent requests only fetch new blocks (delta). This reduces ~24s scans to
+ * near-instant on repeat loads.
+ */
+export async function fetchLogs(
+  _client: string,
   poolContract: string,
   eventTopic: string,
   startBlock: number,
@@ -567,85 +569,21 @@ async function fetchLogs(
     return [];
   }
 
-  let currentBlock = startBlock;
-  let logs: HypersyncEntry[] = [];
+  try {
+    const response = await axios.post<{
+      logs: HypersyncResult[];
+      fromCache: boolean;
+    }>("/api/context-events", {
+      contractAddress: poolContract,
+      eventTopic,
+      fromBlock: startBlock,
+    });
 
-  // Scan from startBlock to the chain tip (no endBlock cap).
-  // Hypersync queries without to_block scan to the latest block.
-  // The loop continues until Hypersync indicates no more data.
-  while (true) {
-    try {
-      const queryResponse = await axios.post<HypersyncResponseData>(
-        "/api/hypersync",
-        {
-          client,
-          from_block: currentBlock,
-          logs: [
-            {
-              address: [poolContract],
-              topics: [[eventTopic]],
-            },
-          ],
-          field_selection: {
-            log: [
-              "block_number",
-              "log_index",
-              "transaction_index",
-              "transaction_hash",
-              "data",
-              "address",
-              "topic0",
-            ],
-            block: ["number", "timestamp"],
-          },
-        },
-      );
-
-      const responseData = queryResponse.data;
-
-      // Check for error responses from the proxy
-      if (!responseData?.data) {
-        console.warn("Hypersync returned no data, stopping scan");
-        break;
-      }
-
-      // Add logs if we got data
-      if (responseData.data.length > 0) {
-        logs = logs.concat(responseData.data);
-      }
-
-      // Exit if no progress (next_block not advancing)
-      if (
-        !responseData.next_block ||
-        responseData.next_block <= currentBlock
-      ) {
-        break;
-      }
-
-      currentBlock = responseData.next_block;
-    } catch (error) {
-      console.warn("Hypersync fetch error, returning partial results:", error);
-      break;
-    }
+    return response.data?.logs || [];
+  } catch (error) {
+    console.warn("Context events fetch error, falling back to empty:", error);
+    return [];
   }
-
-  const allLogs = logs.flatMap((entry) => {
-    // Create a map of block_number to timestamp
-    const blockMap = new Map(
-      entry.blocks.map((block) => [
-        block.number,
-        Number.parseInt(block.timestamp, 16),
-      ]),
-    );
-
-    // Map each log with the corresponding timestamp
-    return entry.logs.map((log) => ({
-      ...log,
-      timestamp: blockMap.get(log.block_number) ?? null,
-    }));
-  });
-
-  return allLogs;
 }
 
 // Function to get the lowest and highest block numbers from trades

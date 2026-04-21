@@ -119,16 +119,27 @@ export class CatalogService {
 
     // If stores are null or empty, fetch from repository
     // Check for null explicitly to distinguish "not loaded" from "loaded but empty"
-    if (!Array.isArray($sfts) || $sfts.length === 0) {
-      const fetchedSfts = await sftRepository.getAllSfts();
-      $sfts = fetchedSfts;
-      sfts.set(fetchedSfts);
-    }
+    const needsSfts = !Array.isArray($sfts) || $sfts.length === 0;
+    const needsMetadata =
+      !Array.isArray($sftMetadataRaw) || $sftMetadataRaw.length === 0;
 
-    if (!Array.isArray($sftMetadataRaw) || $sftMetadataRaw.length === 0) {
-      const fetchedMetadata = await sftRepository.getSftMetadata();
-      $sftMetadataRaw = fetchedMetadata;
-      sftMetadata.set(fetchedMetadata);
+    // Fetch SFTs and metadata in parallel (they query different subgraphs)
+    if (needsSfts || needsMetadata) {
+      const [fetchedSfts, fetchedMetadata] = await Promise.all([
+        needsSfts ? sftRepository.getAllSfts() : Promise.resolve($sfts),
+        needsMetadata
+          ? sftRepository.getSftMetadata()
+          : Promise.resolve($sftMetadataRaw),
+      ]);
+
+      if (needsSfts) {
+        $sfts = fetchedSfts;
+        sfts.set(fetchedSfts);
+      }
+      if (needsMetadata) {
+        $sftMetadataRaw = fetchedMetadata;
+        sftMetadata.set(fetchedMetadata);
+      }
     }
 
     // Check if data has changed

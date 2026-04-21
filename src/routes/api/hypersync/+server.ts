@@ -7,15 +7,20 @@ export async function POST({ request }: RequestEvent) {
   try {
     const body = await request.json();
 
-    const { client, from_block, logs, field_selection } = body;
+    const { client, from_block, to_block, logs, field_selection } = body;
+
+    const payload: Record<string, unknown> = {
+      from_block,
+      logs,
+      field_selection,
+    };
+    if (to_block !== undefined) {
+      payload.to_block = to_block;
+    }
 
     const res = await axios.post<HypersyncResponseData>(
       client,
-      {
-        from_block,
-        logs,
-        field_selection,
-      },
+      payload,
       {
         headers: {
           Authorization: `Bearer ${PRIVATE_HYPERSYNC_API_KEY}`,

@@ -274,9 +274,7 @@ $: hasPortfolioHistory = holdings.length > 0 || (Array.isArray(claimHistory) && 
 
 	// Load data when wallet is connected
 	$: if ($connected && $signerAddress) {
-		if ($sfts && $sftMetadata) {
-			loadSftData();
-		}
+		loadSftData();
 	}
 
 	function toNumeric(value: unknown): number {
@@ -539,22 +537,28 @@ function percentageDisplay(value: number): string {
 		}
 
 		try {
-			// Build catalog to populate stores
+			// Build catalog to populate stores (SFTs + metadata fetched in parallel internally)
 			const catalog = useCatalogService();
 			await catalog.build();
 			catalogRef = catalog;
 
-			// DEBUG: Log initial state
-			console.log('[Portfolio DEBUG] Wallet address:', $signerAddress);
-			console.log('[Portfolio DEBUG] $sfts store:', $sfts);
-			console.log('[Portfolio DEBUG] $sfts length:', $sfts?.length ?? 0);
-			console.log('[Portfolio DEBUG] $sftMetadata store:', $sftMetadata);
-			console.log('[Portfolio DEBUG] $sftMetadata length:', $sftMetadata?.length ?? 0);
+			logDev('Wallet address:', $signerAddress);
+			logDev('$sfts length:', $sfts?.length ?? 0);
+			logDev('$sftMetadata length:', $sftMetadata?.length ?? 0);
 
-			// Load all claims data using ClaimsService
-			const claimsResult = await loadAllClaimsData();
-			
-			// Use the claims result
+			// Load claims, deposits, and on-chain balances in parallel
+			// These are independent data sources that don't depend on each other
+			const allTokenAddresses = ENERGY_FIELDS.flatMap(field =>
+				field.sftTokens.map(token => token.address.toLowerCase() as Hex)
+			);
+
+			const [claimsResult, depositsResult, balancesResult] = await Promise.all([
+				loadAllClaimsData(),
+				sftRepository.getDepositsForOwner($signerAddress),
+				getTokenBalancesOnchain(allTokenAddresses, $signerAddress as Hex),
+			]);
+
+			// Apply claims result
 			if (claimsResult) {
 				claimHistory = claimsResult.claimHistory;
 				totalPayoutsEarned = claimsResult.totals.earned;
@@ -591,16 +595,10 @@ function percentageDisplay(value: number): string {
 			// Load secondary purchases from localStorage
 			secondaryPurchases = loadSecondaryPurchases();
 
-			// Get deposits data for calculating totalMinted
-			allDepositsData = await sftRepository.getDepositsForOwner($signerAddress);
-
-			// Query on-chain balances directly (fallback for stale subgraph data)
-			const allTokenAddresses = ENERGY_FIELDS.flatMap(field =>
-				field.sftTokens.map(token => token.address.toLowerCase() as Hex)
-			);
-			console.log('[Portfolio DEBUG] Querying on-chain balances for tokens:', allTokenAddresses);
-			onchainBalances = await getTokenBalancesOnchain(allTokenAddresses, $signerAddress as Hex);
-			console.log('[Portfolio DEBUG] On-chain balances:', onchainBalances);
+			// Apply deposits and balances from parallel fetch
+			allDepositsData = depositsResult;
+			onchainBalances = balancesResult;
+			logDev('On-chain balances:', onchainBalances);
 
 			if (!$sfts || !$sftMetadata || $sfts.length === 0 || $sftMetadata.length === 0) {
 				console.log('[Portfolio DEBUG] Early return - missing data:', {
