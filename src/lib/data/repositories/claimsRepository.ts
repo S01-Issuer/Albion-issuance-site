@@ -10,6 +10,19 @@ import type {
   GetOrdersResponse,
 } from "$lib/types/graphql";
 
+export type OrderDetail = {
+  orderBytes: string;
+  orderHash: string;
+  orderbook: { id: string };
+  addEvents?: Array<{
+    transaction: {
+      id: string;
+      timestamp: string;
+      blockNumber: string;
+    };
+  }>;
+};
+
 export class ClaimsRepository {
   /**
    * Validate order hash format
@@ -71,20 +84,7 @@ export class ClaimsRepository {
   /**
    * Get order details by hash
    */
-  async getOrderByHash(orderHash: string): Promise<
-    Array<{
-      orderBytes: string;
-      orderHash: string;
-      orderbook: { id: string };
-      addEvents?: Array<{
-        transaction: {
-          id: string;
-          timestamp: string;
-          blockNumber: string;
-        };
-      }>;
-    }>
-  > {
+  async getOrderByHash(orderHash: string): Promise<OrderDetail[]> {
     const [primaryUrl, ...fallbackUrls] = BASE_ORDERBOOK_SUBGRAPH_URLS;
     const cleanOrderHash = this.validateOrderHash(orderHash);
     if (!cleanOrderHash) return [];
@@ -110,6 +110,45 @@ export class ClaimsRepository {
       primaryUrl,
       query,
       { orderHash: cleanOrderHash },
+      {
+        fallbackUrls,
+      },
+    );
+    return data?.orders || [];
+  }
+
+  /**
+   * Batch fetch order details for multiple hashes in a single query
+   */
+  async getOrdersByHashes(orderHashes: string[]): Promise<OrderDetail[]> {
+    const [primaryUrl, ...fallbackUrls] = BASE_ORDERBOOK_SUBGRAPH_URLS;
+    const cleanHashes = orderHashes
+      .map((h) => this.validateOrderHash(h))
+      .filter((h): h is string => h !== null);
+
+    if (cleanHashes.length === 0) return [];
+
+    const query = `
+      query GetOrdersByHashes($orderHashes: [String!]!) {
+        orders(where: { orderHash_in: $orderHashes }) {
+          orderBytes
+          orderHash
+          orderbook { id }
+          addEvents {
+            transaction {
+              id
+              timestamp
+              blockNumber
+            }
+          }
+        }
+      }
+    `;
+
+    const data = await executeGraphQL<GetOrdersResponse>(
+      primaryUrl,
+      query,
+      { orderHashes: cleanHashes },
       {
         fallbackUrls,
       },

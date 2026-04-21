@@ -11,8 +11,8 @@ import { formatEther, parseEther } from "viem";
 // This works in both production and test environments
 const abiCoder = AbiCoder.defaultAbiCoder();
 
-const HYPERSYNC_URL = "https://8453.hypersync.xyz/query";
-const CONTEXT_EVENT_TOPIC =
+export const HYPERSYNC_URL = "https://8453.hypersync.xyz/query";
+export const CONTEXT_EVENT_TOPIC =
   "0x17a5c0f3785132a57703932032f6863e7920434150aa1dc940e567b440fdce1f";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
@@ -86,7 +86,7 @@ export interface HypersyncResponseData {
   next_block: number;
 }
 
-type HypersyncResult = HypersyncLog & {
+export type HypersyncResult = HypersyncLog & {
   timestamp: number | null;
 };
 
@@ -391,25 +391,21 @@ export async function sortClaimsData(
   orderHash?: string, // OrderHash to include in claims for date lookup from metadata
   symbol?: string,
   orderStartBlock?: number, // Block when the order was created, for wider scan range
+  prefetchedLogs?: HypersyncResult[], // Pre-fetched logs to avoid duplicate Hypersync scans
 ): Promise<SortedClaimsResult> {
-  const tradeBlockRange = getBlockRangeFromTrades(trades);
-
-  // Use the order creation block as start if available, to catch claims
-  // that the subgraph may not have indexed yet
-  const startBlock = orderStartBlock
-    ? Math.min(orderStartBlock, tradeBlockRange.lowest || orderStartBlock)
-    : tradeBlockRange.lowest;
-
-  // Don't filter by transaction IDs - scan ALL Context events in the block range.
-  // This prevents missed claims when the subgraph hasn't indexed a trade.
-  // Cross-order contamination is handled by (index, amount) composite matching
-  // in filterClaimedAndUnclaimed.
-  const logs = await fetchLogs(
-    HYPERSYNC_URL,
-    ORDERBOOK_CONTRACT_ADDRESS,
-    CONTEXT_EVENT_TOPIC,
-    startBlock,
-  );
+  // Use pre-fetched logs if available, otherwise fetch independently
+  const logs = prefetchedLogs ?? await (async () => {
+    const tradeBlockRange = getBlockRangeFromTrades(trades);
+    const startBlock = orderStartBlock
+      ? Math.min(orderStartBlock, tradeBlockRange.lowest || orderStartBlock)
+      : tradeBlockRange.lowest;
+    return fetchLogs(
+      HYPERSYNC_URL,
+      ORDERBOOK_CONTRACT_ADDRESS,
+      CONTEXT_EVENT_TOPIC,
+      startBlock,
+    );
+  })();
 
   const decodedLogs = logs
     .map((log) => {
@@ -557,7 +553,7 @@ export async function sortClaimsData(
   };
 }
 
-async function fetchLogs(
+export async function fetchLogs(
   client: string,
   poolContract: string,
   eventTopic: string,

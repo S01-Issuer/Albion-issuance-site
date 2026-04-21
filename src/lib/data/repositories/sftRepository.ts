@@ -147,7 +147,7 @@ export class SftRepository {
           symbol
           deployTimestamp
           activeAuthorizer { address }
-          tokenHolders { address balance }
+          tokenHolders(first: 1000, orderBy: balance, orderDirection: desc) { address balance }
         }
       }
     `;
@@ -184,7 +184,6 @@ export class SftRepository {
         } else {
           allSfts.push(...sfts);
 
-          // If we got fewer results than the page size, we've reached the end
           if (sfts.length < pageSize) {
             hasMore = false;
           } else {
@@ -199,28 +198,22 @@ export class SftRepository {
         vaultAddresses: allSfts.map((v) => v.address),
       });
 
-      // Fetch all token holders for each SFT with pagination
-      logDev("Fetching token holders for all SFTs...");
-      const sftsWithTokenHolders = await Promise.all(
+      // Token holders are fetched inline (first 1000 per SFT, ordered by balance desc).
+      // For SFTs with >1000 holders, fetch remaining pages.
+      const sftsWithFullHolders = await Promise.all(
         allSfts.map(async (sft) => {
+          if (sft.tokenHolders && sft.tokenHolders.length < 1000) {
+            // All holders fetched inline, no pagination needed
+            return sft;
+          }
+          // >1000 holders: do full paginated fetch
           const tokenHolders = await this.getTokenHoldersForSft(sft.id);
-          logDev(`Fetched ${tokenHolders.length} token holders for SFT ${sft.id}`);
-          return {
-            ...sft,
-            tokenHolders,
-          };
+          logDev(`Fetched ${tokenHolders.length} token holders for SFT ${sft.id} (paginated)`);
+          return { ...sft, tokenHolders };
         }),
       );
 
-      logDev("All SFTs with token holders fetched:", {
-        totalSfts: sftsWithTokenHolders.length,
-        totalTokenHolders: sftsWithTokenHolders.reduce(
-          (sum, sft) => sum + sft.tokenHolders.length,
-          0,
-        ),
-      });
-
-      return sftsWithTokenHolders;
+      return sftsWithFullHolders;
     } catch (error) {
       console.error("[SftRepository] Error fetching SFTs:", error);
       return [];
