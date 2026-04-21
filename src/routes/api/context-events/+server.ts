@@ -1,14 +1,16 @@
 /**
- * Server-side cached Context event scanner.
+ * Server-side cached Context event scanner with Vercel Blob persistence.
  *
- * Maintains an in-memory cache of all Context events from the orderbook
- * contract. On each request, only fetches blocks since the last scan
- * (high-water-mark pattern). On Vercel Fluid Compute, the cache persists
- * across requests within the same function instance.
+ * Two-layer cache:
+ * 1. In-memory (fast, lost on cold start)
+ * 2. Vercel Blob (durable, survives cold starts and deployments)
  *
- * Client makes 1 request here instead of 4-6 chunked Hypersync requests.
+ * High-water-mark pattern: stores all events up to block N.
+ * On each request, only fetches blocks N+1 → chain tip.
+ * Even after weeks of no traffic, cold start only fetches the delta.
  */
 import { json, type RequestEvent } from "@sveltejs/kit";
+import { put, head, type HeadBlobResult } from "@vercel/blob";
 import axios from "axios";
 import { PRIVATE_HYPERSYNC_API_KEY } from "$env/static/private";
 
@@ -48,23 +50,65 @@ interface CachedLog {
   timestamp: number | null;
 }
 
-// In-memory cache — persists across requests in Vercel Fluid Compute
-const cache = {
-  logs: [] as CachedLog[],
-  highWaterBlock: 0,
-  lastFetchTime: 0,
-};
+interface BlobCacheData {
+  logs: CachedLog[];
+  highWaterBlock: number;
+  updatedAt: number;
+}
 
-// Don't re-fetch if less than 30s since last fetch
+const BLOB_KEY = "hypersync-context-events.json";
+const HYPERSYNC_URL = "https://8453.hypersync.xyz/query";
 const MIN_REFETCH_INTERVAL_MS = 30_000;
 
-const HYPERSYNC_URL = "https://8453.hypersync.xyz/query";
+// In-memory layer (fast path, avoids Blob reads on warm instances)
+let memCache: BlobCacheData | null = null;
+
+/**
+ * Load cache: try in-memory first, then Vercel Blob
+ */
+async function loadCache(): Promise<BlobCacheData | null> {
+  if (memCache) return memCache;
+
+  try {
+    // Check if blob exists
+    const blobMeta: HeadBlobResult | null = await head(BLOB_KEY).catch(
+      () => null,
+    );
+    if (!blobMeta?.url) return null;
+
+    const response = await fetch(blobMeta.url);
+    if (!response.ok) return null;
+
+    const data: BlobCacheData = await response.json();
+    memCache = data;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Save cache to both in-memory and Vercel Blob
+ */
+async function saveCache(data: BlobCacheData): Promise<void> {
+  memCache = data;
+
+  try {
+    await put(BLOB_KEY, JSON.stringify(data), {
+      access: "public",
+      addRandomSuffix: false,
+      contentType: "application/json",
+    });
+  } catch (error) {
+    console.warn("Failed to save context events to Blob:", error);
+    // In-memory cache still works for this instance
+  }
+}
 
 async function fetchFromHypersync(
   contractAddress: string,
   eventTopic: string,
   fromBlock: number,
-  toBlock?: number,
 ): Promise<{ logs: CachedLog[]; nextBlock: number }> {
   const allLogs: CachedLog[] = [];
   let currentBlock = fromBlock;
@@ -92,20 +136,20 @@ async function fetchFromHypersync(
           block: ["number", "timestamp"],
         },
       };
-      if (toBlock !== undefined) {
-        body.to_block = toBlock;
-      }
 
-      const res = await axios.post<HypersyncResponseData>(HYPERSYNC_URL, body, {
-        headers: {
-          Authorization: `Bearer ${PRIVATE_HYPERSYNC_API_KEY}`,
+      const res = await axios.post<HypersyncResponseData>(
+        HYPERSYNC_URL,
+        body,
+        {
+          headers: {
+            Authorization: `Bearer ${PRIVATE_HYPERSYNC_API_KEY}`,
+          },
         },
-      });
+      );
 
       const responseData = res.data;
       if (!responseData?.data) break;
 
-      // Flatten entries into cached logs with timestamps
       for (const entry of responseData.data) {
         const blockMap = new Map(
           entry.blocks.map((b) => [
@@ -126,10 +170,10 @@ async function fetchFromHypersync(
         !responseData.next_block ||
         responseData.next_block <= currentBlock
       ) {
-        return { logs: allLogs, nextBlock: responseData.next_block || currentBlock };
-      }
-      if (toBlock !== undefined && responseData.next_block >= toBlock) {
-        return { logs: allLogs, nextBlock: responseData.next_block };
+        return {
+          logs: allLogs,
+          nextBlock: responseData.next_block || currentBlock,
+        };
       }
 
       currentBlock = responseData.next_block;
@@ -157,37 +201,45 @@ export async function POST({ request }: RequestEvent) {
     const requestedFrom = Number(fromBlock);
     const now = Date.now();
 
-    // If cache has data and covers the requested range, check if we need delta fetch
-    if (
-      cache.highWaterBlock > 0 &&
-      cache.highWaterBlock >= requestedFrom
-    ) {
-      // Only fetch new blocks if enough time has passed
-      if (now - cache.lastFetchTime > MIN_REFETCH_INTERVAL_MS) {
+    // Try to load existing cache (in-memory → Blob)
+    const cached = await loadCache();
+
+    if (cached && cached.highWaterBlock >= requestedFrom) {
+      // Cache covers the requested range — check if we need a delta fetch
+      if (now - cached.updatedAt > MIN_REFETCH_INTERVAL_MS) {
         const delta = await fetchFromHypersync(
           contractAddress,
           eventTopic,
-          cache.highWaterBlock + 1,
+          cached.highWaterBlock + 1,
         );
+
         if (delta.logs.length > 0) {
-          cache.logs.push(...delta.logs);
+          cached.logs.push(...delta.logs);
         }
-        cache.highWaterBlock = Math.max(cache.highWaterBlock, delta.nextBlock);
-        cache.lastFetchTime = now;
+        cached.highWaterBlock = Math.max(
+          cached.highWaterBlock,
+          delta.nextBlock,
+        );
+        cached.updatedAt = now;
+
+        // Save updated cache (fire-and-forget to not block response)
+        saveCache(cached).catch(() => {});
       }
 
-      // Return cached logs filtered to requested range
-      const filtered = cache.logs.filter(
+      const filtered = cached.logs.filter(
         (log) => Number(log.block_number) >= requestedFrom,
       );
       return json({ logs: filtered, fromCache: true });
     }
 
-    // Cache miss or requested range starts before cache — do full fetch
-    // Use the earlier of requestedFrom and any existing cache start
-    const scanFrom = cache.highWaterBlock > 0
-      ? Math.min(requestedFrom, Number(cache.logs[0]?.block_number || requestedFrom))
-      : requestedFrom;
+    // Cache miss — full scan from requested block
+    const scanFrom =
+      cached && cached.highWaterBlock > 0
+        ? Math.min(
+            requestedFrom,
+            Number(cached.logs[0]?.block_number || requestedFrom),
+          )
+        : requestedFrom;
 
     const result = await fetchFromHypersync(
       contractAddress,
@@ -195,9 +247,14 @@ export async function POST({ request }: RequestEvent) {
       scanFrom,
     );
 
-    cache.logs = result.logs;
-    cache.highWaterBlock = result.nextBlock;
-    cache.lastFetchTime = now;
+    const newCache: BlobCacheData = {
+      logs: result.logs,
+      highWaterBlock: result.nextBlock,
+      updatedAt: now,
+    };
+
+    // Save to both layers (fire-and-forget)
+    saveCache(newCache).catch(() => {});
 
     const filtered = result.logs.filter(
       (log) => Number(log.block_number) >= requestedFrom,

@@ -140,3 +140,4 @@ vite.config.ts.timestamp-*
 .vercel
 
 metaboard-files/
+.env*.local
