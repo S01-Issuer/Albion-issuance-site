@@ -181,9 +181,9 @@ export class ClaimsService {
       }
     }
 
-    // Process claims in batches (2 at a time with 300ms delay between batches)
-    // This prevents overwhelming the subgraph API and triggering rate limits
-    const results = await this.processBatch(claimProcessors, 2, 300);
+    // Process claims in batches (6 at a time with 100ms delay between batches)
+    // GraphQL cache deduplication + increased throttler concurrency allow larger batches
+    const results = await this.processBatch(claimProcessors, 6, 100);
 
     for (let index = 0; index < results.length; index += 1) {
       const result = results[index];

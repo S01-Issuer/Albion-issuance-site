@@ -64,7 +64,7 @@ class RequestThrottler {
 class GraphQLCache {
   private cache = new Map<string, CacheEntry<unknown>>();
   private readonly DEFAULT_TTL = 5 * 60 * 1000; // 5 minutes
-  private throttler = new RequestThrottler(3, 150); // Max 3 concurrent, 150ms between requests
+  private throttler = new RequestThrottler(6, 50); // Max 6 concurrent, 50ms between requests
 
   private getCacheKey(
     url: string,
