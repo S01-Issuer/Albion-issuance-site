@@ -664,29 +664,23 @@ function filterClaimedAndUnclaimed(
 } {
   // Create a set of claimed (index, amount) pairs for accurate matching.
   // Using both index AND amount prevents false matches from Context events
-  // that belong to different orders but share the same CSV index.
+  // that belong to different orders but share the same CSV index — critical
+  // now that Hypersync logs are fetched once and shared across all orders
+  // for a token.
   const claimedKeys = new Set(
     decodedLogs.map((log) => `${log.index}:${log.amount}`),
   );
-  // Also keep an index-only set as fallback for edge cases where
-  // the amount format might differ slightly
-  const claimedIndices = new Set(decodedLogs.map((log) => log.index));
 
   const claimedCsv: ClaimedCsvRow[] = [];
   const unclaimedCsv: UnclaimedCsvRow[] = [];
 
   csvClaims.forEach((claim) => {
-    // Primary match: composite (index, amount) key
     const compositeKey = `${claim.index}:${claim.amount}`;
-    const isClaimedByComposite = claimedKeys.has(compositeKey);
-    // Fallback: index-only match (for backward compatibility)
-    const isClaimedByIndex = claimedIndices.has(claim.index);
+    const isClaimed = claimedKeys.has(compositeKey);
 
-    if (isClaimedByComposite || isClaimedByIndex) {
+    if (isClaimed) {
       const decodedLog = decodedLogs.find(
-        (log) =>
-          log.index === claim.index &&
-          (log.amount === claim.amount || isClaimedByIndex),
+        (log) => log.index === claim.index && log.amount === claim.amount,
       );
       claimedCsv.push({
         ...claim,
