@@ -10,7 +10,7 @@
 	import { injectAnalytics } from '@vercel/analytics/sveltekit';
 	import { injectSpeedInsights } from '@vercel/speed-insights/sveltekit';
 
-	const publicRpcs = [
+	const rpcList = [
 		"https://mainnet.base.org",
 		"https://base-rpc.publicnode.com",
 		"https://base.llamarpc.com",
@@ -18,12 +18,6 @@
 		"https://base-mainnet.public.blastapi.io",
 		"https://gateway.tenderly.co/public/base"
 	];
-
-	// Inject Alchemy as the primary RPC if configured (avoids public RPC rate limits)
-	const alchemyKey = publicEnv.PUBLIC_ALCHEMY_API_KEY;
-	const rpcList = alchemyKey
-		? [`https://base-mainnet.g.alchemy.com/v2/${alchemyKey}`, ...publicRpcs]
-		: publicRpcs;
 
 	const baseNetworkFallbackRpcs = {
 		...base,
@@ -50,16 +44,15 @@
 		// This provides resilience: if one RPC fails, viem automatically tries the next
 		const rpcUrls = baseNetworkFallbackRpcs.rpcUrls.default.http;
 		
-		// Create transports with retry logic optimized for rate limiting
-		const transports = rpcUrls.map((url, index) => {
-			const httpTransport = http(url, {
+		// No per-transport retries — let the outer fallback rotate to the next RPC
+		// immediately on failure (e.g. 429) instead of hammering the same endpoint.
+		const transports = rpcUrls.map((url, index) =>
+			http(url, {
 				name: `RPC-${index + 1}`,
-				retryCount: 3,
-				retryDelay: 1000, // 1 second delay between retries (better for rate limits)
-				timeout: 15_000,  // 15 second timeout
-			});
-			return httpTransport;
-		});
+				retryCount: 0,
+				timeout: 15_000,
+			})
+		);
 
 		// Fallback transport with aggressive rotation for resilience
 		const transport = fallback(
