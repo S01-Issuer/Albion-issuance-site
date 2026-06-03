@@ -5,6 +5,9 @@ export const BASE_SFT_SUBGRAPH_URL =
   "https://api.goldsky.com/api/public/project_cm153vmqi5gke01vy66p4ftzf/subgraphs/sft-offchainassetvaulttest-base/1.0.5/gn";
 export const BASE_ORDERBOOK_SUBGRAPH_URL =
   "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/ob4-base/2024-12-13-9c39/gn";
+// New Raindex v6 OrderBook subgraph (Float era). Separate endpoint from v4.
+export const BASE_ORDERBOOK_V6_SUBGRAPH_URL =
+  "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/ob4-base/2026-02-05-c4ef/gn";
 export const BASE_METADATA_SUBGRAPH_URL =
   "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/metadata-base/2025-07-06-594f/gn";
 
@@ -12,6 +15,8 @@ const BASE_SFT_SUBGRAPH_FALLBACK_URL =
   publicEnv.PUBLIC_BASE_SFT_SUBGRAPH_FALLBACK_URL;
 const BASE_ORDERBOOK_SUBGRAPH_FALLBACK_URL =
   publicEnv.PUBLIC_BASE_ORDERBOOK_SUBGRAPH_FALLBACK_URL;
+const BASE_ORDERBOOK_V6_SUBGRAPH_FALLBACK_URL =
+  publicEnv.PUBLIC_BASE_ORDERBOOK_V6_SUBGRAPH_FALLBACK_URL;
 const BASE_METADATA_SUBGRAPH_FALLBACK_URL =
   publicEnv.PUBLIC_BASE_METADATA_SUBGRAPH_FALLBACK_URL;
 
@@ -26,6 +31,10 @@ export const BASE_ORDERBOOK_SUBGRAPH_URLS = [
   BASE_ORDERBOOK_SUBGRAPH_URL,
   BASE_ORDERBOOK_SUBGRAPH_FALLBACK_URL,
 ].filter(isString);
+export const BASE_ORDERBOOK_V6_SUBGRAPH_URLS = [
+  BASE_ORDERBOOK_V6_SUBGRAPH_URL,
+  BASE_ORDERBOOK_V6_SUBGRAPH_FALLBACK_URL,
+].filter(isString);
 export const BASE_METADATA_SUBGRAPH_URLS = [
   BASE_METADATA_SUBGRAPH_URL,
   BASE_METADATA_SUBGRAPH_FALLBACK_URL,
@@ -34,6 +43,74 @@ export const TARGET_NETWORK = "base";
 export const PINATA_GATEWAY = "/api/ipfs";
 export const ORDERBOOK_CONTRACT_ADDRESS =
   "0xd2938E7c9fe3597F78832CE780Feb61945c377d7";
+// New Raindex v6 OrderBook (Float era). This is a NEWER OrderBook than the old
+// 0xe522…: claims must be built with the SDK's getTakeOrders3Calldata
+// (TakeOrdersConfigV5, IOIsInput=true) — see utils/claimExecution.ts. Anvil-verified
+// claimable end-to-end (2026-06).
+// NOTE: BASE_ORDERBOOK_V6_SUBGRAPH_URL(S) must point at a subgraph that indexes THIS
+// address — the existing ob4-base/2026-02-05-c4ef subgraph indexes only 0xe522, so the
+// UI cannot detect v6 holdings until the new subgraph is live.
+export const ORDERBOOK_V6_CONTRACT_ADDRESS =
+  "0xb05D73E6BCc26AEB5b67Ff68C6E9C6151073e3cE";
+
+/**
+ * Dual-era OrderBook configuration.
+ *
+ * Claims live across two OrderBook deployments after the v4 -> v6 migration:
+ *  - v4 (legacy): read-only. Historical claims stay here so already-claimed payouts
+ *    still show in history & total-earned. Its unclaimed funds were migrated to v6,
+ *    so v4 offers nothing claimable (`claimable: false`).
+ *  - v6 (active): read + claim. Migrated outstanding funds + all future months.
+ *
+ * Amounts: v4 leaves/context use raw 18-decimal integers; v6 uses Float (bytes32).
+ * Context event (claimed detection): v4 `Context(address,uint256[][])`,
+ * v6 `ContextV2(address,bytes32[][])` — different topics.
+ */
+export type OrderbookVersion = "v4" | "v6";
+export interface OrderbookSource {
+  address: string;
+  version: OrderbookVersion;
+  subgraphUrls: string[];
+  contextEventTopic: string;
+  amountEncoding: "int18" | "float";
+  /** Whether holdings on this OrderBook are offered as claimable in the UI. */
+  claimable: boolean;
+}
+
+export const V4_CONTEXT_EVENT_TOPIC =
+  "0x17a5c0f3785132a57703932032f6863e7920434150aa1dc940e567b440fdce1f";
+export const V6_CONTEXT_EVENT_TOPIC =
+  "0x4cb6e22a3e7e651d7cf0376cff48f20f5007a54147777865be7f5f6c38c50f4a";
+
+export const ORDERBOOK_SOURCES: OrderbookSource[] = [
+  {
+    address: ORDERBOOK_CONTRACT_ADDRESS,
+    version: "v4",
+    subgraphUrls: BASE_ORDERBOOK_SUBGRAPH_URLS,
+    contextEventTopic: V4_CONTEXT_EVENT_TOPIC,
+    amountEncoding: "int18",
+    claimable: false,
+  },
+  {
+    address: ORDERBOOK_V6_CONTRACT_ADDRESS,
+    version: "v6",
+    subgraphUrls: BASE_ORDERBOOK_V6_SUBGRAPH_URLS,
+    contextEventTopic: V6_CONTEXT_EVENT_TOPIC,
+    amountEncoding: "float",
+    claimable: true,
+  },
+];
+
+/** Find the OrderBook source/era for a given orderbook contract address. */
+export function getOrderbookSource(address: string): OrderbookSource | undefined {
+  const a = address?.toLowerCase();
+  return ORDERBOOK_SOURCES.find((s) => s.address.toLowerCase() === a);
+}
+
+/** All distinct subgraph URLs across every era (primary first), for merged queries. */
+export const ALL_ORDERBOOK_SUBGRAPH_URLS = Array.from(
+  new Set(ORDERBOOK_SOURCES.flatMap((s) => s.subgraphUrls)),
+);
 
 export type Claim = {
   orderHash: string;

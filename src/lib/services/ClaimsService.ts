@@ -4,8 +4,10 @@ import {
 } from "$lib/data/repositories/claimsRepository";
 import {
   ENERGY_FIELDS,
-  ORDERBOOK_CONTRACT_ADDRESS,
+  ORDERBOOK_SOURCES,
+  getOrderbookSource,
   type Claim,
+  type OrderbookSource,
 } from "$lib/network";
 import {
   fetchAndValidateCSV,
@@ -17,11 +19,11 @@ import {
   sortClaimsData,
   fetchLogs,
   HYPERSYNC_URL,
-  CONTEXT_EVENT_TOPIC,
   type ClaimHistory,
   type CsvClaimRow,
   type HypersyncResult,
 } from "$lib/utils/claims";
+import { floatWordFromAmount18 } from "$lib/utils/float";
 import { formatEther, parseEther, type Hex } from "viem";
 import { wagmiConfig } from "svelte-wagmi";
 import { simulateContract, writeContract } from "@wagmi/core";
@@ -192,26 +194,34 @@ export class ClaimsService {
       ordersByHash.set(order.orderHash.toLowerCase(), order);
     }
 
-    // Phase 2: Determine earliest block across all orders for a single Hypersync scan
-    let earliestBlock = Infinity;
+    // Phase 2+3: Fetch Context logs PER OrderBook era. v4 and v6 have different
+    // contract addresses, event topics, and amount encodings, so each era is scanned
+    // separately (once, from its earliest order block) and keyed by OrderBook address.
+    const earliestByOb = new Map<string, number>();
     for (const order of allOrders) {
+      const ob = order.orderbook?.id?.toLowerCase();
       const blockNum = order.addEvents?.[0]?.transaction?.blockNumber;
-      if (blockNum) {
-        const parsed = parseInt(blockNum);
-        if (parsed < earliestBlock) earliestBlock = parsed;
-      }
+      if (!ob || !blockNum) continue;
+      const parsed = parseInt(blockNum);
+      const prev = earliestByOb.get(ob);
+      if (prev === undefined || parsed < prev) earliestByOb.set(ob, parsed);
     }
 
-    // Phase 3: Fetch Hypersync logs ONCE from earliest block (instead of 12+ separate scans)
-    const sharedLogs: HypersyncResult[] =
-      earliestBlock < Infinity
-        ? await fetchLogs(
-            HYPERSYNC_URL,
-            ORDERBOOK_CONTRACT_ADDRESS,
-            CONTEXT_EVENT_TOPIC,
-            earliestBlock,
-          )
-        : [];
+    const logsByOb = new Map<string, HypersyncResult[]>();
+    await Promise.all(
+      ORDERBOOK_SOURCES.map(async (src) => {
+        const ob = src.address.toLowerCase();
+        const earliest = earliestByOb.get(ob);
+        if (earliest === undefined) return;
+        const logs = await fetchLogs(
+          HYPERSYNC_URL,
+          src.address,
+          src.contextEventTopic,
+          earliest,
+        );
+        logsByOb.set(ob, logs);
+      }),
+    );
 
     // Phase 4: Process each claim using pre-fetched data
     let claimHistory: ClaimHistory[] = [];
@@ -231,7 +241,7 @@ export class ClaimsService {
             tokenAddress,
             symbol,
             ordersByHash,
-            sharedLogs,
+            logsByOb,
           ),
     );
 
@@ -289,7 +299,7 @@ export class ClaimsService {
     tokenAddress: string,
     symbol: string,
     ordersByHash: Map<string, OrderDetail>,
-    sharedLogs: HypersyncResult[],
+    logsByOb: Map<string, HypersyncResult[]>,
   ): Promise<PendingClaim | null> {
     if (!claim.csvLink) return null;
 
@@ -312,15 +322,23 @@ export class ClaimsService {
     }
 
     const orderBookAddress = orderDetail.orderbook.id;
-    const decodedOrder = decodeOrder(orderDetail.orderBytes);
+    // Determine which OrderBook era this order lives on (v4 int18 / v6 Float).
+    const source: OrderbookSource | undefined =
+      getOrderbookSource(orderBookAddress);
+    const encoding = source?.amountEncoding ?? "int18";
+    const version = source?.version ?? "v4";
+    const isClaimable = source?.claimable ?? true;
+    const sharedLogs = logsByOb.get(orderBookAddress.toLowerCase()) ?? [];
+
+    const decodedOrder = decodeOrder(orderDetail.orderBytes, version);
 
     const orderStartBlock = orderDetail.addEvents?.[0]?.transaction
       ?.blockNumber
       ? parseInt(orderDetail.addEvents[0].transaction.blockNumber)
       : undefined;
 
-    // Build merkle tree and process claims (using shared pre-fetched Hypersync logs)
-    const merkleTree = getMerkleTree(csvData);
+    // Build merkle tree and process claims (using shared per-era Hypersync logs)
+    const merkleTree = getMerkleTree(csvData, encoding);
     const sortedClaimsData = (await sortClaimsData(
       csvData,
       trades,
@@ -331,20 +349,39 @@ export class ClaimsService {
       claim.orderHash,
       symbol,
       orderStartBlock,
-      sharedLogs, // Pass shared logs to avoid per-claim Hypersync scan
+      sharedLogs, // per-era logs; scoped to this order via orderHash inside
+      source,
     )) as SortedClaimsData;
 
-    // Generate proofs for holdings
+    const claimedAmount = sortedClaimsData?.totalClaimedAmount
+      ? Number(formatEther(BigInt(sortedClaimsData.totalClaimedAmount)))
+      : 0;
+
+    // Legacy (history-only) era: count already-claimed toward earnings/history, but
+    // offer NOTHING claimable and add nothing to unclaimed — its outstanding funds
+    // were migrated to the active OrderBook, so counting them here would double-count.
+    if (!isClaimable) {
+      return {
+        holdings: [],
+        claims: sortedClaimsData.claims,
+        totalClaimed: claimedAmount,
+        totalEarned: claimedAmount,
+        totalUnclaimed: 0,
+      };
+    }
+
+    // Generate proofs for holdings (active era)
     const holdingsWithProofs: HoldingWithProof[] =
       sortedClaimsData.holdings.map((h) => {
-        const leaf = getLeaf(h.id, ownerAddress, h.unclaimedAmount);
+        const leaf = getLeaf(h.id, ownerAddress, h.unclaimedAmount, encoding);
         const proofForLeaf = getProofForLeaf(merkleTree, leaf);
+        // Signed context: [index, amount, ...proof]. v6 encodes the amount word as a
+        // Float (bytes32); v4 uses the raw 18-dec integer.
+        const amount18 = parseEther(h.unclaimedAmount.toString());
+        const amountWord =
+          encoding === "float" ? floatWordFromAmount18(amount18) : amount18;
         const holdingSignedContext = signContext(
-          [
-            h.id,
-            parseEther(h.unclaimedAmount.toString()),
-            ...proofForLeaf.proof,
-          ].map((i) => BigInt(i)),
+          [BigInt(h.id), amountWord, ...proofForLeaf.proof.map((p) => BigInt(p))],
         );
 
         return {
@@ -358,9 +395,7 @@ export class ClaimsService {
     return {
       holdings: holdingsWithProofs,
       claims: sortedClaimsData.claims,
-      totalClaimed: sortedClaimsData?.totalClaimedAmount
-        ? Number(formatEther(BigInt(sortedClaimsData.totalClaimedAmount)))
-        : 0,
+      totalClaimed: claimedAmount,
       totalEarned: sortedClaimsData?.totalEarned
         ? Number(formatEther(BigInt(sortedClaimsData.totalEarned)))
         : 0,

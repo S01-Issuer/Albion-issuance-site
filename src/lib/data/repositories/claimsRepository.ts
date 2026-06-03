@@ -3,12 +3,36 @@
  */
 
 import { executeGraphQL } from "../clients/cachedGraphqlClient";
-import { BASE_ORDERBOOK_SUBGRAPH_URLS } from "$lib/network";
+import { ORDERBOOK_SOURCES } from "$lib/network";
 import type {
   Trade,
   GetTradesResponse,
   GetOrdersResponse,
 } from "$lib/types/graphql";
+
+/**
+ * Run a GraphQL query against EVERY OrderBook era's subgraph (v4 + v6) and flatten
+ * the results. Each era is a distinct dataset, so we query them all and merge; a
+ * failing era resolves to an empty list rather than aborting the others.
+ */
+async function queryAllOrderbookSubgraphs<T>(
+  query: string,
+  variables: Record<string, unknown>,
+  pick: (data: T | null) => unknown[],
+): Promise<unknown[]> {
+  const results = await Promise.allSettled(
+    ORDERBOOK_SOURCES.map(({ subgraphUrls }) => {
+      const [primaryUrl, ...fallbackUrls] = subgraphUrls;
+      if (!primaryUrl) return Promise.resolve(null);
+      return executeGraphQL<T>(primaryUrl, query, variables, { fallbackUrls });
+    }),
+  );
+  const merged: unknown[] = [];
+  for (const r of results) {
+    if (r.status === "fulfilled") merged.push(...pick(r.value as T | null));
+  }
+  return merged;
+}
 
 export type OrderDetail = {
   orderBytes: string;
@@ -43,7 +67,6 @@ export class ClaimsRepository {
     orderHash: string,
     ownerAddress: string,
   ): Promise<Trade[]> {
-    const [primaryUrl, ...fallbackUrls] = BASE_ORDERBOOK_SUBGRAPH_URLS;
     const cleanOrderHash = this.validateOrderHash(orderHash);
     if (!cleanOrderHash) return [];
 
@@ -67,25 +90,18 @@ export class ClaimsRepository {
       }
     `;
 
-    const data = await executeGraphQL<GetTradesResponse>(
-      primaryUrl,
+    const trades = await queryAllOrderbookSubgraphs<GetTradesResponse>(
       query,
-      {
-        orderHash: cleanOrderHash,
-        sender: ownerAddress.toLowerCase(),
-      },
-      {
-        fallbackUrls,
-      },
+      { orderHash: cleanOrderHash, sender: ownerAddress.toLowerCase() },
+      (data) => data?.trades || [],
     );
-    return data?.trades || [];
+    return trades as Trade[];
   }
 
   /**
    * Get order details by hash
    */
   async getOrderByHash(orderHash: string): Promise<OrderDetail[]> {
-    const [primaryUrl, ...fallbackUrls] = BASE_ORDERBOOK_SUBGRAPH_URLS;
     const cleanOrderHash = this.validateOrderHash(orderHash);
     if (!cleanOrderHash) return [];
 
@@ -106,22 +122,18 @@ export class ClaimsRepository {
       }
     `;
 
-    const data = await executeGraphQL<GetOrdersResponse>(
-      primaryUrl,
+    const orders = await queryAllOrderbookSubgraphs<GetOrdersResponse>(
       query,
       { orderHash: cleanOrderHash },
-      {
-        fallbackUrls,
-      },
+      (data) => data?.orders || [],
     );
-    return data?.orders || [];
+    return orders as OrderDetail[];
   }
 
   /**
    * Batch fetch order details for multiple hashes in a single query
    */
   async getOrdersByHashes(orderHashes: string[]): Promise<OrderDetail[]> {
-    const [primaryUrl, ...fallbackUrls] = BASE_ORDERBOOK_SUBGRAPH_URLS;
     const cleanHashes = orderHashes
       .map((h) => this.validateOrderHash(h))
       .filter((h): h is string => h !== null);
@@ -145,15 +157,12 @@ export class ClaimsRepository {
       }
     `;
 
-    const data = await executeGraphQL<GetOrdersResponse>(
-      primaryUrl,
+    const orders = await queryAllOrderbookSubgraphs<GetOrdersResponse>(
       query,
       { orderHashes: cleanHashes },
-      {
-        fallbackUrls,
-      },
+      (data) => data?.orders || [],
     );
-    return data?.orders || [];
+    return orders as OrderDetail[];
   }
 }
 

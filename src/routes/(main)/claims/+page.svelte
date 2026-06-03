@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { writeContract, simulateContract, waitForTransactionReceipt } from '@wagmi/core';
+	import { writeContract, simulateContract, waitForTransactionReceipt, call, sendTransaction } from '@wagmi/core';
 	import { derived, get } from 'svelte/store';
 	import { onMount, onDestroy } from 'svelte';
 	import { web3Modal, signerAddress, connected, wagmiConfig, chainId } from 'svelte-wagmi';
@@ -10,10 +10,17 @@
 	import { useCatalogService } from '$lib/services';
 	import { dateUtils } from '$lib/utils/dateHelpers';
 	import { arrayUtils } from '$lib/utils/arrayHelpers';
-	import { BASE_ORDERBOOK_SUBGRAPH_URL } from '$lib/network';
+	import { BASE_ORDERBOOK_SUBGRAPH_URL, getOrderbookSource } from '$lib/network';
 	import { getTxUrl } from '$lib/utils/explorer';
 	import { useClaimsService } from '$lib/services';
-	import orderbookAbi from '$lib/abi/orderbook.json';
+	import {
+		buildTakeOrdersConfig,
+		buildV6ClaimCalldata,
+		abiForVersion,
+		takeOrdersFnForVersion,
+		versionForOrderbook,
+		type OrderEntry as ClaimOrderEntry
+	} from '$lib/utils/claimExecution';
 	import type { Hex } from 'viem';
 	import { claimsCache } from '$lib/stores/claimsCache';
 	import type { ClaimsHoldingsGroup } from '$lib/services/ClaimsService';
@@ -170,18 +177,29 @@
 		if ($web3Modal) $web3Modal.open();
 	}
 
-	async function waitForTransactionInSubgraph(hash: string, maxAttempts = 30): Promise<void> {
+	async function waitForTransactionInSubgraph(hash: string, orderbookAddress?: string, maxAttempts = 30): Promise<void> {
+		// Poll the subgraph that indexes the OrderBook we claimed against (v4 vs v6).
+		const subgraphUrl =
+			(orderbookAddress && getOrderbookSource(orderbookAddress)?.subgraphUrls?.[0]) ||
+			BASE_ORDERBOOK_SUBGRAPH_URL;
 		return new Promise((resolve, reject) => {
 			let attempts = 0;
 			const interval = setInterval(async () => {
 				attempts++;
 				try {
-					// Dynamic import to avoid CommonJS module resolution issues
-					const orderbookModule = await import('@rainlanguage/orderbook') as { getTransaction: (url: string, hash: string) => Promise<{ value?: unknown }> };
-					const getTransaction = orderbookModule.getTransaction;
-					const result = await getTransaction(BASE_ORDERBOOK_SUBGRAPH_URL, hash);
+					// Poll the OrderBook subgraph directly for the transaction (the SDK no
+					// longer exports getTransaction in v6/Float releases).
+					const res = await fetch(subgraphUrl, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							query: `query($id: ID!) { transaction(id: $id) { id } }`,
+							variables: { id: hash.toLowerCase() }
+						})
+					});
+					const json = await res.json();
 
-					if (result?.value) {
+					if (json?.data?.transaction?.id) {
 						clearInterval(interval);
 						resolve();
 						return;
@@ -210,28 +228,102 @@
 	};
 
 	/**
-	 * Filter out already-claimed orders by simulating each one individually.
-	 * Returns only the orders that are actually claimable on-chain.
+	 * Filter out already-claimed orders by simulating each one individually against
+	 * its OrderBook era (v4 takeOrders2 / v6 takeOrders3). Returns only claimable ones.
 	 */
 	async function filterClaimableOrders(orders: OrderEntry[], orderbookAddress: Hex): Promise<OrderEntry[]> {
+		const version = versionForOrderbook(orderbookAddress);
+
+		// v6 (new Raindex OB): build takeOrders3 calldata via the SDK and eth_call it.
+		if (version === 'v6') {
+			const results = await Promise.allSettled(
+				orders.map(orderEntry =>
+					call($wagmiConfig, {
+						to: orderbookAddress,
+						data: buildV6ClaimCalldata([orderEntry as ClaimOrderEntry])
+					})
+				)
+			);
+			return orders.filter((_, i) => results[i].status === 'fulfilled');
+		}
+
+		// v4 (legacy): ABI-encoded takeOrders2 simulation.
+		const abi = abiForVersion(version);
+		const fn = takeOrdersFnForVersion(version);
 		const results = await Promise.allSettled(
 			orders.map(orderEntry =>
 				simulateContract($wagmiConfig, {
-					abi: orderbookAbi,
+					abi,
 					address: orderbookAddress,
-					functionName: 'takeOrders2',
-					args: [{
-						minimumInput: 0n,
-						maximumInput: 2n ** 256n - 1n,
-						maximumIORatio: 2n ** 256n - 1n,
-						orders: [orderEntry],
-						data: "0x"
-					}]
+					functionName: fn,
+					args: [buildTakeOrdersConfig([orderEntry as ClaimOrderEntry], version)]
 				})
 			)
 		);
 
 		return orders.filter((_, i) => results[i].status === 'fulfilled');
+	}
+
+	/**
+	 * Filter + simulate + execute the claimable orders for ONE OrderBook, then wait for
+	 * confirmation and subgraph indexing. Returns true if a claim tx was sent.
+	 */
+	async function executeClaimsForOrderbook(
+		orderbookAddress: Hex,
+		entries: OrderEntry[],
+		confirmLabel: 'all' | string
+	): Promise<boolean> {
+		const version = versionForOrderbook(orderbookAddress);
+
+		const claimableOrders = await filterClaimableOrders(entries, orderbookAddress);
+		if (claimableOrders.length === 0) return false;
+
+		let hash: Hex;
+		if (version === 'v6') {
+			// SDK-built takeOrders3 calldata; validate via eth_call, then send raw.
+			const data = buildV6ClaimCalldata(claimableOrders as ClaimOrderEntry[]);
+			await call($wagmiConfig, { to: orderbookAddress, data });
+			hash = await sendTransaction($wagmiConfig, { to: orderbookAddress, data });
+		} else {
+			const abi = abiForVersion(version);
+			const fn = takeOrdersFnForVersion(version);
+			const { request } = await simulateContract($wagmiConfig, {
+				abi,
+				address: orderbookAddress,
+				functionName: fn,
+				args: [buildTakeOrdersConfig(claimableOrders as ClaimOrderEntry[], version)]
+			});
+			hash = await writeContract($wagmiConfig, request);
+		}
+
+		confirmingTarget = confirmLabel;
+		await waitForTransactionReceipt($wagmiConfig, { hash, confirmations: 2 });
+		try {
+			await waitForTransactionInSubgraph(hash, orderbookAddress);
+		} catch {
+			// Transaction not yet indexed, continuing anyway
+		}
+		return true;
+	}
+
+	/** Group holdings (across groups) by their OrderBook address into claim entries. */
+	function groupEntriesByOrderbook(groups: ClaimsHoldingsGroup[]): Map<Hex, OrderEntry[]> {
+		const byOb = new Map<Hex, OrderEntry[]>();
+		for (const group of groups) {
+			for (const holding of group.holdings) {
+				const ob = holding.orderBookAddress as Hex;
+				const entry: OrderEntry = {
+					order: holding.order,
+					inputIOIndex: 0,
+					outputIOIndex: 0,
+					signedContext: [holding.signedContext]
+				};
+				const list = byOb.get(ob) ?? [];
+				list.push(entry);
+				byOb.set(ob, list);
+			}
+		}
+		return byOb;
 	}
 
 	async function claimAllPayouts() {
@@ -242,62 +334,18 @@
 				throw new Error('No holdings available to claim');
 			}
 
-			const orders: OrderEntry[] = [];
-
-			// Collect all orders from all groups
-			for (const group of holdings) {
-				for (const holding of group.holdings) {
-					orders.push({
-						order: holding.order,
-						inputIOIndex: 0,
-						outputIOIndex: 0,
-						signedContext: [holding.signedContext],
-					});
-				}
-			}
-
-			// Get the orderbook address from the first holding
-			const orderbookAddress = holdings[0].holdings[0].orderBookAddress as Hex;
-
-			// Pre-filter: simulate each order individually to skip already-claimed ones
-			const claimableOrders = await filterClaimableOrders(orders, orderbookAddress);
+			// Holdings can span multiple OrderBooks (eras); claim each with one tx.
+			const byOb = groupEntriesByOrderbook(holdings);
 			verifyingTarget = null;
 
-			if (claimableOrders.length === 0) {
-				throw new Error('All claims have already been processed');
+			let anySent = false;
+			for (const [orderbookAddress, entries] of byOb) {
+				const sent = await executeClaimsForOrderbook(orderbookAddress, entries, 'all');
+				anySent = anySent || sent;
 			}
 
-			const takeOrdersConfig = {
-				minimumInput: 0n,
-				maximumInput: 2n ** 256n - 1n,
-				maximumIORatio: 2n ** 256n - 1n,
-				orders: claimableOrders,
-				data: "0x"
-			};
-
-			// Simulate the batch to get the request object
-			const { request } = await simulateContract($wagmiConfig, {
-				abi: orderbookAbi,
-				address: orderbookAddress,
-				functionName: 'takeOrders2',
-				args: [takeOrdersConfig]
-			});
-
-			// Execute transaction after successful simulation
-			const hash = await writeContract($wagmiConfig, request);
-
-			// Wait for transaction confirmation
-			confirmingTarget = 'all';
-			await waitForTransactionReceipt($wagmiConfig, {
-				hash,
-				confirmations: 2
-			});
-
-			// Wait for transaction to be indexed in subgraph
-			try {
-				await waitForTransactionInSubgraph(hash);
-			} catch {
-				// Transaction not yet indexed, continuing anyway
+			if (!anySent) {
+				throw new Error('All claims have already been processed');
 			}
 
 			confirmingTarget = null;
@@ -327,60 +375,20 @@
 			if (!group.holdings.length) {
 				throw new Error('No orders available for this claim group');
 			}
-			const orders: OrderEntry[] = [];
 
-			// Collect all orders from this group
-			for (const holding of group.holdings) {
-				orders.push({
-					order: holding.order,
-					inputIOIndex: 0,
-					outputIOIndex: 0,
-					signedContext: [holding.signedContext],
-				});
-			}
-
-			// Get the orderbook address
-			const orderbookAddress = group.holdings[0].orderBookAddress as Hex;
-
-			// Pre-filter: simulate each order individually to skip already-claimed ones
-			const claimableOrders = await filterClaimableOrders(orders, orderbookAddress);
+			// A token's holdings normally sit on one OrderBook, but group by address
+			// defensively so a mixed-era group still claims correctly.
+			const byOb = groupEntriesByOrderbook([group]);
 			verifyingTarget = null;
 
-			if (claimableOrders.length === 0) {
-				throw new Error('All claims for this asset have already been processed');
+			let anySent = false;
+			for (const [orderbookAddress, entries] of byOb) {
+				const sent = await executeClaimsForOrderbook(orderbookAddress, entries, group.tokenAddress);
+				anySent = anySent || sent;
 			}
 
-			const takeOrdersConfig = {
-				minimumInput: 0n,
-				maximumInput: 2n ** 256n - 1n,
-				maximumIORatio: 2n ** 256n - 1n,
-				orders: claimableOrders,
-				data: "0x"
-			};
-
-			// Simulate the batch to get the request object
-			const { request } = await simulateContract($wagmiConfig, {
-				abi: orderbookAbi,
-				address: orderbookAddress,
-				functionName: 'takeOrders2',
-				args: [takeOrdersConfig]
-			});
-
-			// Execute transaction after successful simulation
-			const hash = await writeContract($wagmiConfig, request);
-
-			// Wait for transaction confirmation
-			confirmingTarget = group.tokenAddress;
-			await waitForTransactionReceipt($wagmiConfig, {
-				hash,
-				confirmations: 2
-			});
-
-			// Wait for transaction to be indexed in subgraph
-			try {
-				await waitForTransactionInSubgraph(hash);
-			} catch {
-				// Transaction not yet indexed, continuing anyway
+			if (!anySent) {
+				throw new Error('All claims for this asset have already been processed');
 			}
 
 			confirmingTarget = null;
@@ -667,7 +675,7 @@
 									</tr>
 								</thead>
 								<tbody>
-									{#each paginatedHistory as claim, index (claim.txHash + index)}
+									{#each paginatedHistory as claim, index ((claim.orderHash ?? '') + ':' + claim.txHash + ':' + claim.amount + ':' + index)}
 										<tr class="border-b border-light-gray last:border-0 hover:bg-light-gray/10 transition-colors">
 											<td class="p-4 text-sm text-black">
 												{formatDate(claim.date)}

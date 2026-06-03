@@ -56,31 +56,36 @@ interface BlobCacheData {
   updatedAt: number;
 }
 
-const BLOB_KEY = "hypersync-context-events.json";
 const HYPERSYNC_URL = "https://8453.hypersync.xyz/query";
 const MIN_REFETCH_INTERVAL_MS = 30_000;
 
-// In-memory layer (fast path, avoids Blob reads on warm instances)
-let memCache: BlobCacheData | null = null;
+// Cache key is per OrderBook contract — v4 and v6 emit different Context events and
+// must not share a cache entry.
+function blobKey(contractAddress: string): string {
+  return `hypersync-context-events-${contractAddress.toLowerCase()}.json`;
+}
+
+// In-memory layer (fast path, avoids Blob reads on warm instances), keyed per contract.
+const memCache = new Map<string, BlobCacheData>();
 
 /**
  * Load cache: try in-memory first, then Vercel Blob
  */
-async function loadCache(): Promise<BlobCacheData | null> {
-  if (memCache) return memCache;
+async function loadCache(contractAddress: string): Promise<BlobCacheData | null> {
+  const key = blobKey(contractAddress);
+  const mem = memCache.get(key);
+  if (mem) return mem;
 
   try {
     // Check if blob exists
-    const blobMeta: HeadBlobResult | null = await head(BLOB_KEY).catch(
-      () => null,
-    );
+    const blobMeta: HeadBlobResult | null = await head(key).catch(() => null);
     if (!blobMeta?.url) return null;
 
     const response = await fetch(blobMeta.url);
     if (!response.ok) return null;
 
     const data: BlobCacheData = await response.json();
-    memCache = data;
+    memCache.set(key, data);
     return data;
   } catch {
     return null;
@@ -90,11 +95,15 @@ async function loadCache(): Promise<BlobCacheData | null> {
 /**
  * Save cache to both in-memory and Vercel Blob
  */
-async function saveCache(data: BlobCacheData): Promise<void> {
-  memCache = data;
+async function saveCache(
+  contractAddress: string,
+  data: BlobCacheData,
+): Promise<void> {
+  const key = blobKey(contractAddress);
+  memCache.set(key, data);
 
   try {
-    await put(BLOB_KEY, JSON.stringify(data), {
+    await put(key, JSON.stringify(data), {
       access: "public",
       addRandomSuffix: false,
       contentType: "application/json",
@@ -201,8 +210,8 @@ export async function POST({ request }: RequestEvent) {
     const requestedFrom = Number(fromBlock);
     const now = Date.now();
 
-    // Try to load existing cache (in-memory → Blob)
-    const cached = await loadCache();
+    // Try to load existing cache (in-memory → Blob), keyed per OrderBook contract
+    const cached = await loadCache(contractAddress);
 
     if (cached && cached.highWaterBlock >= requestedFrom) {
       // Cache covers the requested range — check if we need a delta fetch
@@ -223,7 +232,7 @@ export async function POST({ request }: RequestEvent) {
         cached.updatedAt = now;
 
         // Save updated cache (fire-and-forget to not block response)
-        saveCache(cached).catch(() => {});
+        saveCache(contractAddress, cached).catch(() => {});
       }
 
       const filtered = cached.logs.filter(
@@ -254,7 +263,7 @@ export async function POST({ request }: RequestEvent) {
     };
 
     // Save to both layers (fire-and-forget)
-    saveCache(newCache).catch(() => {});
+    saveCache(contractAddress, newCache).catch(() => {});
 
     const filtered = result.logs.filter(
       (log) => Number(log.block_number) >= requestedFrom,

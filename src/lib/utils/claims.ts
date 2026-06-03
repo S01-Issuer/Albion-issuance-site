@@ -1,5 +1,15 @@
-import { ORDERBOOK_CONTRACT_ADDRESS } from "$lib/network";
+import {
+  ORDERBOOK_CONTRACT_ADDRESS,
+  type OrderbookSource,
+} from "$lib/network";
+import {
+  amount18FromFloatHex,
+  floatWordFromAmount18,
+} from "$lib/utils/float";
 import type { Trade } from "$lib/types/graphql";
+
+/** Amount encoding for an OrderBook era: v4 = raw 18-dec integers, v6 = Float bytes32. */
+export type AmountEncoding = "int18" | "float";
 import { SimpleMerkleTree } from "@openzeppelin/merkle-tree";
 import { AbiCoder } from "ethers";
 import axios from "axios";
@@ -19,6 +29,9 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const IO = "(address token, uint8 decimals, uint256 vaultId)";
 const EvaluableV3 = "(address interpreter, address store, bytes bytecode)";
 const OrderV3 = `(address owner, ${EvaluableV3} evaluable, ${IO}[] validInputs, ${IO}[] validOutputs, bytes32 nonce)`;
+// v6 OrderV4: IO drops the `decimals` field and vaultId becomes bytes32.
+const IOV2 = "(address token, bytes32 vaultId)";
+const OrderV4 = `(address owner, ${EvaluableV3} evaluable, ${IOV2}[] validInputs, ${IOV2}[] validOutputs, bytes32 nonce)`;
 
 type OrderV3Type = [
   string,
@@ -37,6 +50,8 @@ interface DecodedClaimLog {
   index: string;
   address: string;
   amount: string;
+  /** Order hash the Context event belongs to (col[1][0]) — used to scope claims per order. */
+  orderHash?: string;
   timestamp?: string;
 }
 
@@ -392,7 +407,9 @@ export async function sortClaimsData(
   symbol?: string,
   orderStartBlock?: number, // Block when the order was created, for wider scan range
   prefetchedLogs?: HypersyncResult[], // Pre-fetched logs to avoid duplicate Hypersync scans
+  source?: OrderbookSource, // OrderBook era (drives amount encoding + self-fetch address/topic)
 ): Promise<SortedClaimsResult> {
+  const encoding: AmountEncoding = source?.amountEncoding ?? "int18";
   // Use pre-fetched logs if available, otherwise fetch independently
   const logs = prefetchedLogs ?? await (async () => {
     const tradeBlockRange = getBlockRangeFromTrades(trades);
@@ -401,15 +418,16 @@ export async function sortClaimsData(
       : tradeBlockRange.lowest;
     return fetchLogs(
       HYPERSYNC_URL,
-      ORDERBOOK_CONTRACT_ADDRESS,
-      CONTEXT_EVENT_TOPIC,
+      source?.address ?? ORDERBOOK_CONTRACT_ADDRESS,
+      source?.contextEventTopic ?? CONTEXT_EVENT_TOPIC,
       startBlock,
     );
   })();
 
+  const normalizedOrderHash = orderHash?.toLowerCase();
   const decodedLogs = logs
     .map((log) => {
-      const decodedData = decodeLogData(log.data);
+      const decodedData = decodeLogData(log.data, encoding);
       if (!decodedData) {
         return null;
       }
@@ -432,7 +450,14 @@ export async function sortClaimsData(
       if (!log) return false;
       const address = log.address;
       if (!address) return false;
-      return address !== ZERO_ADDRESS;
+      if (address === ZERO_ADDRESS) return false;
+      // Scope claimed-detection to THIS order. Context logs are shared across all
+      // orders of a token, and the same CSV (index, amount) can recur across months,
+      // so matching by index:amount alone misattributes claims between orders.
+      if (normalizedOrderHash && log.orderHash) {
+        return log.orderHash.toLowerCase() === normalizedOrderHash;
+      }
+      return true;
     });
 
   // Filter by owner address (required parameter)
@@ -473,7 +498,7 @@ export async function sortClaimsData(
   const claims: ClaimHistory[] = claimedCsv.map((claim) => {
     // Find the original log data to get the transaction hash
     const originalLog = logs.find((log) => {
-      const decodedData = decodeLogData(log.data);
+      const decodedData = decodeLogData(log.data, encoding);
       if (!decodedData) {
         return false;
       }
@@ -611,28 +636,44 @@ export function getBlockRangeFromTrades(trades: Trade[]): {
   return { lowest, highest };
 }
 
-// Function to decode Context event log data using ethers v6
-function decodeLogData(data: string): DecodedClaimLog | null {
+function toBytes32Hex(v: unknown): string {
+  return "0x" + BigInt(v as string | bigint).toString(16).padStart(64, "0");
+}
+
+// Decode a Context (v4: uint256[][]) / ContextV2 (v6: bytes32[][]) event log.
+// The signed claim context (index, amount, …proof) sits at column 6 (sometimes 5/7/8);
+// col[1][0] is the order hash, used to scope claims to a specific order.
+// Amounts are normalized to 18-decimal integers regardless of era (v6 Float -> 18dec).
+function decodeLogData(
+  data: string,
+  encoding: AmountEncoding = "int18",
+): DecodedClaimLog | null {
   if (!data || data === "0x") {
     return null;
   }
   try {
     const logBytes = ethers.getBytes(data);
-    const decodedData = abiCoder.decode(["address", "uint256[][]"], logBytes);
+    const arrayType = encoding === "float" ? "bytes32[][]" : "uint256[][]";
+    const decodedData = abiCoder.decode(["address", arrayType], logBytes);
 
-    // The signed context is typically at column index 6 in the 2D context array.
-    // Search for it dynamically to handle varying context structures.
     const contextColumns = decodedData[1];
+    const orderHash =
+      contextColumns[1] && contextColumns[1].length >= 1
+        ? toBytes32Hex(contextColumns[1][0])
+        : undefined;
+
     let claimIndex: string | undefined;
     let claimAmount: string | undefined;
 
-    // Try column 6 first (most common), then search other columns
     const columnsToCheck = [6, 5, 7, 8];
     for (const colIdx of columnsToCheck) {
       const col = contextColumns[colIdx];
       if (col && col.length >= 2) {
-        claimIndex = col[0].toString();
-        claimAmount = col[1].toString();
+        claimIndex = BigInt(col[0]).toString();
+        claimAmount =
+          encoding === "float"
+            ? amount18FromFloatHex(toBytes32Hex(col[1])).toString()
+            : col[1].toString();
         break;
       }
     }
@@ -642,6 +683,7 @@ function decodeLogData(data: string): DecodedClaimLog | null {
     }
 
     return {
+      orderHash,
       index: claimIndex,
       address: decodedData[0],
       amount: claimAmount,
@@ -703,10 +745,18 @@ function filterClaimedAndUnclaimed(
   };
 }
 
-export function getLeaf(index: string, address: string, amount: string) {
+export function getLeaf(
+  index: string,
+  address: string,
+  amount: string,
+  encoding: AmountEncoding = "int18",
+) {
   const indexAsUint256 = BigInt(index);
   const addressAsUint256 = BigInt(address);
-  const amountAsUint256 = BigInt(parseEther(amount));
+  // v4: raw 18-dec integer; v6: Float bytes32 (as a uint256 word) of the same value.
+  const amount18 = BigInt(parseEther(amount));
+  const amountAsUint256 =
+    encoding === "float" ? floatWordFromAmount18(amount18) : amount18;
 
   // Create inputs array like in Solidity: uint256[] memory inputs = [indexAsUint256, addressAsUint256, amountAsUint256]
   const inputs = [indexAsUint256, addressAsUint256, amountAsUint256];
@@ -720,7 +770,10 @@ export function getLeaf(index: string, address: string, amount: string) {
   return keccak256("0x" + packed);
 }
 
-export function getMerkleTree(csvInput: CsvClaimRow[]) {
+export function getMerkleTree(
+  csvInput: CsvClaimRow[],
+  encoding: AmountEncoding = "int18",
+) {
   const leaves = csvInput.map((row) => {
     // Handle CSV data format - row is an object with properties
     const index = row.index || "0";
@@ -730,7 +783,9 @@ export function getMerkleTree(csvInput: CsvClaimRow[]) {
     // Convert address to uint256 (like uint256(uint160(address)) in Solidity)
     const indexAsUint256 = BigInt(index);
     const addressAsUint256 = BigInt(address);
-    const amountAsUint256 = BigInt(amount);
+    // CSV amounts are raw 18-dec integers. v6 hashes the Float-encoded amount instead.
+    const amountAsUint256 =
+      encoding === "float" ? floatWordFromAmount18(BigInt(amount)) : BigInt(amount);
 
     // Create inputs array like in Solidity: uint256[] memory inputs = [indexAsUint256, addressAsUint256, amountAsUint256]
     const inputs = [indexAsUint256, addressAsUint256, amountAsUint256];
@@ -773,8 +828,14 @@ export function getProofForLeaf(tree: SimpleMerkleTree, leafValue: string) {
   };
 }
 
-export function decodeOrder(orderBytes: string): OrderV3Type {
-  const [order] = abiCoder.decode([OrderV3], orderBytes);
+export function decodeOrder(
+  orderBytes: string,
+  version: "v4" | "v6" = "v4",
+): OrderV3Type {
+  const [order] = abiCoder.decode(
+    [version === "v6" ? OrderV4 : OrderV3],
+    orderBytes,
+  );
   return order;
 }
 
