@@ -117,6 +117,21 @@ export type Claim = {
   csvLink: string;
   expectedMerkleRoot: string;
   expectedContentHash: string;
+  /**
+   * Subgraph-free path (v6). The OrderBook stores orders only as hashes, so the
+   * full order struct is otherwise only recoverable from the deploy event (via a
+   * subgraph or log scan). Since we deploy these orders, we capture the order at
+   * deploy time instead:
+   *  - `orderBytes`: ABI-encoded OrderV4 (same shape the subgraph would return),
+   *    decoded for `takeOrders3`.
+   *  - `deployBlock`: the order's deploy block, used as the lower bound of the
+   *    Hypersync Context scan.
+   * When both are present, ClaimsService skips the subgraph order lookup entirely
+   * (claimed-state + history come from the Context scan). v4 legacy entries omit
+   * these and continue to resolve via the subgraph.
+   */
+  orderBytes?: string;
+  deployBlock?: number;
 };
 
 export type SftToken = {

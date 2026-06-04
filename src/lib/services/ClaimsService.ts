@@ -5,6 +5,7 @@ import {
 import {
   ENERGY_FIELDS,
   ORDERBOOK_SOURCES,
+  ORDERBOOK_V6_CONTRACT_ADDRESS,
   getOrderbookSource,
   type Claim,
   type OrderbookSource,
@@ -184,15 +185,41 @@ export class ClaimsService {
       };
     }
 
-    // Phase 1: Pre-fetch all orders in a single batch query (instead of 12+ individual queries)
-    const allOrderHashes = claimMetadata.map((m) => m.claim.orderHash);
-    const allOrders = await this.repository.getOrdersByHashes(allOrderHashes);
-
-    // Index orders by hash for O(1) lookup
+    // Phase 1: Resolve order details. Claims that carry a static order (orderBytes +
+    // deployBlock — the v6 subgraph-free path) are resolved locally; only the rest
+    // (v4 legacy) are batch-queried from the subgraph.
     const ordersByHash = new Map<string, OrderDetail>();
-    for (const order of allOrders) {
-      ordersByHash.set(order.orderHash.toLowerCase(), order);
+    const hashesNeedingSubgraph: string[] = [];
+    for (const { claim } of claimMetadata) {
+      if (claim.orderBytes && claim.deployBlock !== undefined) {
+        ordersByHash.set(claim.orderHash.toLowerCase(), {
+          orderBytes: claim.orderBytes,
+          orderHash: claim.orderHash,
+          // Static orders are v6-era (only v6 deploys capture orderBytes).
+          orderbook: { id: ORDERBOOK_V6_CONTRACT_ADDRESS.toLowerCase() },
+          addEvents: [
+            {
+              transaction: {
+                id: "",
+                timestamp: "",
+                blockNumber: String(claim.deployBlock),
+              },
+            },
+          ],
+        });
+      } else {
+        hashesNeedingSubgraph.push(claim.orderHash);
+      }
     }
+    if (hashesNeedingSubgraph.length > 0) {
+      const fetched = await this.repository.getOrdersByHashes(
+        hashesNeedingSubgraph,
+      );
+      for (const order of fetched) {
+        ordersByHash.set(order.orderHash.toLowerCase(), order);
+      }
+    }
+    const allOrders = [...ordersByHash.values()];
 
     // Phase 2+3: Fetch Context logs PER OrderBook era. v4 and v6 have different
     // contract addresses, event topics, and amount encodings, so each era is scanned
@@ -307,15 +334,15 @@ export class ClaimsService {
     const orderDetail = ordersByHash.get(claim.orderHash.toLowerCase());
     if (!orderDetail) return null;
 
-    // Fetch CSV data and trades in parallel (order is already available)
-    const [csvData, trades] = await Promise.all([
-      this.fetchCsv(
-        claim.csvLink,
-        claim.expectedMerkleRoot,
-        claim.expectedContentHash,
-      ),
-      this.repository.getTradesForClaims(claim.orderHash, ownerAddress),
-    ]);
+    // Fetch CSV data (order is already available). Claimed-state AND history both
+    // come from the shared per-OB Context scan (sharedLogs) below, so no per-order
+    // `trades` subgraph query is needed — the Context log carries its own txHash +
+    // block timestamp.
+    const csvData = await this.fetchCsv(
+      claim.csvLink,
+      claim.expectedMerkleRoot,
+      claim.expectedContentHash,
+    );
 
     if (!csvData) {
       throw new ClaimsCsvLoadError();
@@ -341,7 +368,7 @@ export class ClaimsService {
     const merkleTree = getMerkleTree(csvData, encoding);
     const sortedClaimsData = (await sortClaimsData(
       csvData,
-      trades,
+      [], // trades no longer used — claimed-state + history come from sharedLogs
       ownerAddress,
       fieldName,
       undefined,

@@ -496,10 +496,20 @@ export async function sortClaimsData(
   // Create claims array with the same structure as the claims page
   // Include orderHash so caller can look up payout date from metadata
   const claims: ClaimHistory[] = claimedCsv.map((claim) => {
-    // Find the original log data to get the transaction hash
+    // Find the Context log for THIS claim to get its transaction hash. Scope by
+    // orderHash too: logs are shared across a token's orders and the same
+    // (index, address) can recur across months, so matching on those alone could
+    // pick another order's claim tx.
     const originalLog = logs.find((log) => {
       const decodedData = decodeLogData(log.data, encoding);
       if (!decodedData) {
+        return false;
+      }
+      if (
+        normalizedOrderHash &&
+        decodedData.orderHash &&
+        decodedData.orderHash.toLowerCase() !== normalizedOrderHash
+      ) {
         return false;
       }
       return (
@@ -541,7 +551,12 @@ export async function sortClaimsData(
       date: claimDate,
       amount: formatAmountWei(claim.amount),
       asset: fieldName || "Unknown Field",
-      txHash: trades[0]?.tradeEvent?.transaction?.id || "N/A",
+      // txHash comes from this claim's own Context log (works for both eras and is
+      // more accurate than a per-order trade); trades[0] is the legacy fallback.
+      txHash:
+        originalLog?.transaction_hash ||
+        trades[0]?.tradeEvent?.transaction?.id ||
+        "N/A",
       status: "completed",
       tokenAddress,
       symbol,
