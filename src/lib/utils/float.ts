@@ -12,10 +12,13 @@ import { Float } from "@rainlanguage/orderbook";
 
 // The WASM bindings sometimes return the value directly and sometimes wrap it in
 // `{ value }` / `{ float }`; normalize to the underlying Float instance.
-function unwrap(result: unknown): {
+type FloatInstance = {
   asHex: () => string | { value: string };
   toFixedDecimalLossy: (d: number) => unknown;
-} {
+  add: (other: FloatInstance) => unknown;
+};
+
+function unwrap(result: unknown): FloatInstance {
   const r = result as Record<string, unknown>;
   if (r && typeof r.asHex === "function") return r as never;
   if (
@@ -84,6 +87,25 @@ export function amount18FromFloatHex(hex: string): bigint {
 export function floatWordFromIndex(index: bigint): bigint {
   const f = unwrap(Float.fromFixedDecimalLossy(index, 0));
   return BigInt(hexOf(f.asHex()));
+}
+
+/** Sum multiple v6 Float bytes32 words (e.g. batched claim amounts in signed context). */
+export function sumFloatHexWords(hexWords: string[]): string {
+  let total: ReturnType<typeof unwrap> | null = null;
+  for (const hex of hexWords) {
+    const parsed = Float.fromHex(hex as `0x${string}`);
+    if (parsed.error) {
+      throw new Error(
+        parsed.error.readableMsg ?? "Failed to parse Float claim amount.",
+      );
+    }
+    const amount = unwrap(parsed.value ?? parsed);
+    total = total ? unwrap(total.add(amount)) : amount;
+  }
+  if (!total) {
+    throw new Error("No Float words to sum.");
+  }
+  return hexOf(total.asHex());
 }
 
 /** Decode a Float bytes32 hex that was encoded with 0 decimal places back to its original integer.

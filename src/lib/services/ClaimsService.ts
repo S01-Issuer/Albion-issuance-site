@@ -6,6 +6,7 @@ import {
   ENERGY_FIELDS,
   ORDERBOOK_SOURCES,
   ORDERBOOK_V6_CONTRACT_ADDRESS,
+  getContextEventTopics,
   getOrderbookSource,
   type Claim,
   type OrderbookSource,
@@ -16,16 +17,17 @@ import {
   getLeaf,
   getProofForLeaf,
   decodeOrder,
-  signContext,
+  buildClaimSignedContext,
+  type SignedContextV1Type,
   sortClaimsData,
   fetchLogs,
+  getStoredClaimTransactionHashes,
   HYPERSYNC_URL,
   type ClaimHistory,
   type CsvClaimRow,
   type HypersyncResult,
 } from "$lib/utils/claims";
-import { floatWordFromAmount18, floatWordFromIndex } from "$lib/utils/float";
-import { formatEther, parseEther, type Hex } from "viem";
+import { formatEther, type Hex } from "viem";
 import { wagmiConfig } from "svelte-wagmi";
 import { simulateContract, writeContract } from "@wagmi/core";
 import { get } from "svelte/store";
@@ -54,7 +56,7 @@ interface HoldingRow {
   [key: string]: unknown;
 }
 
-type SignedContext = ReturnType<typeof signContext>;
+type SignedContext = SignedContextV1Type;
 
 interface HoldingWithProof extends HoldingRow {
   order: ReturnType<typeof decodeOrder>;
@@ -146,7 +148,14 @@ export class ClaimsService {
   /**
    * Load all claims data for a wallet address
    */
-  async loadClaimsForWallet(ownerAddress: string): Promise<ClaimsResult> {
+  async loadClaimsForWallet(
+    ownerAddress: string,
+    options?: {
+      refreshContextEvents?: boolean;
+      /** Recent claim tx hashes for receipt-log fallback (e.g. after a successful claim). */
+      claimTxHashes?: string[];
+    },
+  ): Promise<ClaimsResult> {
     if (!ownerAddress) {
       return {
         holdings: [],
@@ -218,9 +227,23 @@ export class ClaimsService {
         hashesNeedingSubgraph,
       );
       for (const order of fetched) {
-        ordersByHash.set(order.orderHash.toLowerCase(), order);
+        const key = order.orderHash.toLowerCase();
+        const existing = ordersByHash.get(key);
+        if (
+          !existing ||
+          (order.orderBytes?.length ?? 0) > (existing.orderBytes?.length ?? 0)
+        ) {
+          ordersByHash.set(key, order);
+        }
       }
     }
+
+    const storedClaimTxHashes = [
+      ...new Set([
+        ...getStoredClaimTransactionHashes(),
+        ...(options?.claimTxHashes ?? []),
+      ]),
+    ];
     const allOrders = [...ordersByHash.values()];
 
     // Phase 2+3: Fetch Context logs PER OrderBook era. v4 and v6 have different
@@ -245,8 +268,9 @@ export class ClaimsService {
         const logs = await fetchLogs(
           HYPERSYNC_URL,
           src.address,
-          src.contextEventTopic,
+          getContextEventTopics(src),
           earliest,
+          options?.refreshContextEvents ?? false,
         );
         logsByOb.set(ob, logs);
       }),
@@ -271,6 +295,7 @@ export class ClaimsService {
             symbol,
             ordersByHash,
             logsByOb,
+            storedClaimTxHashes,
           ),
     );
 
@@ -329,6 +354,7 @@ export class ClaimsService {
     symbol: string,
     ordersByHash: Map<string, OrderDetail>,
     logsByOb: Map<string, HypersyncResult[]>,
+    claimTxHashes: string[] = [],
   ): Promise<PendingClaim | null> {
     if (!claim.csvLink) return null;
 
@@ -336,15 +362,14 @@ export class ClaimsService {
     const orderDetail = ordersByHash.get(claim.orderHash.toLowerCase());
     if (!orderDetail) return null;
 
-    // Fetch CSV data (order is already available). Claimed-state AND history both
-    // come from the shared per-OB Context scan (sharedLogs) below, so no per-order
-    // `trades` subgraph query is needed — the Context log carries its own txHash +
-    // block timestamp.
-    const csvData = await this.fetchCsv(
-      claim.csvLink,
-      claim.expectedMerkleRoot,
-      claim.expectedContentHash,
-    );
+    const [csvData, trades] = await Promise.all([
+      this.fetchCsv(
+        claim.csvLink,
+        claim.expectedMerkleRoot,
+        claim.expectedContentHash,
+      ),
+      this.repository.getTradesForClaims(claim.orderHash, ownerAddress),
+    ]);
 
     if (!csvData) {
       throw new ClaimsCsvLoadError();
@@ -369,7 +394,7 @@ export class ClaimsService {
     const merkleTree = getMerkleTree(csvData, encoding);
     const sortedClaimsData = (await sortClaimsData(
       csvData,
-      [], // trades no longer used — claimed-state + history come from sharedLogs
+      trades,
       ownerAddress,
       fieldName,
       undefined,
@@ -377,8 +402,9 @@ export class ClaimsService {
       claim.orderHash,
       symbol,
       orderStartBlock,
-      sharedLogs, // per-era logs; scoped to this order via orderHash inside
+      sharedLogs,
       source,
+      claimTxHashes,
     )) as SortedClaimsData;
 
     const claimedAmount = sortedClaimsData?.totalClaimedAmount
@@ -399,34 +425,18 @@ export class ClaimsService {
     }
 
     // Generate proofs for holdings (active era)
-    // claims.rain expects signed-context<0 2-9> — exactly 8 proof nodes (indices 2–9).
-    const CLAIM_PROOF_DEPTH = 8;
     const holdingsWithProofs: HoldingWithProof[] =
       sortedClaimsData.holdings.map((h) => {
-        const leaf = getLeaf(h.id, ownerAddress, h.unclaimedAmount, encoding);
+        const amountWei = h.amountWei ?? h.unclaimedAmount;
+        const leaf = getLeaf(h.id, ownerAddress, amountWei, encoding);
         const proofForLeaf = getProofForLeaf(merkleTree, leaf);
-        const amount18 = parseEther(h.unclaimedAmount.toString());
 
-        // v6 (Float): context[0] = Float(index,0), context[1] = Float(amount,18)
-        // v4 (int18): context[0] = raw index,       context[1] = raw wei
-        const indexWord =
-          encoding === "float"
-            ? floatWordFromIndex(BigInt(h.id))
-            : BigInt(h.id);
-        const amountWord =
-          encoding === "float" ? floatWordFromAmount18(amount18) : amount18;
-
-        // Pad proof to exactly CLAIM_PROOF_DEPTH nodes (zeros fill unused slots).
-        const proofWords = proofForLeaf.proof
-          .slice(0, CLAIM_PROOF_DEPTH)
-          .map((p) => BigInt(p));
-        while (proofWords.length < CLAIM_PROOF_DEPTH) proofWords.push(0n);
-
-        const holdingSignedContext = signContext([
-          indexWord,
-          amountWord,
-          ...proofWords,
-        ]);
+        const holdingSignedContext = buildClaimSignedContext(
+          h.id,
+          amountWei,
+          proofForLeaf.proof,
+          encoding,
+        );
 
         return {
           ...h,

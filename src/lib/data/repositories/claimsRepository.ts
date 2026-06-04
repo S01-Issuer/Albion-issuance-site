@@ -3,7 +3,10 @@
  */
 
 import { executeGraphQL } from "../clients/cachedGraphqlClient";
-import { ORDERBOOK_SOURCES } from "$lib/network";
+import {
+  ORDERBOOK_LEGACY_V6_CONTRACT_ADDRESS,
+  ORDERBOOK_SOURCES,
+} from "$lib/network";
 import type {
   Trade,
   GetTradesResponse,
@@ -46,6 +49,37 @@ export type OrderDetail = {
     };
   }>;
 };
+
+/** Prefer v6 legacy OB + longest orderBytes when subgraphs return duplicates. */
+function pickBestOrderForHash(orders: OrderDetail[]): OrderDetail | undefined {
+  if (orders.length === 0) return undefined;
+  const legacyOb = ORDERBOOK_LEGACY_V6_CONTRACT_ADDRESS.toLowerCase();
+  const scored = [...orders].sort((a, b) => {
+    const aLegacy =
+      a.orderbook?.id?.toLowerCase() === legacyOb ? 1 : 0;
+    const bLegacy =
+      b.orderbook?.id?.toLowerCase() === legacyOb ? 1 : 0;
+    if (bLegacy !== aLegacy) return bLegacy - aLegacy;
+    const aLen = a.orderBytes?.length ?? 0;
+    const bLen = b.orderBytes?.length ?? 0;
+    return bLen - aLen;
+  });
+  return scored.find((o) => o.orderBytes && o.orderBytes.length > 2) ?? scored[0];
+}
+
+function mergeOrdersByHash(orders: OrderDetail[]): OrderDetail[] {
+  const byHash = new Map<string, OrderDetail[]>();
+  for (const order of orders) {
+    const key = order.orderHash?.toLowerCase();
+    if (!key) continue;
+    const list = byHash.get(key) ?? [];
+    list.push(order);
+    byHash.set(key, list);
+  }
+  return [...byHash.values()]
+    .map((group) => pickBestOrderForHash(group))
+    .filter((o): o is OrderDetail => o !== undefined);
+}
 
 export class ClaimsRepository {
   /**
@@ -127,7 +161,7 @@ export class ClaimsRepository {
       { orderHash: cleanOrderHash },
       (data) => data?.orders || [],
     );
-    return orders as OrderDetail[];
+    return mergeOrdersByHash(orders as OrderDetail[]);
   }
 
   /**
@@ -162,7 +196,7 @@ export class ClaimsRepository {
       { orderHashes: cleanHashes },
       (data) => data?.orders || [],
     );
-    return orders as OrderDetail[];
+    return mergeOrdersByHash(orders as OrderDetail[]);
   }
 }
 
