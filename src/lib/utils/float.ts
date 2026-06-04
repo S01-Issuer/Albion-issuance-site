@@ -18,9 +18,17 @@ function unwrap(result: unknown): {
 } {
   const r = result as Record<string, unknown>;
   if (r && typeof r.asHex === "function") return r as never;
-  if (r && r.value && typeof (r.value as Record<string, unknown>).asHex === "function")
+  if (
+    r &&
+    r.value &&
+    typeof (r.value as Record<string, unknown>).asHex === "function"
+  )
     return r.value as never;
-  if (r && r.float && typeof (r.float as Record<string, unknown>).asHex === "function")
+  if (
+    r &&
+    r.float &&
+    typeof (r.float as Record<string, unknown>).asHex === "function"
+  )
     return r.float as never;
   throw new Error("Unexpected Float result shape");
 }
@@ -46,7 +54,9 @@ export function floatWordFromAmount18(amount18: bigint): bigint {
 
 /** Float bytes32 for zero (takeOrders3 minimumInput). */
 export function floatZeroHex(): `0x${string}` {
-  const f = unwrap(typeof Float.zero === "function" ? Float.zero() : (Float as never)["zero"]);
+  const f = unwrap(
+    typeof Float.zero === "function" ? Float.zero() : (Float as never)["zero"],
+  );
   return hexOf(f.asHex()) as `0x${string}`;
 }
 
@@ -64,6 +74,23 @@ export function floatMaxHex(): `0x${string}` {
 export function amount18FromFloatHex(hex: string): bigint {
   const f = unwrap(Float.fromHex(hex as `0x${string}`));
   const fd = f.toFixedDecimalLossy(18) as Record<string, unknown>;
+  const inner = (fd.value ?? fd) as Record<string, unknown>;
+  const raw = (inner.value ?? inner) as unknown;
+  return BigInt(String(raw));
+}
+
+/** Encode an integer index (0 decimal places) as a v6 Float bytes32, as a bigint.
+ *  Mirrors Float.fromFixedDecimalLossy(index, 0) used by claims.rain. */
+export function floatWordFromIndex(index: bigint): bigint {
+  const f = unwrap(Float.fromFixedDecimalLossy(index, 0));
+  return BigInt(hexOf(f.asHex()));
+}
+
+/** Decode a Float bytes32 hex that was encoded with 0 decimal places back to its original integer.
+ *  Used to recover the claim index from a v6 Context event log. */
+export function indexFromFloatHex(hex: string): bigint {
+  const f = unwrap(Float.fromHex(hex as `0x${string}`));
+  const fd = f.toFixedDecimalLossy(0) as Record<string, unknown>;
   const inner = (fd.value ?? fd) as Record<string, unknown>;
   const raw = (inner.value ?? inner) as unknown;
   return BigInt(String(raw));

@@ -1,10 +1,9 @@
-import {
-  ORDERBOOK_CONTRACT_ADDRESS,
-  type OrderbookSource,
-} from "$lib/network";
+import { ORDERBOOK_CONTRACT_ADDRESS, type OrderbookSource } from "$lib/network";
 import {
   amount18FromFloatHex,
   floatWordFromAmount18,
+  floatWordFromIndex,
+  indexFromFloatHex,
 } from "$lib/utils/float";
 import type { Trade } from "$lib/types/graphql";
 
@@ -240,25 +239,20 @@ export function validateCSVIntegrity(
       }
     }
 
-    // Generate merkle tree from CSV data
-    const tree = getMerkleTree(csvData);
-    const calculatedMerkleRoot = tree.root;
-
-    // Compare with expected merkle root
-    if (
-      calculatedMerkleRoot.toLowerCase() !== expectedMerkleRoot.toLowerCase()
-    ) {
-      return {
-        isValid: false,
-        error: "Merkle root mismatch",
-        merkleRoot: calculatedMerkleRoot,
-        expectedMerkleRoot,
-      };
+    // Try float encoding first (v6 claims), then int18 (v4 claims).
+    // This avoids threading encoding through fetchAndValidateCSV's call chain.
+    const expectedLower = expectedMerkleRoot.toLowerCase();
+    for (const enc of ["float", "int18"] as const) {
+      const tree = getMerkleTree(csvData, enc);
+      if (tree.root.toLowerCase() === expectedLower) {
+        return { isValid: true, merkleRoot: tree.root, expectedMerkleRoot };
+      }
     }
 
     return {
-      isValid: true,
-      merkleRoot: calculatedMerkleRoot,
+      isValid: false,
+      error: "Merkle root mismatch",
+      merkleRoot: getMerkleTree(csvData, "int18").root,
       expectedMerkleRoot,
     };
   } catch (error) {
@@ -411,18 +405,20 @@ export async function sortClaimsData(
 ): Promise<SortedClaimsResult> {
   const encoding: AmountEncoding = source?.amountEncoding ?? "int18";
   // Use pre-fetched logs if available, otherwise fetch independently
-  const logs = prefetchedLogs ?? await (async () => {
-    const tradeBlockRange = getBlockRangeFromTrades(trades);
-    const startBlock = orderStartBlock
-      ? Math.min(orderStartBlock, tradeBlockRange.lowest || orderStartBlock)
-      : tradeBlockRange.lowest;
-    return fetchLogs(
-      HYPERSYNC_URL,
-      source?.address ?? ORDERBOOK_CONTRACT_ADDRESS,
-      source?.contextEventTopic ?? CONTEXT_EVENT_TOPIC,
-      startBlock,
-    );
-  })();
+  const logs =
+    prefetchedLogs ??
+    (await (async () => {
+      const tradeBlockRange = getBlockRangeFromTrades(trades);
+      const startBlock = orderStartBlock
+        ? Math.min(orderStartBlock, tradeBlockRange.lowest || orderStartBlock)
+        : tradeBlockRange.lowest;
+      return fetchLogs(
+        HYPERSYNC_URL,
+        source?.address ?? ORDERBOOK_CONTRACT_ADDRESS,
+        source?.contextEventTopic ?? CONTEXT_EVENT_TOPIC,
+        startBlock,
+      );
+    })());
 
   const normalizedOrderHash = orderHash?.toLowerCase();
   const decodedLogs = logs
@@ -652,13 +648,21 @@ export function getBlockRangeFromTrades(trades: Trade[]): {
 }
 
 function toBytes32Hex(v: unknown): string {
-  return "0x" + BigInt(v as string | bigint).toString(16).padStart(64, "0");
+  return (
+    "0x" +
+    BigInt(v as string | bigint)
+      .toString(16)
+      .padStart(64, "0")
+  );
 }
 
-// Decode a Context (v4: uint256[][]) / ContextV2 (v6: bytes32[][]) event log.
+// Decode a Context / ContextV2 event log from either era.
+// Both v4 (Context(address,uint256[][])) and v6 (ContextV2(address,bytes32[][])) have
+// the same on-wire 32-byte-per-element format, so we always decode as uint256[][].
 // The signed claim context (index, amount, …proof) sits at column 6 (sometimes 5/7/8);
 // col[1][0] is the order hash, used to scope claims to a specific order.
-// Amounts are normalized to 18-decimal integers regardless of era (v6 Float -> 18dec).
+// For v6, slot[0] is Float(index,0) and slot[1] is Float(amount,18) — we convert both
+// back to their plain integer forms so they match raw CSV values.
 function decodeLogData(
   data: string,
   encoding: AmountEncoding = "int18",
@@ -668,10 +672,9 @@ function decodeLogData(
   }
   try {
     const logBytes = ethers.getBytes(data);
-    const arrayType = encoding === "float" ? "bytes32[][]" : "uint256[][]";
-    const decodedData = abiCoder.decode(["address", arrayType], logBytes);
+    const decodedData = abiCoder.decode(["address", "uint256[][]"], logBytes);
 
-    const contextColumns = decodedData[1];
+    const contextColumns = decodedData[1] as bigint[][];
     const orderHash =
       contextColumns[1] && contextColumns[1].length >= 1
         ? toBytes32Hex(contextColumns[1][0])
@@ -680,15 +683,18 @@ function decodeLogData(
     let claimIndex: string | undefined;
     let claimAmount: string | undefined;
 
-    const columnsToCheck = [6, 5, 7, 8];
+    const columnsToCheck = [6, 5, 7, 8, 0, 1, 2, 3, 4, 9];
     for (const colIdx of columnsToCheck) {
       const col = contextColumns[colIdx];
       if (col && col.length >= 2) {
-        claimIndex = BigInt(col[0]).toString();
-        claimAmount =
-          encoding === "float"
-            ? amount18FromFloatHex(toBytes32Hex(col[1])).toString()
-            : col[1].toString();
+        if (encoding === "float") {
+          // v6: slot[0] = Float(index,0) as uint256, slot[1] = Float(amount,18) as uint256
+          claimIndex = indexFromFloatHex(toBytes32Hex(col[0])).toString();
+          claimAmount = amount18FromFloatHex(toBytes32Hex(col[1])).toString();
+        } else {
+          claimIndex = col[0].toString();
+          claimAmount = col[1].toString();
+        }
         break;
       }
     }
@@ -700,7 +706,7 @@ function decodeLogData(
     return {
       orderHash,
       index: claimIndex,
-      address: decodedData[0],
+      address: decodedData[0] as string,
       amount: claimAmount,
     };
   } catch {
@@ -766,22 +772,21 @@ export function getLeaf(
   amount: string,
   encoding: AmountEncoding = "int18",
 ) {
-  const indexAsUint256 = BigInt(index);
+  const rawIndex = BigInt(index);
   const addressAsUint256 = BigInt(address);
-  // v4: raw 18-dec integer; v6: Float bytes32 (as a uint256 word) of the same value.
   const amount18 = BigInt(parseEther(amount));
+
+  // v6 (Float): leaf = Float(index,0) || address || Float(amount,18)
+  // v4 (int18): leaf = index || address || amount_wei
+  const indexAsUint256 =
+    encoding === "float" ? floatWordFromIndex(rawIndex) : rawIndex;
   const amountAsUint256 =
     encoding === "float" ? floatWordFromAmount18(amount18) : amount18;
 
-  // Create inputs array like in Solidity: uint256[] memory inputs = [indexAsUint256, addressAsUint256, amountAsUint256]
   const inputs = [indexAsUint256, addressAsUint256, amountAsUint256];
-
-  // Pack the inputs array like abi.encodePacked(inputs) in Solidity
   const packed = inputs
     .map((input) => input.toString(16).padStart(64, "0"))
     .join("");
-
-  // Hash the packed data (single hash, matching Solidity)
   return keccak256("0x" + packed);
 }
 
@@ -790,33 +795,30 @@ export function getMerkleTree(
   encoding: AmountEncoding = "int18",
 ) {
   const leaves = csvInput.map((row) => {
-    // Handle CSV data format - row is an object with properties
     const index = row.index || "0";
     const address = row.address || ZERO_ADDRESS;
     const amount = row.amount || "0";
 
-    // Convert address to uint256 (like uint256(uint160(address)) in Solidity)
-    const indexAsUint256 = BigInt(index);
+    const rawIndex = BigInt(index);
     const addressAsUint256 = BigInt(address);
-    // CSV amounts are raw 18-dec integers. v6 hashes the Float-encoded amount instead.
+
+    // v6 (Float): leaf = Float(index,0) || address || Float(amount,18)
+    // v4 (int18): leaf = index || address || amount_wei
+    const indexAsUint256 =
+      encoding === "float" ? floatWordFromIndex(rawIndex) : rawIndex;
     const amountAsUint256 =
-      encoding === "float" ? floatWordFromAmount18(BigInt(amount)) : BigInt(amount);
+      encoding === "float"
+        ? floatWordFromAmount18(BigInt(amount))
+        : BigInt(amount);
 
-    // Create inputs array like in Solidity: uint256[] memory inputs = [indexAsUint256, addressAsUint256, amountAsUint256]
     const inputs = [indexAsUint256, addressAsUint256, amountAsUint256];
-
-    // Pack the inputs array like abi.encodePacked(inputs) in Solidity
     const packed = inputs
       .map((input) => input.toString(16).padStart(64, "0"))
       .join("");
-
-    // Hash the packed data (single hash, matching Solidity)
     return keccak256("0x" + packed);
   });
 
-  const tree = SimpleMerkleTree.of(leaves);
-
-  return tree;
+  return SimpleMerkleTree.of(leaves);
 }
 
 export function getProofForLeaf(tree: SimpleMerkleTree, leafValue: string) {

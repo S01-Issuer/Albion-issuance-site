@@ -24,7 +24,7 @@ import {
   type CsvClaimRow,
   type HypersyncResult,
 } from "$lib/utils/claims";
-import { floatWordFromAmount18 } from "$lib/utils/float";
+import { floatWordFromAmount18, floatWordFromIndex } from "$lib/utils/float";
 import { formatEther, parseEther, type Hex } from "viem";
 import { wagmiConfig } from "svelte-wagmi";
 import { simulateContract, writeContract } from "@wagmi/core";
@@ -134,7 +134,9 @@ export class ClaimsService {
 
       // Add delay between batches to avoid rate limiting
       if (i + batchSize < items.length) {
-        await new Promise((resolve) => setTimeout(resolve, delayBetweenBatches));
+        await new Promise((resolve) =>
+          setTimeout(resolve, delayBetweenBatches),
+        );
       }
     }
 
@@ -359,8 +361,7 @@ export class ClaimsService {
 
     const decodedOrder = decodeOrder(orderDetail.orderBytes, version);
 
-    const orderStartBlock = orderDetail.addEvents?.[0]?.transaction
-      ?.blockNumber
+    const orderStartBlock = orderDetail.addEvents?.[0]?.transaction?.blockNumber
       ? parseInt(orderDetail.addEvents[0].transaction.blockNumber)
       : undefined;
 
@@ -398,18 +399,34 @@ export class ClaimsService {
     }
 
     // Generate proofs for holdings (active era)
+    // claims.rain expects signed-context<0 2-9> — exactly 8 proof nodes (indices 2–9).
+    const CLAIM_PROOF_DEPTH = 8;
     const holdingsWithProofs: HoldingWithProof[] =
       sortedClaimsData.holdings.map((h) => {
         const leaf = getLeaf(h.id, ownerAddress, h.unclaimedAmount, encoding);
         const proofForLeaf = getProofForLeaf(merkleTree, leaf);
-        // Signed context: [index, amount, ...proof]. v6 encodes the amount word as a
-        // Float (bytes32); v4 uses the raw 18-dec integer.
         const amount18 = parseEther(h.unclaimedAmount.toString());
+
+        // v6 (Float): context[0] = Float(index,0), context[1] = Float(amount,18)
+        // v4 (int18): context[0] = raw index,       context[1] = raw wei
+        const indexWord =
+          encoding === "float"
+            ? floatWordFromIndex(BigInt(h.id))
+            : BigInt(h.id);
         const amountWord =
           encoding === "float" ? floatWordFromAmount18(amount18) : amount18;
-        const holdingSignedContext = signContext(
-          [BigInt(h.id), amountWord, ...proofForLeaf.proof.map((p) => BigInt(p))],
-        );
+
+        // Pad proof to exactly CLAIM_PROOF_DEPTH nodes (zeros fill unused slots).
+        const proofWords = proofForLeaf.proof
+          .slice(0, CLAIM_PROOF_DEPTH)
+          .map((p) => BigInt(p));
+        while (proofWords.length < CLAIM_PROOF_DEPTH) proofWords.push(0n);
+
+        const holdingSignedContext = signContext([
+          indexWord,
+          amountWord,
+          ...proofWords,
+        ]);
 
         return {
           ...h,
