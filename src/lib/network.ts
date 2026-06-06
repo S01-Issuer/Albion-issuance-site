@@ -284,6 +284,16 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0x12b0ad087ddbcd90388c110ecc52079140e0d94dfc319ca9231e25a3f8dd0d6e",
             expectedContentHash:
               "bafkreia2ebr2wyuga3d4t6yqwcbbs65hqtqyyycnuo24wj5zo4ikurly7m",
+          },
+          {
+            // 2026-03 (March 2026)
+            orderHash:
+              "0x937c50343ca0a9f7bf12bff5487e39b614f374346146cea1de925d9cdb829144",
+            csvLink: `${PINATA_GATEWAY}/bafkreignjoj7po3ycuqyvwbgsxptv3oyu6y7efzqhxyvear2adenbeilmm`,
+            expectedMerkleRoot:
+              "0x81615a4f4dd57a5301c17790c22df7b54ea6cf1e5426d23896fd21f280107af7",
+            expectedContentHash:
+              "bafkreignjoj7po3ycuqyvwbgsxptv3oyu6y7efzqhxyvear2adenbeilmm",
           }
         ],
       },
@@ -291,6 +301,16 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
         address: "0x1d57246fd0ba134d7cc78ddf3ed829379d95f4b7",
         symbol: "ALB-WR1-R2",
         claims: [
+          {
+            // 2025-11 (November 2025)
+            orderHash:
+              "0xca9ebf6d282d24a63d6892c0a888d3604b17ddfca69a035b2a6c06b769fc84f7",
+            csvLink: `${PINATA_GATEWAY}/bafkreibygxsf3zvkhif6qr6psa2lz6jjny3grdivi7tj3bucastc2hnetq`,
+            expectedMerkleRoot:
+              "0x8f28680dc0da6dd6780d912fa67a16864cb49b70c8861b05802e720f6bac4143",
+            expectedContentHash:
+              "bafkreibygxsf3zvkhif6qr6psa2lz6jjny3grdivi7tj3bucastc2hnetq",
+          },
           {
             orderHash:
               "0x6793d41107fa9bc7e6661e1d462c6e622479a85f8d67d366a03cae90e45370f6",
