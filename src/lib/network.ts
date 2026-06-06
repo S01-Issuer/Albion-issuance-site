@@ -43,13 +43,9 @@ export const TARGET_NETWORK = "base";
 export const PINATA_GATEWAY = "/api/ipfs";
 export const ORDERBOOK_CONTRACT_ADDRESS =
   "0xd2938E7c9fe3597F78832CE780Feb61945c377d7";
-// First Raindex v6 OrderBook (Float era). Indexed by ob4-base/2026-02-05-c4ef; most
-// live claim orders (incl. Wressle) are still deployed here until migrated to 0xb05D….
-export const ORDERBOOK_LEGACY_V6_CONTRACT_ADDRESS =
-  "0xe522cb4a5fcb2eb31a52ff41a4653d85a4fd7c9d";
-// Newer v6 OrderBook. Claims use getTakeOrders3Calldata (TakeOrdersConfigV5,
-// IOIsInput=true) — see utils/claimExecution.ts. Anvil-verified on 0xb05D… (2026-06).
-// Needs a subgraph that indexes THIS address once orders move off 0xe522….
+// Raindex v6 OrderBook (Float era), the "new" OrderBook. Claims use
+// getTakeOrders3Calldata (TakeOrdersConfigV5, IOIsInput=true) — see
+// utils/claimExecution.ts. Anvil-verified on 0xb05D… (2026-06).
 export const ORDERBOOK_V6_CONTRACT_ADDRESS =
   "0xb05D73E6BCc26AEB5b67Ff68C6E9C6151073e3cE";
 
@@ -57,10 +53,10 @@ export const ORDERBOOK_V6_CONTRACT_ADDRESS =
  * Dual-era OrderBook configuration.
  *
  * Claims live across two OrderBook deployments after the v4 -> v6 migration:
- *  - v4 (legacy): read-only. Historical claims stay here so already-claimed payouts
+ *  - v4 (old): read-only. Historical claims stay here so already-claimed payouts
  *    still show in history & total-earned. Its unclaimed funds were migrated to v6,
  *    so v4 offers nothing claimable (`claimable: false`).
- *  - v6 (active): read + claim on 0xe522 (current) and 0xb05D (next). Float encoding.
+ *  - v6 (new): read + claim on 0xb05D. Float encoding.
  *
  * Amounts: v4 leaves/context use raw 18-decimal integers; v6 uses Float (bytes32).
  * Context event (claimed detection): v4 `Context(address,uint256[][])`,
@@ -72,7 +68,7 @@ export interface OrderbookSource {
   version: OrderbookVersion;
   subgraphUrls: string[];
   contextEventTopic: string;
-  /** When set, Hypersync scans topic0 against any of these (OR). Used on legacy v6 0xe522. */
+  /** When set, Hypersync scans topic0 against any of these (OR). */
   contextEventTopics?: string[];
   amountEncoding: "int18" | "float";
   /** Whether holdings on this OrderBook are offered as claimable in the UI. */
@@ -81,10 +77,7 @@ export interface OrderbookSource {
 
 export const V4_CONTEXT_EVENT_TOPIC =
   "0x17a5c0f3785132a57703932032f6863e7920434150aa1dc940e567b440fdce1f";
-/** Context events on legacy v6 OrderBook 0xe522… (TakeOrderContext-style). */
-export const V6_LEGACY_CONTEXT_EVENT_TOPIC =
-  "0x194f1feb3b4d7076a2c272e774e792e0c48bb8c7aa1a9a3671c1cd6da9e6b4c1";
-/** Context events on newer v6 OrderBook 0xb05D… */
+/** Context events on v6 OrderBook 0xb05D… */
 export const V6_CONTEXT_EVENT_TOPIC =
   "0x4cb6e22a3e7e651d7cf0376cff48f20f5007a54147777865be7f5f6c38c50f4a";
 
@@ -96,16 +89,6 @@ export const ORDERBOOK_SOURCES: OrderbookSource[] = [
     contextEventTopic: V4_CONTEXT_EVENT_TOPIC,
     amountEncoding: "int18",
     claimable: false,
-  },
-  {
-    address: ORDERBOOK_LEGACY_V6_CONTRACT_ADDRESS,
-    version: "v6",
-    subgraphUrls: BASE_ORDERBOOK_V6_SUBGRAPH_URLS,
-    contextEventTopic: V6_LEGACY_CONTEXT_EVENT_TOPIC,
-    // Match nht-comliq: legacy OB emits both v5-style and v6 TakeOrderContext topics.
-    contextEventTopics: [V4_CONTEXT_EVENT_TOPIC, V6_LEGACY_CONTEXT_EVENT_TOPIC],
-    amountEncoding: "float",
-    claimable: true,
   },
   {
     address: ORDERBOOK_V6_CONTRACT_ADDRESS,

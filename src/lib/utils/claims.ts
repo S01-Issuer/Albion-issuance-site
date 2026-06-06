@@ -505,7 +505,7 @@ export async function sortClaimsData(
       const address = log.address;
       if (!address) return false;
       if (address === ZERO_ADDRESS) return false;
-      // Do not filter by col[1] order hash — on 0xe522 it is often merkle metadata,
+      // Do not filter by col[1] order hash — on v6 it is often merkle metadata,
       // not the subgraph orderHash. This call is already scoped to one order's CSV.
       return true;
     }) as DecodedClaimLog[];

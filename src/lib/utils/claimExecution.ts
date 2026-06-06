@@ -2,7 +2,7 @@
  * Era-aware claim execution against an OrderBook.
  *
  * v4 uses `takeOrders2` with uint256 min/max and a uint256[] signed context.
- * v6 uses `takeOrders3` + SDK TakeOrdersConfigV5 (IOIsInput=true) on 0xe522 and 0xb05D.
+ * v6 uses `takeOrders3` + SDK TakeOrdersConfigV5 (IOIsInput=true) on the v6 OrderBook.
  */
 import type { Hex } from "viem";
 import { bytesToHex } from "viem";
@@ -182,7 +182,7 @@ export function countClaimSignedContexts(orders: OrderEntry[]): number {
  * Build v6 claim calldata (TakeOrdersConfigV5 / takeOrders4 selector).
  *
  * Batch shape: one TakeOrderConfigV4 row per payout index (same Rain order
- * repeated), maximumIO = sum of all claim Float amounts. Verified on 0xe522.
+ * repeated), maximumIO = sum of all claim Float amounts.
  */
 export function buildV6ClaimCalldata(orders: OrderEntry[]): Hex {
   const stringified = stringifyOrderContexts(orders);
