@@ -12,7 +12,7 @@ import {
   type OrderbookSource,
 } from "$lib/network";
 import {
-  fetchAndValidateCSV,
+  fetchAndVerifyCSV,
   getMerkleTree,
   getLeaf,
   getProofForLeaf,
@@ -23,7 +23,6 @@ import {
   fetchLogs,
   getStoredClaimTransactionHashes,
   HYPERSYNC_URL,
-  type AmountEncoding,
   type ClaimHistory,
   type CsvClaimRow,
   type HypersyncResult,
@@ -102,21 +101,14 @@ export class ClaimsService {
    */
   private async fetchCsv(
     csvLink: string,
-    expectedMerkleRoot: string,
     expectedContentHash: string,
-    encoding: AmountEncoding = "int18",
   ): Promise<CsvClaimRow[] | null> {
     const cached = this.csvCache.get(csvLink);
     if (cached) {
       return cached;
     }
 
-    const data = await fetchAndValidateCSV(
-      csvLink,
-      expectedMerkleRoot,
-      expectedContentHash,
-      encoding,
-    );
+    const data = await fetchAndVerifyCSV(csvLink, expectedContentHash);
     if (data) {
       this.csvCache.set(csvLink, data);
     }
@@ -386,9 +378,7 @@ export class ClaimsService {
     // block timestamp.
     const csvData = await this.fetchCsv(
       claim.csvLink,
-      claim.expectedMerkleRoot,
       claim.expectedContentHash,
-      encoding,
     );
 
     if (!csvData) {

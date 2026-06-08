@@ -14,6 +14,7 @@ import axios from "axios";
 import { ethers, Signature } from "ethers";
 import { Wallet, keccak256, hashMessage, getBytes, concat, hexlify } from "ethers";
 import { decodeOrderBytes, normalizeOrderForSdk } from "$lib/utils/orderbook";
+import { verifyCid } from "./cidVerify";
 import type { OrderV4 as OrderV4Type } from "@rainlanguage/orderbook";
 import { formatEther, parseEther } from "viem";
 
@@ -233,181 +234,44 @@ async function fetchWithRetry(url: string): Promise<Response> {
 }
 
 /**
- * Validates CSV data integrity against on-chain merkle root
- * @param csvData - Raw CSV data to validate
- * @param expectedMerkleRoot - Expected merkle root from on-chain data
- * @param encoding - Amount encoding for the order's era. The merkle root is era-
- *   specific: v4 orders hash raw 18-dec amounts ("int18"), v6 orders hash the
- *   Float-encoded amount ("float"). `expectedMerkleRoot` therefore equals the
- *   order's actual on-chain root only when computed with the matching encoding.
- * @returns Validation result with details
- */
-export function validateCSVIntegrity(
-  csvData: CsvClaimRow[],
-  expectedMerkleRoot: string,
-  encoding: AmountEncoding = "int18",
-): CSVValidationResult {
-  try {
-    // Validate CSV structure
-    if (!Array.isArray(csvData) || csvData.length === 0) {
-      return {
-        isValid: false,
-        error: "Invalid CSV structure: data must be a non-empty array",
-      };
-    }
-
-    // Validate required fields in each row
-    for (const [index, row] of csvData.entries()) {
-      if (!row.address || !row.amount || row.index === undefined) {
-        return {
-          isValid: false,
-          error: `Invalid CSV row ${index}: missing required fields (address, amount, index)`,
-        };
-      }
-
-      // Validate address format
-      if (!/^0x[a-fA-F0-9]{40}$/.test(row.address)) {
-        return {
-          isValid: false,
-          error: `Invalid address format in row ${index}: ${row.address}`,
-        };
-      }
-
-      // Validate amount is positive
-      const amount = Number.parseFloat(row.amount);
-      if (isNaN(amount) || amount < 0) {
-        return {
-          isValid: false,
-          error: `Invalid amount in row ${index}: ${row.amount}`,
-        };
-      }
-    }
-
-    // Generate merkle tree from CSV data (era-specific amount encoding)
-    const tree = getMerkleTree(csvData, encoding);
-    const calculatedMerkleRoot = tree.root;
-
-    // Compare with expected merkle root
-    if (
-      calculatedMerkleRoot.toLowerCase() !== expectedMerkleRoot.toLowerCase()
-    ) {
-      return {
-        isValid: false,
-        error: "Merkle root mismatch",
-        merkleRoot: calculatedMerkleRoot,
-        expectedMerkleRoot,
-      };
-    }
-
-    return {
-      isValid: true,
-      merkleRoot: calculatedMerkleRoot,
-      expectedMerkleRoot,
-    };
-  } catch (error) {
-    return {
-      isValid: false,
-      error: `CSV validation error: ${error instanceof Error ? error.message : "Unknown error"}`,
-    };
-  }
-}
-
-/**
- * Validates IPFS content integrity using content addressing
- * @param ipfsUrl - IPFS URL to validate
- * @param expectedContentHash - Expected content hash (CID)
+ * Validates that already-fetched CSV bytes match the pinned CID.
+ * @param bytes - Raw CSV bytes fetched from IPFS
+ * @param expectedContentHash - Expected content hash (CIDv1, raw codec, sha-256)
  * @returns Validation result with details
  */
 export async function validateIPFSContent(
-  ipfsUrl: string,
+  bytes: Uint8Array,
   expectedContentHash: string,
 ): Promise<IPFSValidationResult> {
-  try {
-    // Extract CID from IPFS URL
-    const urlParts = ipfsUrl.split("/");
-    const cidFromUrl = urlParts[urlParts.length - 1];
-
-    // Validate CID format
-    if (!cidFromUrl || cidFromUrl.length < 10) {
-      return {
-        isValid: false,
-        error: "Invalid IPFS URL format",
-      };
-    }
-
-    // Compare with expected hash
-    if (cidFromUrl !== expectedContentHash) {
-      return {
+  const ok = await verifyCid(bytes, expectedContentHash);
+  return ok
+    ? { isValid: true, expectedHash: expectedContentHash }
+    : {
         isValid: false,
         error: "IPFS content hash mismatch",
-        contentHash: cidFromUrl,
         expectedHash: expectedContentHash,
       };
-    }
-
-    return {
-      isValid: true,
-      contentHash: cidFromUrl,
-      expectedHash: expectedContentHash,
-    };
-  } catch (error) {
-    return {
-      isValid: false,
-      error: `IPFS validation error: ${error instanceof Error ? error.message : "Unknown error"}`,
-    };
-  }
 }
 
 /**
- * Enhanced CSV fetching with security validation
+ * Fetch a CSV from IPFS and verify its bytes against the pinned content hash.
+ * The CID is the integrity gate — the merkle tree is rebuilt only later, at
+ * claim time, not on this load path.
  * @param csvLink - IPFS link to CSV file
- * @param expectedMerkleRoot - Expected merkle root for validation
- * @param expectedContentHash - Expected IPFS content hash
- * @param encoding - Amount encoding for the order's era (int18 v4 / float v6)
- * @returns Validated CSV data or null if validation fails
+ * @param expectedContentHash - Expected IPFS content hash (CID)
+ * @returns Parsed CSV data or null if fetch/verification fails
  */
-export async function fetchAndValidateCSV(
+export async function fetchAndVerifyCSV(
   csvLink: string,
-  expectedMerkleRoot: string,
   expectedContentHash: string,
-  encoding: AmountEncoding = "int18",
 ): Promise<CsvClaimRow[] | null> {
   try {
-    // Step 1: Validate IPFS content integrity
-    const ipfsValidation = await validateIPFSContent(
-      csvLink,
-      expectedContentHash,
-    );
-    if (!ipfsValidation.isValid) {
-      return null;
-    }
-
-    // Step 2: Fetch CSV data (server route provides gateway fallback)
     const response = await fetchWithRetry(csvLink);
-    if (!response.ok) {
-      return null;
-    }
-
-    const csvText = await response.text();
-    const csvData = parseCSVData(csvText);
-
-    // Step 3: Validate CSV data integrity
-    const csvValidation = validateCSVIntegrity(
-      csvData,
-      expectedMerkleRoot,
-      encoding,
-    );
-    if (!csvValidation.isValid) {
-      if (
-        expectedMerkleRoot ===
-        "0x0000000000000000000000000000000000000000000000000000000000000000"
-      ) {
-        return csvData;
-      }
-      return null;
-    }
-
-    return csvData;
+    if (!response.ok) return null;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const check = await validateIPFSContent(bytes, expectedContentHash);
+    if (!check.isValid) return null;
+    return parseCSVData(new TextDecoder().decode(bytes));
   } catch {
     return null;
   }
