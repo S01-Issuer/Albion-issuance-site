@@ -47,26 +47,67 @@ Replace `validateIPFSContent`'s string compare with genuine verification via
 content, and is cheaper than the merkle rebuild it replaces.
 
 ### B. Defer merkle tree + proofs to claim time
-- Load (`processClaimForWallet`): remove `getMerkleTree` (`:443`) and the proof
-  block (`:477-499`). Keep `sortClaimsData` — it derives claimed/unclaimed from
-  Context logs, no tree needed. Holdings return without `signedContext`.
-- `fetchAndValidateCSV` → `fetchAndVerifyCSV`: CID check only, no merkle on load.
-- Claim (`executeClaimsForOrderbook`, `claims/+page.svelte:348`): on click, for
-  the targeted order, fetch CSV (browser-cached), build the tree **once**,
-  generate proof + `signedContext`, **assert computed root === expectedMerkleRoot**
-  (hard gate), submit.
+Gate proof generation behind a `withProofs` flag on the existing load path,
+which the claim flow already re-invokes before submitting.
+
+- `loadClaimsForWallet(address, { withProofs = false })` → threads to
+  `processClaimForWallet(..., withProofs)`.
+- **Display load** (`withProofs:false` — claims page, portfolio): fetch CSV
+  (CID-verified, no merkle), `sortClaimsData` for claimed/unclaimed. Build no
+  tree, no proofs. Holdings carry display fields only.
+- **Claim refresh** (`withProofs:true`): `refreshClaimableHoldings`
+  (`claims/+page.svelte:326`) already calls `loadClaimsForWallet` immediately
+  before every claim and reads proofs off the returned holdings. Pass
+  `withProofs:true` there. Only then build the tree **once** per order,
+  generate proof + `signedContext`, and **assert computed root ===
+  `expectedMerkleRoot`** (hard gate). This is the *only* new proof site — the
+  claim path itself (`executeClaimsForOrderbook`) is unchanged.
+- Types: `signedContext`, `order`, `orderBookAddress`, `orderHash` become
+  **optional** on `HoldingWithProof` / `ClaimsHoldingsGroup`; on the page-level
+  `OrderEntry` (`claims/+page.svelte:285`) make `order` + `signedContext`
+  optional (`orderHash` already is). Populated only on the `withProofs`
+  path; the `groupEntriesByOrderbook` "missing claim fields" guard (`:424`)
+  already drops holdings without them, so a display-load holding is never
+  claimable by accident.
+- `fetchAndValidateCSV` → `fetchAndVerifyCSV`: CID check only, no merkle.
+  `validateCSVIntegrity` + `getMerkleTree` **survive** — reused at claim time
+  for the root assert. (`getMerkleTree` is also mirrored, not imported, in
+  `scripts/v6-float-roots.mjs`; renaming source has no script impact.)
+- Cache: `refreshClaimableHoldings` must **not** persist proof-carrying holdings
+  into the display `claimsCache` (drop the `claimsCache.set` on the withProofs
+  path) — the display cache holds the proof-less snapshot; the claim refresh is
+  a transient fetch that always rebuilds proofs fresh regardless of cache.
+
 **Why:** the tree/proofs are only needed to *execute* a claim, not to *display*
-one. Building them on the load path costs every visitor; building on click costs
-only the one order being claimed. The contract re-verifies the proof regardless,
-so the claim-time assert is belt-and-suspenders.
+one. Building them on the load path costs every visitor; gating them to the
+pre-claim refresh costs only the one user's claimable holdings, on click. The
+contract re-verifies the proof on-chain regardless, so the claim-time assert is
+belt-and-suspenders.
 
 ### C. Static v4 + April orders (drop the subgraph)
-A one-off script queries the existing `ORDERBOOK_SOURCES` subgraphs for each
-subgraph-resolved order (9 v4 R1 + 5 v4 R2 + 2 April), cross-checks the order's
-embedded merkle root against the `expectedMerkleRoot` already in `network.ts`,
-then bakes `orderBytes` + `deployBlock` into those entries (as v6 already does).
-Then delete `getOrdersByHashes` and the `hashesNeedingSubgraph` path outright.
-**Why:** order bytes/blocks are immutable once deployed; resolving them at
+The static-resolution path currently **infers v6 from `orderBytes` presence**
+and hardcodes `orderbook.id = ORDERBOOK_V6` (`ClaimsService.ts:211-216`).
+Downstream era logic (amount encoding int18-v4 vs float-v6, `claimable`) keys off
+`orderbook.id`. So baking `orderBytes` into a v4 entry without more would
+misclassify it as v6 and break both root verification and claimed-state
+detection. Therefore:
+
+- Add an explicit optional `orderbook?: string` (OB contract address) to the
+  `Claim` type. Resolution uses `claim.orderbook ?? ORDERBOOK_V6` — backward
+  compatible with existing v6 entries, correct for newly-static v4 entries.
+- A script (kept in `scripts/`, alongside `v6-float-roots.mjs`) queries
+  `ORDERBOOK_SOURCES` for each subgraph-resolved order (9 v4 R1 + 5 v4 R2 + 2
+  April = 16; the 2 legacy `BHF`/`GOM4` dev entries on the `claimable:false` OB
+  are out of scope). For each it captures `orderBytes`, `deployBlock`, **and the
+  source `orderbook` address**, cross-checks the order's embedded merkle root
+  against the `expectedMerkleRoot` already in `network.ts`, and emits the patch.
+- Bake `orderBytes` + `deployBlock` + `orderbook` into those entries. Then
+  `hashesNeedingSubgraph` is always empty → delete the `getOrdersByHashes` call
+  and method. `getOrderByHash` (singular, `claimsRepository:143`, re-exported
+  `repositories/index.ts:9`) has **zero call sites** — remove it and its
+  re-export in the same change to avoid a dangling export.
+
+**Why:** order bytes/blocks/era are immutable once deployed; resolving them at
 runtime buys nothing and adds a network dependency that can be slow or down.
 
 ## Data flow (cold load)
@@ -75,9 +116,14 @@ runtime buys nothing and adds a network dependency that can be slow or down.
 BEFORE  fetch CSV → rebuild tree (root check) → sortClaims → rebuild tree → gen proofs   ×30
         + v4 subgraph getOrdersByHashes
 AFTER   fetch CSV → verify CID (once, cached)  → sortClaims                               ×30
-        (no subgraph, no tree, no proofs)
-CLAIM   fetch CSV (cached) → build tree once → proof → assert root==expected → submit
+(display) (no subgraph, no tree, no proofs)
+CLAIM   refreshClaimableHoldings → loadClaimsForWallet(withProofs:true):
+        per claimable order → build tree once → proof → assert root==expected,
+        then executeClaimsForOrderbook submits (unchanged)
 ```
+
+Portfolio (`portfolio/+page.svelte:668`) only reads totals/amounts, never
+proofs → unaffected by the `withProofs` split.
 
 ## Risk & testing
 
@@ -88,8 +134,11 @@ CLAIM   fetch CSV (cached) → build tree once → proof → assert root==expect
 - **B** claim-time root assertion guarantees a wrong/tampered CSV throws before
   signing — never a submitted tx.
 - Tests: CID verify (valid / tampered / cached); claim-time proof + root assert;
-  regression that load path no longer calls `getMerkleTree`; e2e claim on
-  preview before merge.
+  regression that the **display** load (`withProofs:false`) calls no
+  `getMerkleTree`; regression that `groupEntriesByOrderbook` still receives
+  populated `order`/`signedContext` after a `withProofs:true` refresh (the
+  "skip missing fields" warn at `:424` is the silent-failure mode this change is
+  most likely to trip); e2e claim on preview before merge.
 
 ## PR description (dev-facing, short)
 
