@@ -52,35 +52,62 @@ interface CachedLog {
 
 interface BlobCacheData {
   logs: CachedLog[];
+  // Lowest block the cache has been scanned FROM. Without this, a request for an
+  // older range than was previously cached would be served a truncated set (the
+  // cache only knew its upper bound). Older blobs may omit it — inferred on read.
+  lowWaterBlock?: number;
   highWaterBlock: number;
   updatedAt: number;
 }
 
-const BLOB_KEY = "hypersync-context-events.json";
 const HYPERSYNC_URL = "https://8453.hypersync.xyz/query";
 const MIN_REFETCH_INTERVAL_MS = 30_000;
 
-// In-memory layer (fast path, avoids Blob reads on warm instances)
-let memCache: BlobCacheData | null = null;
+function normalizeEventTopics(
+  eventTopic: string | undefined,
+  eventTopics: string[] | undefined,
+): string[] {
+  const topics =
+    eventTopics?.filter((t) => typeof t === "string" && t.startsWith("0x")) ??
+    [];
+  if (topics.length > 0) return [...new Set(topics.map((t) => t.toLowerCase()))];
+  if (eventTopic?.startsWith("0x")) return [eventTopic.toLowerCase()];
+  return [];
+}
+
+// Cache key is per OrderBook + topic set — eras must not share a cache entry.
+function blobKey(contractAddress: string, eventTopics: string[]): string {
+  const topicKey = eventTopics
+    .map((t) => t.slice(2, 10))
+    .sort()
+    .join("-");
+  return `hypersync-context-events-${contractAddress.toLowerCase()}-${topicKey}.json`;
+}
+
+// In-memory layer (fast path, avoids Blob reads on warm instances), keyed per contract.
+const memCache = new Map<string, BlobCacheData>();
 
 /**
  * Load cache: try in-memory first, then Vercel Blob
  */
-async function loadCache(): Promise<BlobCacheData | null> {
-  if (memCache) return memCache;
+async function loadCache(
+  contractAddress: string,
+  eventTopics: string[],
+): Promise<BlobCacheData | null> {
+  const key = blobKey(contractAddress, eventTopics);
+  const mem = memCache.get(key);
+  if (mem) return mem;
 
   try {
     // Check if blob exists
-    const blobMeta: HeadBlobResult | null = await head(BLOB_KEY).catch(
-      () => null,
-    );
+    const blobMeta: HeadBlobResult | null = await head(key).catch(() => null);
     if (!blobMeta?.url) return null;
 
     const response = await fetch(blobMeta.url);
     if (!response.ok) return null;
 
     const data: BlobCacheData = await response.json();
-    memCache = data;
+    memCache.set(key, data);
     return data;
   } catch {
     return null;
@@ -90,11 +117,16 @@ async function loadCache(): Promise<BlobCacheData | null> {
 /**
  * Save cache to both in-memory and Vercel Blob
  */
-async function saveCache(data: BlobCacheData): Promise<void> {
-  memCache = data;
+async function saveCache(
+  contractAddress: string,
+  eventTopics: string[],
+  data: BlobCacheData,
+): Promise<void> {
+  const key = blobKey(contractAddress, eventTopics);
+  memCache.set(key, data);
 
   try {
-    await put(BLOB_KEY, JSON.stringify(data), {
+    await put(key, JSON.stringify(data), {
       access: "public",
       addRandomSuffix: false,
       contentType: "application/json",
@@ -107,7 +139,7 @@ async function saveCache(data: BlobCacheData): Promise<void> {
 
 async function fetchFromHypersync(
   contractAddress: string,
-  eventTopic: string,
+  eventTopics: string[],
   fromBlock: number,
 ): Promise<{ logs: CachedLog[]; nextBlock: number }> {
   const allLogs: CachedLog[] = [];
@@ -120,7 +152,7 @@ async function fetchFromHypersync(
         logs: [
           {
             address: [contractAddress],
-            topics: [[eventTopic]],
+            topics: [eventTopics],
           },
         ],
         field_selection: {
@@ -189,11 +221,17 @@ async function fetchFromHypersync(
 export async function POST({ request }: RequestEvent) {
   try {
     const body = await request.json();
-    const { contractAddress, eventTopic, fromBlock } = body;
+    const { contractAddress, eventTopic, eventTopics, fromBlock, forceRefresh } =
+      body;
 
-    if (!contractAddress || !eventTopic || !fromBlock) {
+    const topics = normalizeEventTopics(eventTopic, eventTopics);
+
+    if (!contractAddress || topics.length === 0 || !fromBlock) {
       return json(
-        { error: "contractAddress, eventTopic, and fromBlock are required" },
+        {
+          error:
+            "contractAddress, eventTopic or eventTopics, and fromBlock are required",
+        },
         { status: 400 },
       );
     }
@@ -201,15 +239,34 @@ export async function POST({ request }: RequestEvent) {
     const requestedFrom = Number(fromBlock);
     const now = Date.now();
 
-    // Try to load existing cache (in-memory → Blob)
-    const cached = await loadCache();
+    // Try to load existing cache (in-memory → Blob), keyed per OrderBook contract
+    const cached = await loadCache(contractAddress, topics);
+    const shouldDelta =
+      forceRefresh === true || now - (cached?.updatedAt ?? 0) > MIN_REFETCH_INTERVAL_MS;
 
-    if (cached && cached.highWaterBlock >= requestedFrom) {
-      // Cache covers the requested range — check if we need a delta fetch
-      if (now - cached.updatedAt > MIN_REFETCH_INTERVAL_MS) {
+    // Lower bound of what the cache actually scanned. Older blobs predate
+    // `lowWaterBlock`, so infer it from the lowest cached log; if there are no
+    // logs we can't know how low it scanned, so treat it as "covers nothing"
+    // (null) and force a fresh scan rather than serve a possibly-truncated set.
+    const cachedLow =
+      cached == null
+        ? null
+        : cached.lowWaterBlock ??
+          (cached.logs.length ? Number(cached.logs[0].block_number) : null);
+
+    // Fast path: the cache fully covers [requestedFrom, tip] — its lower bound is
+    // known AND at/below the requested block, and its high-water mark is at/above it.
+    if (
+      cached &&
+      cachedLow !== null &&
+      cachedLow <= requestedFrom &&
+      cached.highWaterBlock >= requestedFrom
+    ) {
+      // Delta fetch after a claim (forceRefresh) or on the refetch interval
+      if (shouldDelta) {
         const delta = await fetchFromHypersync(
           contractAddress,
-          eventTopic,
+          topics,
           cached.highWaterBlock + 1,
         );
 
@@ -222,8 +279,7 @@ export async function POST({ request }: RequestEvent) {
         );
         cached.updatedAt = now;
 
-        // Save updated cache (fire-and-forget to not block response)
-        saveCache(cached).catch(() => {});
+        saveCache(contractAddress, topics, cached).catch(() => {});
       }
 
       const filtered = cached.logs.filter(
@@ -232,29 +288,32 @@ export async function POST({ request }: RequestEvent) {
       return json({ logs: filtered, fromCache: true });
     }
 
-    // Cache miss — full scan from requested block
+    // Cache miss, OR the cache doesn't reach down to requestedFrom (an older range
+    // was requested than what was previously scanned), OR requestedFrom is newer
+    // than the cached tip. Scan from the lowest of {requestedFrom, existing lower
+    // bound} so we never lose coverage we already had, and rebuild the cache with
+    // an explicit lowWaterBlock. This makes a stale high-floored cache self-heal:
+    // the next request for an older block backfills instead of silently truncating.
     const scanFrom =
-      cached && cached.highWaterBlock > 0
-        ? Math.min(
-            requestedFrom,
-            Number(cached.logs[0]?.block_number || requestedFrom),
-          )
+      cached && cachedLow !== null
+        ? Math.min(requestedFrom, cachedLow)
         : requestedFrom;
 
     const result = await fetchFromHypersync(
       contractAddress,
-      eventTopic,
+      topics,
       scanFrom,
     );
 
     const newCache: BlobCacheData = {
       logs: result.logs,
+      lowWaterBlock: scanFrom,
       highWaterBlock: result.nextBlock,
       updatedAt: now,
     };
 
     // Save to both layers (fire-and-forget)
-    saveCache(newCache).catch(() => {});
+    saveCache(contractAddress, topics, newCache).catch(() => {});
 
     const filtered = result.logs.filter(
       (log) => Number(log.block_number) >= requestedFrom,

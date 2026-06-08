@@ -20,7 +20,7 @@
 	import ReturnsEstimatorModal from '$lib/components/patterns/ReturnsEstimatorModal.svelte';
 import { calculateTokenReturns, getTokenPayoutHistory, getTokenSupply } from '$lib/utils/returnCalculations';
 import { calculateLifetimeIRR, calculateFullyDilutedReturns, calculateMonthlyTokenCashflows, calculateIRR } from '$lib/utils/returnsEstimatorHelpers';
-import { PINATA_GATEWAY } from '$lib/network';
+import { PINATA_GATEWAY, ORDERBOOK_SOURCES } from '$lib/network';
 import { catalogService } from '$lib/services';
 import { getTokenTermsPath } from '$lib/utils/tokenTerms';
 import { getTxUrl, getAddressUrl } from '$lib/utils/explorer';
@@ -619,6 +619,19 @@ let historyPayouts: Array<{
   orderHash: string;
   txHash?: string;
 }> = [];
+
+// Claims-vault (Raindex) deep link. A Raindex order ID is
+// `{chainId}-{orderbookAddress}-{orderHash}`, so the OrderBook address must be
+// included. It's era-aware: payouts through Mar 2026 live on the v4 OrderBook,
+// Apr 2026 onward on the migrated v6 OrderBook.
+const BASE_CHAIN_ID = 8453;
+const V6_FIRST_PAYOUT_MONTH = '2026-04';
+const v4OrderbookAddress = (ORDERBOOK_SOURCES.find((s) => s.version === 'v4')?.address ?? '').toLowerCase();
+const v6OrderbookAddress = (ORDERBOOK_SOURCES.find((s) => s.version === 'v6')?.address ?? '').toLowerCase();
+function claimsVaultUrl(month: string, orderHash: string): string {
+  const orderbook = month >= V6_FIRST_PAYOUT_MONTH ? v6OrderbookAddress : v4OrderbookAddress;
+  return `https://raindex.finance/orders/${BASE_CHAIN_ID}-${orderbook}-${orderHash.toLowerCase()}`;
+}
 
 $: {
   const normalizedToken = historyModalToken?.toLowerCase() ?? null;
@@ -1539,7 +1552,7 @@ async function handlePurchaseSuccess() {
 												<div class="text-left font-semibold text-secondary">
 													{#if payout.orderHash}
 														<a
-															href={`https://raindex.finance/orders/8453-${payout.orderHash}`}
+															href={claimsVaultUrl(payout.month, payout.orderHash)}
 															target="_blank"
 															rel="noopener noreferrer"
 															class="inline-flex items-center gap-1 no-underline hover:text-primary break-all"

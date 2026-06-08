@@ -3,12 +3,51 @@
  */
 
 import { executeGraphQL } from "../clients/cachedGraphqlClient";
-import { BASE_ORDERBOOK_SUBGRAPH_URLS } from "$lib/network";
+import { ORDERBOOK_SOURCES } from "$lib/network";
 import type {
   Trade,
   GetTradesResponse,
   GetOrdersResponse,
 } from "$lib/types/graphql";
+
+/**
+ * Run a GraphQL query against EVERY OrderBook era's subgraph (v4 + v6) and flatten
+ * the results. Each era is a distinct dataset, so we query them all and merge; a
+ * failing era resolves to an empty list rather than aborting the others.
+ */
+async function queryAllOrderbookSubgraphs<T>(
+  query: string,
+  variables: Record<string, unknown>,
+  pick: (data: T | null) => unknown[],
+): Promise<unknown[]> {
+  const results = await Promise.allSettled(
+    ORDERBOOK_SOURCES.map(async ({ address, subgraphUrls }) => {
+      const [primaryUrl, ...fallbackUrls] = subgraphUrls;
+      if (!primaryUrl) return { address, items: [] as unknown[] };
+      const data = await executeGraphQL<T>(primaryUrl, query, variables, {
+        fallbackUrls,
+      });
+      return { address, items: pick(data) };
+    }),
+  );
+  const merged: unknown[] = [];
+  for (const r of results) {
+    if (r.status !== "fulfilled") continue;
+    const { address, items } = r.value;
+    // Each era's subgraph indexes a single OrderBook, so tag every result with its
+    // source address. This lets the shared query omit an `orderbook { id }` field —
+    // the v6 raindex subgraph is single-OB and doesn't expose one — while callers
+    // (ClaimsService) still resolve each order's era from `orderbook.id`.
+    for (const it of items) {
+      merged.push(
+        it && typeof it === "object" && !("orderbook" in it)
+          ? { ...(it as Record<string, unknown>), orderbook: { id: address } }
+          : it,
+      );
+    }
+  }
+  return merged;
+}
 
 export type OrderDetail = {
   orderBytes: string;
@@ -22,6 +61,31 @@ export type OrderDetail = {
     };
   }>;
 };
+
+/** Prefer the order carrying the longest orderBytes when subgraphs return duplicates. */
+function pickBestOrderForHash(orders: OrderDetail[]): OrderDetail | undefined {
+  if (orders.length === 0) return undefined;
+  const scored = [...orders].sort((a, b) => {
+    const aLen = a.orderBytes?.length ?? 0;
+    const bLen = b.orderBytes?.length ?? 0;
+    return bLen - aLen;
+  });
+  return scored.find((o) => o.orderBytes && o.orderBytes.length > 2) ?? scored[0];
+}
+
+function mergeOrdersByHash(orders: OrderDetail[]): OrderDetail[] {
+  const byHash = new Map<string, OrderDetail[]>();
+  for (const order of orders) {
+    const key = order.orderHash?.toLowerCase();
+    if (!key) continue;
+    const list = byHash.get(key) ?? [];
+    list.push(order);
+    byHash.set(key, list);
+  }
+  return [...byHash.values()]
+    .map((group) => pickBestOrderForHash(group))
+    .filter((o): o is OrderDetail => o !== undefined);
+}
 
 export class ClaimsRepository {
   /**
@@ -43,7 +107,6 @@ export class ClaimsRepository {
     orderHash: string,
     ownerAddress: string,
   ): Promise<Trade[]> {
-    const [primaryUrl, ...fallbackUrls] = BASE_ORDERBOOK_SUBGRAPH_URLS;
     const cleanOrderHash = this.validateOrderHash(orderHash);
     if (!cleanOrderHash) return [];
 
@@ -58,7 +121,6 @@ export class ClaimsRepository {
           }
         ) {
           order { orderBytes orderHash }
-          orderbook { id }
           tradeEvent {
             transaction { id blockNumber timestamp }
             sender
@@ -67,25 +129,18 @@ export class ClaimsRepository {
       }
     `;
 
-    const data = await executeGraphQL<GetTradesResponse>(
-      primaryUrl,
+    const trades = await queryAllOrderbookSubgraphs<GetTradesResponse>(
       query,
-      {
-        orderHash: cleanOrderHash,
-        sender: ownerAddress.toLowerCase(),
-      },
-      {
-        fallbackUrls,
-      },
+      { orderHash: cleanOrderHash, sender: ownerAddress.toLowerCase() },
+      (data) => data?.trades || [],
     );
-    return data?.trades || [];
+    return trades as Trade[];
   }
 
   /**
    * Get order details by hash
    */
   async getOrderByHash(orderHash: string): Promise<OrderDetail[]> {
-    const [primaryUrl, ...fallbackUrls] = BASE_ORDERBOOK_SUBGRAPH_URLS;
     const cleanOrderHash = this.validateOrderHash(orderHash);
     if (!cleanOrderHash) return [];
 
@@ -94,7 +149,6 @@ export class ClaimsRepository {
         orders(where: { orderHash: $orderHash }) {
           orderBytes
           orderHash
-          orderbook { id }
           addEvents {
             transaction {
               id
@@ -106,22 +160,18 @@ export class ClaimsRepository {
       }
     `;
 
-    const data = await executeGraphQL<GetOrdersResponse>(
-      primaryUrl,
+    const orders = await queryAllOrderbookSubgraphs<GetOrdersResponse>(
       query,
       { orderHash: cleanOrderHash },
-      {
-        fallbackUrls,
-      },
+      (data) => data?.orders || [],
     );
-    return data?.orders || [];
+    return mergeOrdersByHash(orders as OrderDetail[]);
   }
 
   /**
    * Batch fetch order details for multiple hashes in a single query
    */
   async getOrdersByHashes(orderHashes: string[]): Promise<OrderDetail[]> {
-    const [primaryUrl, ...fallbackUrls] = BASE_ORDERBOOK_SUBGRAPH_URLS;
     const cleanHashes = orderHashes
       .map((h) => this.validateOrderHash(h))
       .filter((h): h is string => h !== null);
@@ -133,7 +183,6 @@ export class ClaimsRepository {
         orders(where: { orderHash_in: $orderHashes }) {
           orderBytes
           orderHash
-          orderbook { id }
           addEvents {
             transaction {
               id
@@ -145,15 +194,12 @@ export class ClaimsRepository {
       }
     `;
 
-    const data = await executeGraphQL<GetOrdersResponse>(
-      primaryUrl,
+    const orders = await queryAllOrderbookSubgraphs<GetOrdersResponse>(
       query,
       { orderHashes: cleanHashes },
-      {
-        fallbackUrls,
-      },
+      (data) => data?.orders || [],
     );
-    return data?.orders || [];
+    return mergeOrdersByHash(orders as OrderDetail[]);
   }
 }
 

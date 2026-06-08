@@ -1,10 +1,20 @@
-import { ORDERBOOK_CONTRACT_ADDRESS } from "$lib/network";
+import { ORDERBOOK_CONTRACT_ADDRESS, type OrderbookSource } from "$lib/network";
+import {
+  floatHexFromFixedDecimal,
+  floatWordFromAmount18,
+  floatWordFromIndex,
+} from "$lib/utils/float";
 import type { Trade } from "$lib/types/graphql";
+
+/** Amount encoding for an OrderBook era: v4 = raw 18-dec integers, v6 = Float bytes32. */
+export type AmountEncoding = "int18" | "float";
 import { SimpleMerkleTree } from "@openzeppelin/merkle-tree";
 import { AbiCoder } from "ethers";
 import axios from "axios";
-import { ethers } from "ethers";
-import { Wallet, keccak256, hashMessage, getBytes, concat } from "ethers";
+import { ethers, Signature } from "ethers";
+import { Wallet, keccak256, hashMessage, getBytes, concat, hexlify } from "ethers";
+import { decodeOrderBytes, normalizeOrderForSdk } from "$lib/utils/orderbook";
+import type { OrderV4 as OrderV4Type } from "@rainlanguage/orderbook";
 import { formatEther, parseEther } from "viem";
 
 // Create a singleton AbiCoder instance for reuse
@@ -14,11 +24,47 @@ const abiCoder = AbiCoder.defaultAbiCoder();
 export const HYPERSYNC_URL = "https://8453.hypersync.xyz/query";
 export const CONTEXT_EVENT_TOPIC =
   "0x17a5c0f3785132a57703932032f6863e7920434150aa1dc940e567b440fdce1f";
+const CLAIM_RECEIPT_LOGS_API = "/api/claim-receipt-logs";
+const CLAIM_TX_STORAGE_KEY = "albion-recent-claim-txs";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+/** Remember claim tx hashes for receipt-log fallback until Hypersync indexes. */
+export function recordClaimTransactionHashes(hashes: string[]): void {
+  if (typeof sessionStorage === "undefined" || hashes.length === 0) return;
+  try {
+    const prev = JSON.parse(
+      sessionStorage.getItem(CLAIM_TX_STORAGE_KEY) ?? "[]",
+    ) as string[];
+    const merged = [
+      ...new Set([
+        ...prev.map((h) => h.toLowerCase()),
+        ...hashes.map((h) => h.toLowerCase()),
+      ]),
+    ].slice(-20);
+    sessionStorage.setItem(CLAIM_TX_STORAGE_KEY, JSON.stringify(merged));
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+export function getStoredClaimTransactionHashes(): string[] {
+  if (typeof sessionStorage === "undefined") return [];
+  try {
+    const raw = sessionStorage.getItem(CLAIM_TX_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as string[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 const IO = "(address token, uint8 decimals, uint256 vaultId)";
 const EvaluableV3 = "(address interpreter, address store, bytes bytecode)";
 const OrderV3 = `(address owner, ${EvaluableV3} evaluable, ${IO}[] validInputs, ${IO}[] validOutputs, bytes32 nonce)`;
+// v6 OrderV4: IO drops the `decimals` field and vaultId becomes bytes32.
+const IOV2 = "(address token, bytes32 vaultId)";
+const OrderV4_ABI = `(address owner, ${EvaluableV3} evaluable, ${IOV2}[] validInputs, ${IOV2}[] validOutputs, bytes32 nonce)`;
 
 type OrderV3Type = [
   string,
@@ -27,7 +73,7 @@ type OrderV3Type = [
   [string, number, string][],
   string,
 ];
-type SignedContextV1Type = {
+export type SignedContextV1Type = {
   signer: string;
   context: (string | number | bigint)[];
   signature: string;
@@ -37,6 +83,9 @@ interface DecodedClaimLog {
   index: string;
   address: string;
   amount: string;
+  /** Order hash from Context column 1 when present (may be metadata, not deploy hash). */
+  orderHash?: string;
+  txHash?: string;
   timestamp?: string;
 }
 
@@ -129,15 +178,19 @@ export type ClaimSignedContext = {
   id: string;
   name: string;
   location: string;
+  /** Raw wei from CSV — used for Float merkle leaves and signed context. */
+  amountWei?: string;
   unclaimedAmount: string;
   totalEarned: string;
   lastPayout: string;
   lastClaimDate: string;
   status: string;
-  order?: OrderV3Type;
+  order?: OrderV3Type | OrderV4Type;
   signedContext?: SignedContextV1Type;
   orderBookAddress?: string;
 };
+
+export const CLAIM_MERKLE_PROOF_DEPTH = 8;
 
 // Security validation types
 export type CSVValidationResult = {
@@ -183,11 +236,16 @@ async function fetchWithRetry(url: string): Promise<Response> {
  * Validates CSV data integrity against on-chain merkle root
  * @param csvData - Raw CSV data to validate
  * @param expectedMerkleRoot - Expected merkle root from on-chain data
+ * @param encoding - Amount encoding for the order's era. The merkle root is era-
+ *   specific: v4 orders hash raw 18-dec amounts ("int18"), v6 orders hash the
+ *   Float-encoded amount ("float"). `expectedMerkleRoot` therefore equals the
+ *   order's actual on-chain root only when computed with the matching encoding.
  * @returns Validation result with details
  */
 export function validateCSVIntegrity(
   csvData: CsvClaimRow[],
   expectedMerkleRoot: string,
+  encoding: AmountEncoding = "int18",
 ): CSVValidationResult {
   try {
     // Validate CSV structure
@@ -225,8 +283,8 @@ export function validateCSVIntegrity(
       }
     }
 
-    // Generate merkle tree from CSV data
-    const tree = getMerkleTree(csvData);
+    // Generate merkle tree from CSV data (era-specific amount encoding)
+    const tree = getMerkleTree(csvData, encoding);
     const calculatedMerkleRoot = tree.root;
 
     // Compare with expected merkle root
@@ -305,12 +363,14 @@ export async function validateIPFSContent(
  * @param csvLink - IPFS link to CSV file
  * @param expectedMerkleRoot - Expected merkle root for validation
  * @param expectedContentHash - Expected IPFS content hash
+ * @param encoding - Amount encoding for the order's era (int18 v4 / float v6)
  * @returns Validated CSV data or null if validation fails
  */
 export async function fetchAndValidateCSV(
   csvLink: string,
   expectedMerkleRoot: string,
   expectedContentHash: string,
+  encoding: AmountEncoding = "int18",
 ): Promise<CsvClaimRow[] | null> {
   try {
     // Step 1: Validate IPFS content integrity
@@ -332,7 +392,11 @@ export async function fetchAndValidateCSV(
     const csvData = parseCSVData(csvText);
 
     // Step 3: Validate CSV data integrity
-    const csvValidation = validateCSVIntegrity(csvData, expectedMerkleRoot);
+    const csvValidation = validateCSVIntegrity(
+      csvData,
+      expectedMerkleRoot,
+      encoding,
+    );
     if (!csvValidation.isValid) {
       if (
         expectedMerkleRoot ===
@@ -392,24 +456,49 @@ export async function sortClaimsData(
   symbol?: string,
   orderStartBlock?: number, // Block when the order was created, for wider scan range
   prefetchedLogs?: HypersyncResult[], // Pre-fetched logs to avoid duplicate Hypersync scans
+  source?: OrderbookSource, // OrderBook era (drives amount encoding + self-fetch address/topic)
+  extraClaimTxHashes?: string[], // Recent claim txs (receipt fallback when subgraph/Hypersync lag)
+  expectedMerkleRoot?: string, // v6: scope Context logs to this order's merkle root
 ): Promise<SortedClaimsResult> {
-  // Use pre-fetched logs if available, otherwise fetch independently
-  const logs = prefetchedLogs ?? await (async () => {
-    const tradeBlockRange = getBlockRangeFromTrades(trades);
-    const startBlock = orderStartBlock
-      ? Math.min(orderStartBlock, tradeBlockRange.lowest || orderStartBlock)
-      : tradeBlockRange.lowest;
-    return fetchLogs(
-      HYPERSYNC_URL,
-      ORDERBOOK_CONTRACT_ADDRESS,
-      CONTEXT_EVENT_TOPIC,
-      startBlock,
-    );
-  })();
+  const encoding: AmountEncoding = source?.amountEncoding ?? "int18";
+  const orderbookAddress =
+    source?.address ?? ORDERBOOK_CONTRACT_ADDRESS;
+  const tradeBlockRange = getBlockRangeFromTrades(trades);
+  const startBlock = orderStartBlock
+    ? Math.min(orderStartBlock, tradeBlockRange.lowest || orderStartBlock)
+    : tradeBlockRange.lowest;
 
+  const hypersyncLogs =
+    prefetchedLogs ??
+    (startBlock > 0
+      ? await fetchLogs(
+          HYPERSYNC_URL,
+          orderbookAddress,
+          source?.contextEventTopics?.length
+            ? source.contextEventTopics
+            : (source?.contextEventTopic ?? CONTEXT_EVENT_TOPIC),
+          startBlock,
+        )
+      : []);
+
+  const receiptFromTrades =
+    trades.length > 0
+      ? await fetchLogsFromTradeReceipts(trades, orderbookAddress)
+      : [];
+  const receiptFromTxs =
+    extraClaimTxHashes && extraClaimTxHashes.length > 0
+      ? await fetchLogsFromTransactionHashes(
+          extraClaimTxHashes,
+          orderbookAddress,
+        )
+      : [];
+
+  const logs = [...hypersyncLogs, ...receiptFromTrades, ...receiptFromTxs];
+
+  const normalizedOrderHash = orderHash?.toLowerCase();
   const decodedLogs = logs
     .map((log) => {
-      const decodedData = decodeLogData(log.data);
+      const decodedData = decodeLogData(log.data, encoding);
       if (!decodedData) {
         return null;
       }
@@ -426,14 +515,20 @@ export async function sortClaimsData(
         decodedData.timestamp = new Date(log.timestamp * 1000).toISOString();
       }
 
-      return decodedData;
+      return {
+        ...decodedData,
+        txHash: log.transaction_hash,
+      };
     })
-    .filter((log): log is DecodedClaimLog => {
+    .filter((log) => {
       if (!log) return false;
       const address = log.address;
       if (!address) return false;
-      return address !== ZERO_ADDRESS;
-    });
+      if (address === ZERO_ADDRESS) return false;
+      // Do not filter by col[1] order hash — on v6 it is often merkle metadata,
+      // not the subgraph orderHash. This call is already scoped to one order's CSV.
+      return true;
+    }) as DecodedClaimLog[];
 
   // Filter by owner address (required parameter)
   const normalizedOwnerAddress = ownerAddress.toLowerCase();
@@ -443,16 +538,29 @@ export async function sortClaimsData(
     (claim) => claim.address.toLowerCase() === normalizedOwnerAddress,
   );
 
-  // Filter decoded logs by owner address
-  const filteredDecodedLogs = decodedLogs.filter(
-    (log) =>
-      log?.address && log.address.toLowerCase() === normalizedOwnerAddress,
-  );
+  // Filter decoded logs by owner address. For v6, also scope to this order's
+  // merkle root (Context col[1]) so shared per-OrderBook logs do not mark
+  // another order's payout as claimed.
+  const normalizedMerkleRoot = expectedMerkleRoot?.toLowerCase();
+  const filteredDecodedLogs = decodedLogs.filter((log) => {
+    if (!log?.address || log.address.toLowerCase() !== normalizedOwnerAddress) {
+      return false;
+    }
+    // v6: col[1] is this order's merkle root — require it so shared OB logs
+    // cannot mark another monthly order's payout as claimed/unclaimed.
+    if (encoding === "float" && normalizedMerkleRoot) {
+      if (!log.orderHash) return false;
+      return log.orderHash.toLowerCase() === normalizedMerkleRoot;
+    }
+    return true;
+  });
 
   // Filter into claimed and unclaimed arrays
   const { claimedCsv, unclaimedCsv } = filterClaimedAndUnclaimed(
     filteredCsvClaims,
     filteredDecodedLogs,
+    encoding,
+    expectedMerkleRoot,
   );
 
   // Calculate total amounts
@@ -471,15 +579,13 @@ export async function sortClaimsData(
   // Create claims array with the same structure as the claims page
   // Include orderHash so caller can look up payout date from metadata
   const claims: ClaimHistory[] = claimedCsv.map((claim) => {
-    // Find the original log data to get the transaction hash
     const originalLog = logs.find((log) => {
-      const decodedData = decodeLogData(log.data);
-      if (!decodedData) {
-        return false;
-      }
-      return (
-        decodedData.index === claim.index &&
-        decodedData.address === claim.address
+      const decodedData = decodeLogData(log.data, encoding);
+      if (!decodedData) return false;
+      return decodedLogMatchesClaim(
+        { ...decodedData, txHash: log.transaction_hash },
+        claim,
+        encoding,
       );
     });
 
@@ -516,7 +622,13 @@ export async function sortClaimsData(
       date: claimDate,
       amount: formatAmountWei(claim.amount),
       asset: fieldName || "Unknown Field",
-      txHash: trades[0]?.tradeEvent?.transaction?.id || "N/A",
+      // txHash comes from this claim's own Context log (works for both eras and is
+      // more accurate than a per-order trade); trades[0] is the legacy fallback.
+      txHash:
+        claim.decodedLog?.txHash ||
+        originalLog?.transaction_hash ||
+        trades[0]?.tradeEvent?.transaction?.id ||
+        "N/A",
       status: "completed",
       tokenAddress,
       symbol,
@@ -530,6 +642,7 @@ export async function sortClaimsData(
       id: claim.index,
       name: fieldName || "Unknown Field",
       location: "",
+      amountWei: claim.amount.toString(),
       unclaimedAmount: formatAmountWei(claim.amount),
       totalEarned: formatAmountWei(totalEarned),
       lastPayout: new Date().toISOString(),
@@ -562,12 +675,15 @@ export async function sortClaimsData(
 export async function fetchLogs(
   _client: string,
   poolContract: string,
-  eventTopic: string,
+  eventTopic: string | string[],
   startBlock: number,
+  forceRefresh = false,
 ): Promise<HypersyncResult[]> {
   if (!startBlock || startBlock <= 0) {
     return [];
   }
+
+  const eventTopics = Array.isArray(eventTopic) ? eventTopic : [eventTopic];
 
   try {
     const response = await axios.post<{
@@ -575,13 +691,70 @@ export async function fetchLogs(
       fromCache: boolean;
     }>("/api/context-events", {
       contractAddress: poolContract,
-      eventTopic,
+      eventTopics,
       fromBlock: startBlock,
+      forceRefresh,
     });
 
     return response.data?.logs || [];
   } catch (error) {
     console.warn("Context events fetch error, falling back to empty:", error);
+    return [];
+  }
+}
+
+/** Decode Context logs from indexed take/claim txs when Hypersync is empty or lagging. */
+async function fetchLogsFromTradeReceipts(
+  trades: Trade[],
+  orderbookAddress: string,
+): Promise<HypersyncResult[]> {
+  const transactionHashes = [
+    ...new Set(
+      trades
+        .map((trade) => trade.tradeEvent?.transaction?.id)
+        .filter((id): id is string => Boolean(id))
+        .map((id) => id.toLowerCase()),
+    ),
+  ];
+  return fetchLogsFromTransactionHashes(transactionHashes, orderbookAddress);
+}
+
+async function fetchLogsFromTransactionHashes(
+  transactionHashes: string[],
+  orderbookAddress: string,
+): Promise<HypersyncResult[]> {
+  if (transactionHashes.length === 0) return [];
+
+  try {
+    const response = await axios.post<{
+      logs: Array<{
+        block_number: string;
+        transaction_hash: string;
+        data: string;
+        timestamp: number | null;
+      }>;
+    }>(CLAIM_RECEIPT_LOGS_API, {
+      transactionHashes,
+      orderbookAddress,
+    });
+    const receiptLogs = response.data?.logs ?? [];
+    return receiptLogs.map(
+      (log): HypersyncResult => ({
+        block_number: log.block_number,
+        log_index: "0",
+        transaction_index: "0",
+        transaction_hash: log.transaction_hash,
+        data: log.data,
+        address: orderbookAddress,
+        topic0: "0x0",
+        timestamp: log.timestamp,
+        block: {
+          timestamp: log.timestamp ?? 0,
+        },
+      }),
+    );
+  } catch (error) {
+    console.warn("Claim receipt log fallback failed:", error);
     return [];
   }
 }
@@ -611,8 +784,26 @@ export function getBlockRangeFromTrades(trades: Trade[]): {
   return { lowest, highest };
 }
 
-// Function to decode Context event log data using ethers v6
-function decodeLogData(data: string): DecodedClaimLog | null {
+function toBytes32Hex(v: unknown): string {
+  return (
+    "0x" +
+    BigInt(v as string | bigint)
+      .toString(16)
+      .padStart(64, "0")
+  );
+}
+
+// Decode a Context / ContextV2 event log from either era.
+// Both v4 (Context(address,uint256[][])) and v6 (ContextV2(address,bytes32[][])) have
+// the same on-wire 32-byte-per-element format, so we always decode as uint256[][].
+// The signed claim context (index, amount, …proof) sits at column 6 (sometimes 5/7/8);
+// col[1][0] is the order hash, used to scope claims to a specific order.
+// For v6, slot[0] is Float(index,0) and slot[1] is Float(amount,18) — we convert both
+// back to their plain integer forms so they match raw CSV values.
+function decodeLogData(
+  data: string,
+  encoding: AmountEncoding = "int18",
+): DecodedClaimLog | null {
   if (!data || data === "0x") {
     return null;
   }
@@ -620,19 +811,27 @@ function decodeLogData(data: string): DecodedClaimLog | null {
     const logBytes = ethers.getBytes(data);
     const decodedData = abiCoder.decode(["address", "uint256[][]"], logBytes);
 
-    // The signed context is typically at column index 6 in the 2D context array.
-    // Search for it dynamically to handle varying context structures.
-    const contextColumns = decodedData[1];
+    const contextColumns = decodedData[1] as bigint[][];
+    const orderHash =
+      contextColumns[1] && contextColumns[1].length >= 1
+        ? toBytes32Hex(contextColumns[1][0])
+        : undefined;
+
     let claimIndex: string | undefined;
     let claimAmount: string | undefined;
 
-    // Try column 6 first (most common), then search other columns
-    const columnsToCheck = [6, 5, 7, 8];
+    const columnsToCheck = [6, 5, 7, 8, 0, 1, 2, 3, 4, 9];
     for (const colIdx of columnsToCheck) {
       const col = contextColumns[colIdx];
       if (col && col.length >= 2) {
-        claimIndex = col[0].toString();
-        claimAmount = col[1].toString();
+        if (encoding === "float") {
+          // v6: on-wire Float words as uint256; match via floatContextSlot* helpers
+          claimIndex = col[0].toString();
+          claimAmount = col[1].toString();
+        } else {
+          claimIndex = col[0].toString();
+          claimAmount = col[1].toString();
+        }
         break;
       }
     }
@@ -642,8 +841,9 @@ function decodeLogData(data: string): DecodedClaimLog | null {
     }
 
     return {
+      orderHash,
       index: claimIndex,
-      address: decodedData[0],
+      address: decodedData[0] as string,
       amount: claimAmount,
     };
   } catch {
@@ -655,37 +855,54 @@ function decodeLogData(data: string): DecodedClaimLog | null {
 // Function to filter CSV claims into claimed and unclaimed arrays.
 // Uses composite (index, amount) matching to prevent cross-order contamination
 // when multiple orders are claimed in the same transaction.
+function decodedLogMatchesClaim(
+  log: DecodedClaimLog,
+  claim: { index: string; amount: string; address: string },
+  encoding: AmountEncoding,
+): boolean {
+  if (log.address.toLowerCase() !== claim.address.toLowerCase()) {
+    return false;
+  }
+  const indexMatch =
+    log.index === claim.index ||
+    (encoding === "float" && log.index === floatContextSlotIndex(claim.index));
+  const amountMatch =
+    log.amount === claim.amount ||
+    (encoding === "float" &&
+      log.amount === floatContextSlotAmount(claim.amount));
+  return indexMatch && amountMatch;
+}
+
 function filterClaimedAndUnclaimed(
   csvClaims: CsvClaimRow[],
   decodedLogs: DecodedClaimLog[],
+  encoding: AmountEncoding = "int18",
+  expectedMerkleRoot?: string,
 ): {
   claimedCsv: ClaimedCsvRow[];
   unclaimedCsv: UnclaimedCsvRow[];
 } {
-  // Create a set of claimed (index, amount) pairs for accurate matching.
-  // Using both index AND amount prevents false matches from Context events
-  // that belong to different orders but share the same CSV index — critical
-  // now that Hypersync logs are fetched once and shared across all orders
-  // for a token.
-  const claimedKeys = new Set(
-    decodedLogs.map((log) => `${log.index}:${log.amount}`),
-  );
-
   const claimedCsv: ClaimedCsvRow[] = [];
   const unclaimedCsv: UnclaimedCsvRow[] = [];
+  const normalizedMerkleRoot = expectedMerkleRoot?.toLowerCase();
 
   csvClaims.forEach((claim) => {
-    const compositeKey = `${claim.index}:${claim.amount}`;
-    const isClaimed = claimedKeys.has(compositeKey);
+    const decodedLog = decodedLogs.find((log) => {
+      if (
+        encoding === "float" &&
+        normalizedMerkleRoot &&
+        log.orderHash?.toLowerCase() !== normalizedMerkleRoot
+      ) {
+        return false;
+      }
+      return decodedLogMatchesClaim(log, claim, encoding);
+    });
 
-    if (isClaimed) {
-      const decodedLog = decodedLogs.find(
-        (log) => log.index === claim.index && log.amount === claim.amount,
-      );
+    if (decodedLog) {
       claimedCsv.push({
         ...claim,
         claimed: true,
-        decodedLog: decodedLog ?? null,
+        decodedLog,
       });
     } else {
       unclaimedCsv.push({
@@ -703,50 +920,68 @@ function filterClaimedAndUnclaimed(
   };
 }
 
-export function getLeaf(index: string, address: string, amount: string) {
-  const indexAsUint256 = BigInt(index);
+function amountWeiFromArg(amount: string, encoding: AmountEncoding): bigint {
+  if (encoding === "float") {
+    return amount.includes(".") ? BigInt(parseEther(amount)) : BigInt(amount);
+  }
+  return amount.includes(".") ? BigInt(parseEther(amount)) : BigInt(amount);
+}
+
+export function getLeaf(
+  index: string,
+  address: string,
+  amount: string,
+  encoding: AmountEncoding = "int18",
+) {
+  const rawIndex = BigInt(index);
   const addressAsUint256 = BigInt(address);
-  const amountAsUint256 = BigInt(parseEther(amount));
+  const amountWei = amountWeiFromArg(amount, encoding);
 
-  // Create inputs array like in Solidity: uint256[] memory inputs = [indexAsUint256, addressAsUint256, amountAsUint256]
+  // v6 (Float): leaf = Float(index,0) || address || Float(amount,18)
+  // v4 (int18): leaf = index || address || amount_wei
+  const indexAsUint256 =
+    encoding === "float" ? floatWordFromIndex(rawIndex) : rawIndex;
+  const amountAsUint256 =
+    encoding === "float"
+      ? floatWordFromAmount18(amountWei)
+      : amountWei;
+
   const inputs = [indexAsUint256, addressAsUint256, amountAsUint256];
-
-  // Pack the inputs array like abi.encodePacked(inputs) in Solidity
   const packed = inputs
     .map((input) => input.toString(16).padStart(64, "0"))
     .join("");
-
-  // Hash the packed data (single hash, matching Solidity)
   return keccak256("0x" + packed);
 }
 
-export function getMerkleTree(csvInput: CsvClaimRow[]) {
+export function getMerkleTree(
+  csvInput: CsvClaimRow[],
+  encoding: AmountEncoding = "int18",
+) {
   const leaves = csvInput.map((row) => {
-    // Handle CSV data format - row is an object with properties
     const index = row.index || "0";
     const address = row.address || ZERO_ADDRESS;
     const amount = row.amount || "0";
 
-    // Convert address to uint256 (like uint256(uint160(address)) in Solidity)
-    const indexAsUint256 = BigInt(index);
+    const rawIndex = BigInt(index);
     const addressAsUint256 = BigInt(address);
-    const amountAsUint256 = BigInt(amount);
 
-    // Create inputs array like in Solidity: uint256[] memory inputs = [indexAsUint256, addressAsUint256, amountAsUint256]
+    // v6 (Float): leaf = Float(index,0) || address || Float(amount,18)
+    // v4 (int18): leaf = index || address || amount_wei
+    const indexAsUint256 =
+      encoding === "float" ? floatWordFromIndex(rawIndex) : rawIndex;
+    const amountAsUint256 =
+      encoding === "float"
+        ? floatWordFromAmount18(amountWeiFromArg(amount, encoding))
+        : amountWeiFromArg(amount, encoding);
+
     const inputs = [indexAsUint256, addressAsUint256, amountAsUint256];
-
-    // Pack the inputs array like abi.encodePacked(inputs) in Solidity
     const packed = inputs
       .map((input) => input.toString(16).padStart(64, "0"))
       .join("");
-
-    // Hash the packed data (single hash, matching Solidity)
     return keccak256("0x" + packed);
   });
 
-  const tree = SimpleMerkleTree.of(leaves);
-
-  return tree;
+  return SimpleMerkleTree.of(leaves);
 }
 
 export function getProofForLeaf(tree: SimpleMerkleTree, leafValue: string) {
@@ -773,9 +1008,76 @@ export function getProofForLeaf(tree: SimpleMerkleTree, leafValue: string) {
   };
 }
 
-export function decodeOrder(orderBytes: string): OrderV3Type {
+export function decodeOrder(
+  orderBytes: string,
+  version: "v4" | "v6" = "v4",
+): OrderV3Type | OrderV4Type {
+  if (version === "v6") {
+    return decodeOrderBytes(orderBytes);
+  }
   const [order] = abiCoder.decode([OrderV3], orderBytes);
   return order;
+}
+
+function floatContextSlotIndex(index: string | bigint): string {
+  return BigInt(floatHexFromFixedDecimal(BigInt(index), 0)).toString();
+}
+
+function floatContextSlotAmount(amountWei: string | bigint): string {
+  return BigInt(floatHexFromFixedDecimal(BigInt(amountWei), 18)).toString();
+}
+
+function floatContextSlots(
+  index: string | bigint,
+  amountWei: string | bigint,
+): [`0x${string}`, `0x${string}`] {
+  return [
+    floatHexFromFixedDecimal(BigInt(index), 0),
+    floatHexFromFixedDecimal(BigInt(amountWei), 18),
+  ];
+}
+
+/** Format uint256 / Float words as bytes32 hex for takeOrders3 signedContext. */
+export function formatUint256Hex(value: string | bigint | number): string {
+  if (typeof value === "string" && value.startsWith("0x")) {
+    const hex = value.slice(2).padStart(64, "0").slice(-64);
+    return `0x${hex}`;
+  }
+  const raw =
+    typeof value === "string" && value.includes(".")
+      ? parseEther(value).toString()
+      : value.toString();
+  return `0x${BigInt(raw).toString(16).padStart(64, "0")}`;
+}
+
+export function formatSignatureHex(signature: string | Uint8Array): string {
+  if (typeof signature === "string") {
+    return signature.startsWith("0x") ? signature : `0x${signature}`;
+  }
+  return hexlify(signature);
+}
+
+/**
+ * Build signed context for claims.rain: [index, amount, proof…].
+ * Float orders use Float-encoded slots 0–1; int18 orders use raw uint256 wei.
+ */
+export function buildClaimSignedContext(
+  index: string | bigint,
+  amountWei: string | bigint,
+  proof: string[],
+  encoding: AmountEncoding = "int18",
+): SignedContextV1Type {
+  const proofSlots = proof.slice(0, CLAIM_MERKLE_PROOF_DEPTH).map((p) => BigInt(p));
+  while (proofSlots.length < CLAIM_MERKLE_PROOF_DEPTH) {
+    proofSlots.push(0n);
+  }
+
+  const [indexSlot, amountSlot] =
+    encoding === "float"
+      ? floatContextSlots(index, amountWei)
+      : [BigInt(index), BigInt(amountWei)];
+
+  return signContext([indexSlot, amountSlot, ...proofSlots], encoding);
 }
 
 /**
@@ -786,44 +1088,34 @@ export function decodeOrder(orderBytes: string): OrderV3Type {
  */
 export function signContext(
   context: Array<string | bigint | number>,
+  encoding: AmountEncoding = "int18",
 ): SignedContextV1Type {
   const wallet = Wallet.createRandom();
-
   const signer = wallet.address;
-
-  // 2. Encode uint256[] context as tightly packed bytes (like abi.encodePacked in Solidity)
-  const contextBytes = concat(
-    context.map((n) => {
-      // Always convert to wei for amounts (assuming index 1 is the amount)
-      const value =
-        typeof n === "string" && n.includes(".")
-          ? parseEther(n).toString()
-          : n.toString();
-      return getBytes("0x" + BigInt(value).toString(16).padStart(64, "0"));
-    }),
+  const contextHex = context.map((n) =>
+    typeof n === "string" && n.startsWith("0x") && n.length === 66
+      ? n
+      : formatUint256Hex(n),
   );
 
-  // 3. Hash the packed context (contextHash)
+  const contextBytes = concat(contextHex.map((h) => getBytes(h)));
   const contextHash = keccak256(contextBytes);
-
-  // 4. HashMessage = ECDSA.toEthSignedMessageHash(contextHash)
   const digest = hashMessage(getBytes(contextHash));
-
-  // 5. Sign the digest
-  const signature = wallet.signingKey.sign(digest);
-  // In ethers v6, sign returns a Signature object directly
+  const signatureHex = wallet.signingKey.sign(digest);
+  const signature = Signature.from(signatureHex);
   const signatureBytes = concat([
     getBytes(signature.r),
     getBytes(signature.s),
     Uint8Array.from([signature.v]),
   ]);
 
-  // 6. Return as SignedContextV1
   return {
     signer,
-    context,
-    signature: signatureBytes,
+    context: encoding === "float" ? contextHex : context,
+    signature: formatSignatureHex(signatureBytes),
   };
 }
+
+export { normalizeOrderForSdk };
 
 export type { CsvClaimRow };

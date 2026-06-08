@@ -4,8 +4,12 @@ import {
 } from "$lib/data/repositories/claimsRepository";
 import {
   ENERGY_FIELDS,
-  ORDERBOOK_CONTRACT_ADDRESS,
+  ORDERBOOK_SOURCES,
+  ORDERBOOK_V6_CONTRACT_ADDRESS,
+  getContextEventTopics,
+  getOrderbookSource,
   type Claim,
+  type OrderbookSource,
 } from "$lib/network";
 import {
   fetchAndValidateCSV,
@@ -13,16 +17,18 @@ import {
   getLeaf,
   getProofForLeaf,
   decodeOrder,
-  signContext,
+  buildClaimSignedContext,
+  type SignedContextV1Type,
   sortClaimsData,
   fetchLogs,
+  getStoredClaimTransactionHashes,
   HYPERSYNC_URL,
-  CONTEXT_EVENT_TOPIC,
+  type AmountEncoding,
   type ClaimHistory,
   type CsvClaimRow,
   type HypersyncResult,
 } from "$lib/utils/claims";
-import { formatEther, parseEther, type Hex } from "viem";
+import { formatEther, type Hex } from "viem";
 import { wagmiConfig } from "svelte-wagmi";
 import { simulateContract, writeContract } from "@wagmi/core";
 import { get } from "svelte/store";
@@ -51,12 +57,13 @@ interface HoldingRow {
   [key: string]: unknown;
 }
 
-type SignedContext = ReturnType<typeof signContext>;
+type SignedContext = SignedContextV1Type;
 
 interface HoldingWithProof extends HoldingRow {
   order: ReturnType<typeof decodeOrder>;
   signedContext: SignedContext;
   orderBookAddress: string;
+  orderHash: string;
 }
 
 interface PendingClaim {
@@ -97,6 +104,7 @@ export class ClaimsService {
     csvLink: string,
     expectedMerkleRoot: string,
     expectedContentHash: string,
+    encoding: AmountEncoding = "int18",
   ): Promise<CsvClaimRow[] | null> {
     const cached = this.csvCache.get(csvLink);
     if (cached) {
@@ -107,6 +115,7 @@ export class ClaimsService {
       csvLink,
       expectedMerkleRoot,
       expectedContentHash,
+      encoding,
     );
     if (data) {
       this.csvCache.set(csvLink, data);
@@ -131,7 +140,9 @@ export class ClaimsService {
 
       // Add delay between batches to avoid rate limiting
       if (i + batchSize < items.length) {
-        await new Promise((resolve) => setTimeout(resolve, delayBetweenBatches));
+        await new Promise((resolve) =>
+          setTimeout(resolve, delayBetweenBatches),
+        );
       }
     }
 
@@ -141,7 +152,14 @@ export class ClaimsService {
   /**
    * Load all claims data for a wallet address
    */
-  async loadClaimsForWallet(ownerAddress: string): Promise<ClaimsResult> {
+  async loadClaimsForWallet(
+    ownerAddress: string,
+    options?: {
+      refreshContextEvents?: boolean;
+      /** Recent claim tx hashes for receipt-log fallback (e.g. after a successful claim). */
+      claimTxHashes?: string[];
+    },
+  ): Promise<ClaimsResult> {
     if (!ownerAddress) {
       return {
         holdings: [],
@@ -182,36 +200,85 @@ export class ClaimsService {
       };
     }
 
-    // Phase 1: Pre-fetch all orders in a single batch query (instead of 12+ individual queries)
-    const allOrderHashes = claimMetadata.map((m) => m.claim.orderHash);
-    const allOrders = await this.repository.getOrdersByHashes(allOrderHashes);
-
-    // Index orders by hash for O(1) lookup
+    // Phase 1: Resolve order details. Claims that carry a static order (orderBytes +
+    // deployBlock — the v6 subgraph-free path) are resolved locally; only the rest
+    // (v4 legacy) are batch-queried from the subgraph.
     const ordersByHash = new Map<string, OrderDetail>();
-    for (const order of allOrders) {
-      ordersByHash.set(order.orderHash.toLowerCase(), order);
+    const hashesNeedingSubgraph: string[] = [];
+    for (const { claim } of claimMetadata) {
+      if (claim.orderBytes && claim.deployBlock !== undefined) {
+        ordersByHash.set(claim.orderHash.toLowerCase(), {
+          orderBytes: claim.orderBytes,
+          orderHash: claim.orderHash,
+          // Static orders are v6-era (only v6 deploys capture orderBytes).
+          orderbook: { id: ORDERBOOK_V6_CONTRACT_ADDRESS.toLowerCase() },
+          addEvents: [
+            {
+              transaction: {
+                id: "",
+                timestamp: "",
+                blockNumber: String(claim.deployBlock),
+              },
+            },
+          ],
+        });
+      } else {
+        hashesNeedingSubgraph.push(claim.orderHash);
+      }
     }
-
-    // Phase 2: Determine earliest block across all orders for a single Hypersync scan
-    let earliestBlock = Infinity;
-    for (const order of allOrders) {
-      const blockNum = order.addEvents?.[0]?.transaction?.blockNumber;
-      if (blockNum) {
-        const parsed = parseInt(blockNum);
-        if (parsed < earliestBlock) earliestBlock = parsed;
+    if (hashesNeedingSubgraph.length > 0) {
+      const fetched = await this.repository.getOrdersByHashes(
+        hashesNeedingSubgraph,
+      );
+      for (const order of fetched) {
+        const key = order.orderHash.toLowerCase();
+        const existing = ordersByHash.get(key);
+        if (
+          !existing ||
+          (order.orderBytes?.length ?? 0) > (existing.orderBytes?.length ?? 0)
+        ) {
+          ordersByHash.set(key, order);
+        }
       }
     }
 
-    // Phase 3: Fetch Hypersync logs ONCE from earliest block (instead of 12+ separate scans)
-    const sharedLogs: HypersyncResult[] =
-      earliestBlock < Infinity
-        ? await fetchLogs(
-            HYPERSYNC_URL,
-            ORDERBOOK_CONTRACT_ADDRESS,
-            CONTEXT_EVENT_TOPIC,
-            earliestBlock,
-          )
-        : [];
+    const storedClaimTxHashes = [
+      ...new Set([
+        ...getStoredClaimTransactionHashes(),
+        ...(options?.claimTxHashes ?? []),
+      ]),
+    ];
+    const allOrders = [...ordersByHash.values()];
+
+    // Phase 2+3: Fetch Context logs PER OrderBook era. v4 and v6 have different
+    // contract addresses, event topics, and amount encodings, so each era is scanned
+    // separately (once, from its earliest order block) and keyed by OrderBook address.
+    const earliestByOb = new Map<string, number>();
+    for (const order of allOrders) {
+      const ob = order.orderbook?.id?.toLowerCase();
+      const blockNum = order.addEvents?.[0]?.transaction?.blockNumber;
+      if (!ob || !blockNum) continue;
+      const parsed = parseInt(blockNum);
+      const prev = earliestByOb.get(ob);
+      if (prev === undefined || parsed < prev) earliestByOb.set(ob, parsed);
+    }
+
+    const logsByOb = new Map<string, HypersyncResult[]>();
+    await Promise.all(
+      ORDERBOOK_SOURCES.map(async (src) => {
+        const ob = src.address.toLowerCase();
+        const earliest = earliestByOb.get(ob);
+        if (earliest === undefined) return;
+        const logs = await fetchLogs(
+          HYPERSYNC_URL,
+          src.address,
+          getContextEventTopics(src),
+          earliest,
+          options?.refreshContextEvents ?? false,
+        );
+        logsByOb.set(ob, logs);
+      }),
+    );
 
     // Phase 4: Process each claim using pre-fetched data
     let claimHistory: ClaimHistory[] = [];
@@ -231,7 +298,8 @@ export class ClaimsService {
             tokenAddress,
             symbol,
             ordersByHash,
-            sharedLogs,
+            logsByOb,
+            storedClaimTxHashes,
           ),
     );
 
@@ -289,7 +357,8 @@ export class ClaimsService {
     tokenAddress: string,
     symbol: string,
     ordersByHash: Map<string, OrderDetail>,
-    sharedLogs: HypersyncResult[],
+    logsByOb: Map<string, HypersyncResult[]>,
+    claimTxHashes: string[] = [],
   ): Promise<PendingClaim | null> {
     if (!claim.csvLink) return null;
 
@@ -297,33 +366,48 @@ export class ClaimsService {
     const orderDetail = ordersByHash.get(claim.orderHash.toLowerCase());
     if (!orderDetail) return null;
 
-    // Fetch CSV data and trades in parallel (order is already available)
-    const [csvData, trades] = await Promise.all([
-      this.fetchCsv(
-        claim.csvLink,
-        claim.expectedMerkleRoot,
-        claim.expectedContentHash,
-      ),
-      this.repository.getTradesForClaims(claim.orderHash, ownerAddress),
-    ]);
+    // Determine which OrderBook era this order lives on (v4 int18 / v6 Float).
+    // Resolved BEFORE the CSV fetch: the merkle-root integrity check is era-
+    // specific, so the CSV must be validated with this order's amount encoding
+    // (v6 against the Float root, v4 against the int18 root).
+    const orderBookAddress = orderDetail.orderbook?.id?.toLowerCase();
+    if (!orderBookAddress) {
+      return null;
+    }
+    const source: OrderbookSource | undefined =
+      getOrderbookSource(orderBookAddress);
+    const encoding = source?.amountEncoding ?? "int18";
+    const version = source?.version ?? "v4";
+    const isClaimable = source?.claimable ?? true;
+
+    // Fetch CSV data (order is already available). Claimed-state AND history both
+    // come from the shared per-OB Context scan (sharedLogs) below, so no per-order
+    // `trades` subgraph query is needed — the Context log carries its own txHash +
+    // block timestamp.
+    const csvData = await this.fetchCsv(
+      claim.csvLink,
+      claim.expectedMerkleRoot,
+      claim.expectedContentHash,
+      encoding,
+    );
 
     if (!csvData) {
       throw new ClaimsCsvLoadError();
     }
 
-    const orderBookAddress = orderDetail.orderbook.id;
-    const decodedOrder = decodeOrder(orderDetail.orderBytes);
+    const sharedLogs = logsByOb.get(orderBookAddress.toLowerCase()) ?? [];
 
-    const orderStartBlock = orderDetail.addEvents?.[0]?.transaction
-      ?.blockNumber
+    const decodedOrder = decodeOrder(orderDetail.orderBytes, version);
+
+    const orderStartBlock = orderDetail.addEvents?.[0]?.transaction?.blockNumber
       ? parseInt(orderDetail.addEvents[0].transaction.blockNumber)
       : undefined;
 
-    // Build merkle tree and process claims (using shared pre-fetched Hypersync logs)
-    const merkleTree = getMerkleTree(csvData);
+    // Build merkle tree and process claims (using shared per-era Hypersync logs)
+    const merkleTree = getMerkleTree(csvData, encoding);
     const sortedClaimsData = (await sortClaimsData(
       csvData,
-      trades,
+      [], // claimed-state + history come from per-era Context logs (not trades)
       ownerAddress,
       fieldName,
       undefined,
@@ -331,20 +415,41 @@ export class ClaimsService {
       claim.orderHash,
       symbol,
       orderStartBlock,
-      sharedLogs, // Pass shared logs to avoid per-claim Hypersync scan
+      sharedLogs,
+      source,
+      claimTxHashes,
+      claim.expectedMerkleRoot,
     )) as SortedClaimsData;
 
-    // Generate proofs for holdings
-    const holdingsWithProofs: HoldingWithProof[] =
-      sortedClaimsData.holdings.map((h) => {
-        const leaf = getLeaf(h.id, ownerAddress, h.unclaimedAmount);
+    const claimedAmount = sortedClaimsData?.totalClaimedAmount
+      ? Number(formatEther(BigInt(sortedClaimsData.totalClaimedAmount)))
+      : 0;
+
+    // Legacy (history-only) era: count already-claimed toward earnings/history, but
+    // offer NOTHING claimable and add nothing to unclaimed — its outstanding funds
+    // were migrated to the active OrderBook, so counting them here would double-count.
+    if (!isClaimable) {
+      return {
+        holdings: [],
+        claims: sortedClaimsData.claims,
+        totalClaimed: claimedAmount,
+        totalEarned: claimedAmount,
+        totalUnclaimed: 0,
+      };
+    }
+
+    // Generate proofs for holdings (active era)
+    const holdingsWithProofs: HoldingWithProof[] = sortedClaimsData.holdings
+      .map((h) => {
+        const amountWei = h.amountWei ?? h.unclaimedAmount;
+        const leaf = getLeaf(h.id, ownerAddress, amountWei, encoding);
         const proofForLeaf = getProofForLeaf(merkleTree, leaf);
-        const holdingSignedContext = signContext(
-          [
-            h.id,
-            parseEther(h.unclaimedAmount.toString()),
-            ...proofForLeaf.proof,
-          ].map((i) => BigInt(i)),
+
+        const holdingSignedContext = buildClaimSignedContext(
+          h.id,
+          amountWei,
+          proofForLeaf.proof,
+          encoding,
         );
 
         return {
@@ -352,15 +457,15 @@ export class ClaimsService {
           order: decodedOrder,
           signedContext: holdingSignedContext,
           orderBookAddress,
+          orderHash: claim.orderHash,
         };
-      });
+      })
+      .filter((h) => h.order && h.signedContext && h.orderBookAddress);
 
     return {
       holdings: holdingsWithProofs,
       claims: sortedClaimsData.claims,
-      totalClaimed: sortedClaimsData?.totalClaimedAmount
-        ? Number(formatEther(BigInt(sortedClaimsData.totalClaimedAmount)))
-        : 0,
+      totalClaimed: claimedAmount,
       totalEarned: sortedClaimsData?.totalEarned
         ? Number(formatEther(BigInt(sortedClaimsData.totalEarned)))
         : 0,
