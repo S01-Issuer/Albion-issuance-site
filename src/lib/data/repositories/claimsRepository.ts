@@ -62,6 +62,31 @@ export type OrderDetail = {
   }>;
 };
 
+/** Prefer the order carrying the longest orderBytes when subgraphs return duplicates. */
+function pickBestOrderForHash(orders: OrderDetail[]): OrderDetail | undefined {
+  if (orders.length === 0) return undefined;
+  const scored = [...orders].sort((a, b) => {
+    const aLen = a.orderBytes?.length ?? 0;
+    const bLen = b.orderBytes?.length ?? 0;
+    return bLen - aLen;
+  });
+  return scored.find((o) => o.orderBytes && o.orderBytes.length > 2) ?? scored[0];
+}
+
+function mergeOrdersByHash(orders: OrderDetail[]): OrderDetail[] {
+  const byHash = new Map<string, OrderDetail[]>();
+  for (const order of orders) {
+    const key = order.orderHash?.toLowerCase();
+    if (!key) continue;
+    const list = byHash.get(key) ?? [];
+    list.push(order);
+    byHash.set(key, list);
+  }
+  return [...byHash.values()]
+    .map((group) => pickBestOrderForHash(group))
+    .filter((o): o is OrderDetail => o !== undefined);
+}
+
 export class ClaimsRepository {
   /**
    * Validate order hash format
@@ -141,7 +166,7 @@ export class ClaimsRepository {
       { orderHash: cleanOrderHash },
       (data) => data?.orders || [],
     );
-    return orders as OrderDetail[];
+    return mergeOrdersByHash(orders as OrderDetail[]);
   }
 
   /**
@@ -175,7 +200,7 @@ export class ClaimsRepository {
       { orderHashes: cleanHashes },
       (data) => data?.orders || [],
     );
-    return orders as OrderDetail[];
+    return mergeOrdersByHash(orders as OrderDetail[]);
   }
 }
 

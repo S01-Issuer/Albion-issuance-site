@@ -61,10 +61,10 @@ export const ORDERBOOK_V6_CONTRACT_ADDRESS =
  * Dual-era OrderBook configuration.
  *
  * Claims live across two OrderBook deployments after the v4 -> v6 migration:
- *  - v4 (legacy): read-only. Historical claims stay here so already-claimed payouts
+ *  - v4 (old): read-only. Historical claims stay here so already-claimed payouts
  *    still show in history & total-earned. Its unclaimed funds were migrated to v6,
  *    so v4 offers nothing claimable (`claimable: false`).
- *  - v6 (active): read + claim. Migrated outstanding funds + all future months.
+ *  - v6 (new): read + claim on 0xb05D. Float encoding.
  *
  * Amounts: v4 leaves/context use raw 18-decimal integers; v6 uses Float (bytes32).
  * Context event (claimed detection): v4 `Context(address,uint256[][])`,
@@ -76,6 +76,8 @@ export interface OrderbookSource {
   version: OrderbookVersion;
   subgraphUrls: string[];
   contextEventTopic: string;
+  /** When set, Hypersync scans topic0 against any of these (OR). */
+  contextEventTopics?: string[];
   amountEncoding: "int18" | "float";
   /** Whether holdings on this OrderBook are offered as claimable in the UI. */
   claimable: boolean;
@@ -83,6 +85,7 @@ export interface OrderbookSource {
 
 export const V4_CONTEXT_EVENT_TOPIC =
   "0x17a5c0f3785132a57703932032f6863e7920434150aa1dc940e567b440fdce1f";
+/** Context events on v6 OrderBook 0xb05D… */
 export const V6_CONTEXT_EVENT_TOPIC =
   "0x4cb6e22a3e7e651d7cf0376cff48f20f5007a54147777865be7f5f6c38c50f4a";
 
@@ -109,6 +112,13 @@ export const ORDERBOOK_SOURCES: OrderbookSource[] = [
 export function getOrderbookSource(address: string): OrderbookSource | undefined {
   const a = address?.toLowerCase();
   return ORDERBOOK_SOURCES.find((s) => s.address.toLowerCase() === a);
+}
+
+/** Topic0 filters for Context / TakeOrderContext scans on an OrderBook. */
+export function getContextEventTopics(source: OrderbookSource): string[] {
+  return source.contextEventTopics?.length
+    ? source.contextEventTopics
+    : [source.contextEventTopic];
 }
 
 /** All distinct subgraph URLs across every era (primary first), for merged queries. */
@@ -394,6 +404,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "bafkreia2ebr2wyuga3d4t6yqwcbbs65hqtqyyycnuo24wj5zo4ikurly7m",
           },
           {
+            // 2026-03 (March 2026)
             orderHash:
               "0x937c50343ca0a9f7bf12bff5487e39b614f374346146cea1de925d9cdb829144",
             csvLink: `${PINATA_GATEWAY}/bafkreignjoj7po3ycuqyvwbgsxptv3oyu6y7efzqhxyvear2adenbeilmm`,
@@ -480,6 +491,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
             deployBlock: 47065027,
           },
           {
+            // 2025-11 (November 2025)
             orderHash:
               "0xca9ebf6d282d24a63d6892c0a888d3604b17ddfca69a035b2a6c06b769fc84f7",
             csvLink: `${PINATA_GATEWAY}/bafkreibygxsf3zvkhif6qr6psa2lz6jjny3grdivi7tj3bucastc2hnetq`,

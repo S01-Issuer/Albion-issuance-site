@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { writeContract, simulateContract, waitForTransactionReceipt, call, sendTransaction } from '@wagmi/core';
+	import { writeContract, simulateContract, waitForTransactionReceipt, sendTransaction } from '@wagmi/core';
 	import { derived, get } from 'svelte/store';
 	import { onMount, onDestroy } from 'svelte';
 	import { web3Modal, signerAddress, connected, wagmiConfig, chainId } from 'svelte-wagmi';
@@ -10,21 +10,30 @@
 	import { useCatalogService } from '$lib/services';
 	import { dateUtils } from '$lib/utils/dateHelpers';
 	import { arrayUtils } from '$lib/utils/arrayHelpers';
-	import { BASE_ORDERBOOK_SUBGRAPH_URL, getOrderbookSource } from '$lib/network';
+	import {
+		BASE_ORDERBOOK_SUBGRAPH_URL,
+		BASE_ORDERBOOK_V6_SUBGRAPH_URL,
+		getOrderbookSource
+	} from '$lib/network';
 	import { getTxUrl } from '$lib/utils/explorer';
 	import { useClaimsService } from '$lib/services';
 	import {
 		buildTakeOrdersConfig,
 		buildV6ClaimCalldata,
+		countClaimSignedContexts,
 		abiForVersion,
 		takeOrdersFnForVersion,
 		versionForOrderbook,
+		usesV6SdkClaimCalldata,
 		type OrderEntry as ClaimOrderEntry
 	} from '$lib/utils/claimExecution';
 	import type { Hex } from 'viem';
 	import { claimsCache } from '$lib/stores/claimsCache';
 	import type { ClaimsHoldingsGroup } from '$lib/services/ClaimsService';
-	import type { ClaimHistory } from '$lib/utils/claims';
+	import {
+		recordClaimTransactionHashes,
+		type ClaimHistory
+	} from '$lib/utils/claims';
 
 	const claimsService = useClaimsService();
 
@@ -76,10 +85,10 @@
 	let unsubscribeWallet: (() => void) | null = null;
 
 	function invalidateClaimData() {
-		// Force subsequent loads to re-fetch orderbook data after a claim
 		graphQLCache.invalidate(BASE_ORDERBOOK_SUBGRAPH_URL);
-		// Clear CSV cache so fresh data is fetched on next load
+		graphQLCache.invalidate(BASE_ORDERBOOK_V6_SUBGRAPH_URL);
 		claimsService.clearCache();
+		claimsCache.clear();
 	}
 
 	function resetClaimsState() {
@@ -107,7 +116,11 @@
 		});
 	}
 
-	async function loadClaimsData(addressOverride?: string, forceFresh = false) {
+	async function loadClaimsData(
+		addressOverride?: string,
+		forceFresh = false,
+		recentClaimTxHashes?: string[]
+	) {
 		pageLoading = true;
 		dataLoadError = false;
 		try {
@@ -140,7 +153,10 @@
 				return;
 			}
 
-			const result = await claimsService.loadClaimsForWallet(cacheKey);
+			const result = await claimsService.loadClaimsForWallet(cacheKey, {
+				refreshContextEvents: forceFresh,
+				claimTxHashes: recentClaimTxHashes
+			});
 			
 			// Store in cache
 			dataLoadError = !!result.hasCsvLoadError;
@@ -227,63 +243,75 @@
 		signedContext: readonly ClaimsHoldingsGroup['holdings'][number]['signedContext'][];
 	};
 
-	/**
-	 * Filter out already-claimed orders by simulating each one individually against
-	 * its OrderBook era (v4 takeOrders2 / v6 takeOrders3). Returns only claimable ones.
-	 */
-	async function filterClaimableOrders(orders: OrderEntry[], orderbookAddress: Hex): Promise<OrderEntry[]> {
-		const version = versionForOrderbook(orderbookAddress);
+	function isRpcRateLimitError(error: unknown): boolean {
+		const msg = String(
+			(error as { message?: string; shortMessage?: string })?.shortMessage ??
+				(error as Error)?.message ??
+				error
+		).toLowerCase();
+		return msg.includes('429') || msg.includes('rate limit') || msg.includes('-32016');
+	}
 
-		// v6 (new Raindex OB): build takeOrders3 calldata via the SDK and eth_call it.
-		if (version === 'v6') {
-			const results = await Promise.allSettled(
-				orders.map(orderEntry =>
-					call($wagmiConfig, {
-						to: orderbookAddress,
-						data: buildV6ClaimCalldata([orderEntry as ClaimOrderEntry])
-					})
-				)
-			);
-			return orders.filter((_, i) => results[i].status === 'fulfilled');
-		}
-
-		// v4 (legacy): ABI-encoded takeOrders2 simulation.
-		const abi = abiForVersion(version);
-		const fn = takeOrdersFnForVersion(version);
-		const results = await Promise.allSettled(
-			orders.map(orderEntry =>
-				simulateContract($wagmiConfig, {
-					abi,
-					address: orderbookAddress,
-					functionName: fn,
-					args: [buildTakeOrdersConfig([orderEntry as ClaimOrderEntry], version)]
-				})
-			)
+	function isUserRejectedError(error: unknown): boolean {
+		const msg = String(
+			(error as { message?: string; shortMessage?: string; details?: string })
+				?.shortMessage ??
+				(error as Error)?.message ??
+				(error as { details?: string })?.details ??
+				error
+		).toLowerCase();
+		return (
+			msg.includes('user rejected') ||
+			msg.includes('user denied') ||
+			msg.includes('rejected the request')
 		);
+	}
 
-		return orders.filter((_, i) => results[i].status === 'fulfilled');
+	function formatClaimError(error: unknown): string {
+		if (isUserRejectedError(error)) {
+			return 'Transaction was cancelled in your wallet.';
+		}
+		if (isRpcRateLimitError(error)) {
+			return 'Base RPC rate limit reached. Wait a moment and try again, or retry one claim at a time.';
+		}
+		return error instanceof Error ? error.message : 'Claim transaction failed';
 	}
 
 	/**
-	 * Filter + simulate + execute the claimable orders for ONE OrderBook, then wait for
-	 * confirmation and subgraph indexing. Returns true if a claim tx was sent.
+	 * Execute claim txs for ONE OrderBook. Holdings are already filtered off-chain;
+	 * we skip per-holding eth_call preflight (avoids 429s on public Base RPCs).
 	 */
 	async function executeClaimsForOrderbook(
 		orderbookAddress: Hex,
 		entries: OrderEntry[],
 		confirmLabel: 'all' | string
-	): Promise<boolean> {
-		const version = versionForOrderbook(orderbookAddress);
+	): Promise<Hex | null> {
+		if (entries.length === 0) return null;
 
-		const claimableOrders = await filterClaimableOrders(entries, orderbookAddress);
-		if (claimableOrders.length === 0) return false;
+		const version = versionForOrderbook(orderbookAddress);
+		const account = get(signerAddress) as Hex | undefined;
 
 		let hash: Hex;
-		if (version === 'v6') {
-			// SDK-built takeOrders3 calldata; validate via eth_call, then send raw.
-			const data = buildV6ClaimCalldata(claimableOrders as ClaimOrderEntry[]);
-			await call($wagmiConfig, { to: orderbookAddress, data });
-			hash = await sendTransaction($wagmiConfig, { to: orderbookAddress, data });
+		if (usesV6SdkClaimCalldata(orderbookAddress)) {
+			const claimEntries = entries as ClaimOrderEntry[];
+			const sendV6Claim = async (batch: ClaimOrderEntry[]) => {
+				const data = buildV6ClaimCalldata(batch);
+				return sendTransaction($wagmiConfig, {
+					account,
+					to: orderbookAddress,
+					data
+				});
+			};
+
+			const contextCount = countClaimSignedContexts(claimEntries);
+			if (contextCount !== claimEntries.length) {
+				console.warn(
+					`Claim batch: expected ${claimEntries.length} signed contexts, built ${contextCount}`
+				);
+			}
+
+			// One takeOrders tx: one TakeOrderConfigV4 per payout index, maximumIO = sum.
+			hash = await sendV6Claim(claimEntries);
 		} else {
 			const abi = abiForVersion(version);
 			const fn = takeOrdersFnForVersion(version);
@@ -291,11 +319,11 @@
 				abi,
 				address: orderbookAddress,
 				functionName: fn,
-				args: [buildTakeOrdersConfig(claimableOrders as ClaimOrderEntry[], version)]
+				args: [buildTakeOrdersConfig(entries as ClaimOrderEntry[], version)],
+				account
 			});
 			hash = await writeContract($wagmiConfig, request);
 		}
-
 		confirmingTarget = confirmLabel;
 		await waitForTransactionReceipt($wagmiConfig, { hash, confirmations: 2 });
 		try {
@@ -303,7 +331,7 @@
 		} catch {
 			// Transaction not yet indexed, continuing anyway
 		}
-		return true;
+		return hash;
 	}
 
 	/** Group holdings (across groups) by their OrderBook address into claim entries. */
@@ -341,28 +369,31 @@
 			const byOb = groupEntriesByOrderbook(holdings);
 			verifyingTarget = null;
 
-			let anySent = false;
+			const claimTxHashes: Hex[] = [];
 			for (const [orderbookAddress, entries] of byOb) {
-				const sent = await executeClaimsForOrderbook(orderbookAddress, entries, 'all');
-				anySent = anySent || sent;
+				const txHash = await executeClaimsForOrderbook(orderbookAddress, entries, 'all');
+				if (txHash) claimTxHashes.push(txHash);
 			}
 
-			if (!anySent) {
-				throw new Error('All claims have already been processed');
+			if (claimTxHashes.length === 0) {
+				throw new Error('No claimable holdings to submit.');
 			}
 
 			confirmingTarget = null;
 
 			claimSuccess = true;
-			// Invalidate caches and reload claims data after successful claim
+			recordClaimTransactionHashes(claimTxHashes);
 			invalidateClaimData();
 			const address = get(signerAddress) ?? '';
 			if (address) {
-				await loadClaimsData(address, true);
+				await loadClaimsData(address, true, claimTxHashes);
 			}
 
 		} catch (error) {
-			console.error('Claim all failed:', error);
+			if (!isUserRejectedError(error)) {
+				console.error('Claim all failed:', error);
+				alert(formatClaimError(error));
+			}
 			claimSuccess = false;
 		} finally {
 			claimingTarget = null;
@@ -384,28 +415,35 @@
 			const byOb = groupEntriesByOrderbook([group]);
 			verifyingTarget = null;
 
-			let anySent = false;
+			const claimTxHashes: Hex[] = [];
 			for (const [orderbookAddress, entries] of byOb) {
-				const sent = await executeClaimsForOrderbook(orderbookAddress, entries, group.tokenAddress);
-				anySent = anySent || sent;
+				const txHash = await executeClaimsForOrderbook(
+					orderbookAddress,
+					entries,
+					group.tokenAddress
+				);
+				if (txHash) claimTxHashes.push(txHash);
 			}
 
-			if (!anySent) {
-				throw new Error('All claims for this asset have already been processed');
+			if (claimTxHashes.length === 0) {
+				throw new Error('No claimable holdings for this asset.');
 			}
 
 			confirmingTarget = null;
 
 			claimSuccess = true;
-			// Invalidate caches and reload claims data after successful claim
+			recordClaimTransactionHashes(claimTxHashes);
 			invalidateClaimData();
 			const address = get(signerAddress) ?? '';
 			if (address) {
-				await loadClaimsData(address, true);
+				await loadClaimsData(address, true, claimTxHashes);
 			}
 
 		} catch (error) {
-			console.error('Claim single failed:', error);
+			if (!isUserRejectedError(error)) {
+				console.error('Claim single failed:', error);
+				alert(formatClaimError(error));
+			}
 			claimSuccess = false;
 		} finally {
 			claimingTarget = null;

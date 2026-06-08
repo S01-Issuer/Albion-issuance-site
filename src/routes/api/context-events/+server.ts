@@ -63,10 +63,25 @@ interface BlobCacheData {
 const HYPERSYNC_URL = "https://8453.hypersync.xyz/query";
 const MIN_REFETCH_INTERVAL_MS = 30_000;
 
-// Cache key is per OrderBook contract — v4 and v6 emit different Context events and
-// must not share a cache entry.
-function blobKey(contractAddress: string): string {
-  return `hypersync-context-events-${contractAddress.toLowerCase()}.json`;
+function normalizeEventTopics(
+  eventTopic: string | undefined,
+  eventTopics: string[] | undefined,
+): string[] {
+  const topics =
+    eventTopics?.filter((t) => typeof t === "string" && t.startsWith("0x")) ??
+    [];
+  if (topics.length > 0) return [...new Set(topics.map((t) => t.toLowerCase()))];
+  if (eventTopic?.startsWith("0x")) return [eventTopic.toLowerCase()];
+  return [];
+}
+
+// Cache key is per OrderBook + topic set — eras must not share a cache entry.
+function blobKey(contractAddress: string, eventTopics: string[]): string {
+  const topicKey = eventTopics
+    .map((t) => t.slice(2, 10))
+    .sort()
+    .join("-");
+  return `hypersync-context-events-${contractAddress.toLowerCase()}-${topicKey}.json`;
 }
 
 // In-memory layer (fast path, avoids Blob reads on warm instances), keyed per contract.
@@ -75,8 +90,11 @@ const memCache = new Map<string, BlobCacheData>();
 /**
  * Load cache: try in-memory first, then Vercel Blob
  */
-async function loadCache(contractAddress: string): Promise<BlobCacheData | null> {
-  const key = blobKey(contractAddress);
+async function loadCache(
+  contractAddress: string,
+  eventTopics: string[],
+): Promise<BlobCacheData | null> {
+  const key = blobKey(contractAddress, eventTopics);
   const mem = memCache.get(key);
   if (mem) return mem;
 
@@ -101,9 +119,10 @@ async function loadCache(contractAddress: string): Promise<BlobCacheData | null>
  */
 async function saveCache(
   contractAddress: string,
+  eventTopics: string[],
   data: BlobCacheData,
 ): Promise<void> {
-  const key = blobKey(contractAddress);
+  const key = blobKey(contractAddress, eventTopics);
   memCache.set(key, data);
 
   try {
@@ -120,7 +139,7 @@ async function saveCache(
 
 async function fetchFromHypersync(
   contractAddress: string,
-  eventTopic: string,
+  eventTopics: string[],
   fromBlock: number,
 ): Promise<{ logs: CachedLog[]; nextBlock: number }> {
   const allLogs: CachedLog[] = [];
@@ -133,7 +152,7 @@ async function fetchFromHypersync(
         logs: [
           {
             address: [contractAddress],
-            topics: [[eventTopic]],
+            topics: [eventTopics],
           },
         ],
         field_selection: {
@@ -202,11 +221,17 @@ async function fetchFromHypersync(
 export async function POST({ request }: RequestEvent) {
   try {
     const body = await request.json();
-    const { contractAddress, eventTopic, fromBlock } = body;
+    const { contractAddress, eventTopic, eventTopics, fromBlock, forceRefresh } =
+      body;
 
-    if (!contractAddress || !eventTopic || !fromBlock) {
+    const topics = normalizeEventTopics(eventTopic, eventTopics);
+
+    if (!contractAddress || topics.length === 0 || !fromBlock) {
       return json(
-        { error: "contractAddress, eventTopic, and fromBlock are required" },
+        {
+          error:
+            "contractAddress, eventTopic or eventTopics, and fromBlock are required",
+        },
         { status: 400 },
       );
     }
@@ -215,7 +240,9 @@ export async function POST({ request }: RequestEvent) {
     const now = Date.now();
 
     // Try to load existing cache (in-memory → Blob), keyed per OrderBook contract
-    const cached = await loadCache(contractAddress);
+    const cached = await loadCache(contractAddress, topics);
+    const shouldDelta =
+      forceRefresh === true || now - (cached?.updatedAt ?? 0) > MIN_REFETCH_INTERVAL_MS;
 
     // Lower bound of what the cache actually scanned. Older blobs predate
     // `lowWaterBlock`, so infer it from the lowest cached log; if there are no
@@ -235,11 +262,11 @@ export async function POST({ request }: RequestEvent) {
       cachedLow <= requestedFrom &&
       cached.highWaterBlock >= requestedFrom
     ) {
-      // check if we need a delta fetch forward
-      if (now - cached.updatedAt > MIN_REFETCH_INTERVAL_MS) {
+      // Delta fetch after a claim (forceRefresh) or on the refetch interval
+      if (shouldDelta) {
         const delta = await fetchFromHypersync(
           contractAddress,
-          eventTopic,
+          topics,
           cached.highWaterBlock + 1,
         );
 
@@ -252,8 +279,7 @@ export async function POST({ request }: RequestEvent) {
         );
         cached.updatedAt = now;
 
-        // Save updated cache (fire-and-forget to not block response)
-        saveCache(contractAddress, cached).catch(() => {});
+        saveCache(contractAddress, topics, cached).catch(() => {});
       }
 
       const filtered = cached.logs.filter(
@@ -275,7 +301,7 @@ export async function POST({ request }: RequestEvent) {
 
     const result = await fetchFromHypersync(
       contractAddress,
-      eventTopic,
+      topics,
       scanFrom,
     );
 
@@ -287,7 +313,7 @@ export async function POST({ request }: RequestEvent) {
     };
 
     // Save to both layers (fire-and-forget)
-    saveCache(contractAddress, newCache).catch(() => {});
+    saveCache(contractAddress, topics, newCache).catch(() => {});
 
     const filtered = result.logs.filter(
       (log) => Number(log.block_number) >= requestedFrom,

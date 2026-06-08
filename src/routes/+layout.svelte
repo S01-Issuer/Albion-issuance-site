@@ -10,14 +10,16 @@
 	import { injectAnalytics } from '@vercel/analytics/sveltekit';
 	import { injectSpeedInsights } from '@vercel/speed-insights/sveltekit';
 
+	// Prefer dedicated / third-party RPCs; mainnet.base.org is last (strict 429 limits).
 	const rpcList = [
-		"https://mainnet.base.org",
+		publicEnv.PUBLIC_BASE_RPC_URL,
 		"https://base-rpc.publicnode.com",
 		"https://base.llamarpc.com",
 		"https://base.meowrpc.com",
 		"https://base-mainnet.public.blastapi.io",
-		"https://gateway.tenderly.co/public/base"
-	];
+		"https://gateway.tenderly.co/public/base",
+		"https://mainnet.base.org"
+	].filter((url): url is string => typeof url === "string" && url.length > 0);
 
 	const baseNetworkFallbackRpcs = {
 		...base,
