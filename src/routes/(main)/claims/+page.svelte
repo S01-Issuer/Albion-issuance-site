@@ -285,14 +285,15 @@
 			throw new Error('Wallet not connected');
 		}
 		const result = await claimsService.loadClaimsForWallet(address, {
-			refreshContextEvents: true
+			refreshContextEvents: true,
+			withProofs: true
 		});
 		if (result.hasCsvLoadError) {
 			throw new Error('Unable to refresh claim data before submitting');
 		}
 		holdings = result.holdings;
 		unclaimedPayout = result.totals.unclaimed;
-		claimsCache.set(address, result);
+		// proof-carrying holdings must not enter the display cache
 		return result.holdings;
 	}
 

@@ -14,6 +14,7 @@ import {
 import {
   fetchAndVerifyCSV,
   getMerkleTree,
+  assertMerkleRootMatches,
   getLeaf,
   getProofForLeaf,
   decodeOrder,
@@ -59,10 +60,10 @@ interface HoldingRow {
 type SignedContext = SignedContextV1Type;
 
 interface HoldingWithProof extends HoldingRow {
-  order: ReturnType<typeof decodeOrder>;
-  signedContext: SignedContext;
-  orderBookAddress: string;
-  orderHash: string;
+  order?: ReturnType<typeof decodeOrder>;
+  signedContext?: SignedContext;
+  orderBookAddress?: string;
+  orderHash?: string;
 }
 
 interface PendingClaim {
@@ -150,6 +151,8 @@ export class ClaimsService {
       refreshContextEvents?: boolean;
       /** Recent claim tx hashes for receipt-log fallback (e.g. after a successful claim). */
       claimTxHashes?: string[];
+      /** Build merkle tree + proofs (only needed to EXECUTE a claim, set on pre-claim refresh). */
+      withProofs?: boolean;
     },
   ): Promise<ClaimsResult> {
     if (!ownerAddress) {
@@ -292,6 +295,7 @@ export class ClaimsService {
             ordersByHash,
             logsByOb,
             storedClaimTxHashes,
+            options?.withProofs ?? false,
           ),
     );
 
@@ -351,6 +355,7 @@ export class ClaimsService {
     ordersByHash: Map<string, OrderDetail>,
     logsByOb: Map<string, HypersyncResult[]>,
     claimTxHashes: string[] = [],
+    withProofs = false,
   ): Promise<PendingClaim | null> {
     if (!claim.csvLink) return null;
 
@@ -387,14 +392,23 @@ export class ClaimsService {
 
     const sharedLogs = logsByOb.get(orderBookAddress.toLowerCase()) ?? [];
 
-    const decodedOrder = decodeOrder(orderDetail.orderBytes, version);
-
     const orderStartBlock = orderDetail.addEvents?.[0]?.transaction?.blockNumber
       ? parseInt(orderDetail.addEvents[0].transaction.blockNumber)
       : undefined;
 
-    // Build merkle tree and process claims (using shared per-era Hypersync logs)
-    const merkleTree = getMerkleTree(csvData, encoding);
+    // Build the merkle tree ONLY when proofs are needed (pre-claim refresh).
+    // The display load skips it entirely — no tree, no proofs. When built, assert
+    // its root matches the order's committed root before any proof is generated.
+    let merkleTree: ReturnType<typeof getMerkleTree> | undefined;
+    if (withProofs) {
+      merkleTree = getMerkleTree(csvData, encoding);
+      assertMerkleRootMatches(
+        merkleTree.root,
+        claim.expectedMerkleRoot,
+        claim.orderHash,
+      );
+    }
+
     const sortedClaimsData = (await sortClaimsData(
       csvData,
       [], // claimed-state + history come from per-era Context logs (not trades)
@@ -428,32 +442,42 @@ export class ClaimsService {
       };
     }
 
-    // Generate proofs for holdings (active era)
-    const holdingsWithProofs: HoldingWithProof[] = sortedClaimsData.holdings
-      .map((h) => {
-        const amountWei = h.amountWei ?? h.unclaimedAmount;
-        const leaf = getLeaf(h.id, ownerAddress, amountWei, encoding);
-        const proofForLeaf = getProofForLeaf(merkleTree, leaf);
+    // Generate proofs for holdings (active era) ONLY when claiming. The display
+    // load returns display-only holdings (no order/signedContext/proofs).
+    let resultHoldings: HoldingWithProof[];
+    if (withProofs && merkleTree) {
+      const tree = merkleTree;
+      const decodedOrder = decodeOrder(orderDetail.orderBytes, version);
+      resultHoldings = sortedClaimsData.holdings
+        .map((h) => {
+          const amountWei = h.amountWei ?? h.unclaimedAmount;
+          const leaf = getLeaf(h.id, ownerAddress, amountWei, encoding);
+          const proofForLeaf = getProofForLeaf(tree, leaf);
 
-        const holdingSignedContext = buildClaimSignedContext(
-          h.id,
-          amountWei,
-          proofForLeaf.proof,
-          encoding,
-        );
+          const holdingSignedContext = buildClaimSignedContext(
+            h.id,
+            amountWei,
+            proofForLeaf.proof,
+            encoding,
+          );
 
-        return {
-          ...h,
-          order: decodedOrder,
-          signedContext: holdingSignedContext,
-          orderBookAddress,
-          orderHash: claim.orderHash,
-        };
-      })
-      .filter((h) => h.order && h.signedContext && h.orderBookAddress);
+          return {
+            ...h,
+            order: decodedOrder,
+            signedContext: holdingSignedContext,
+            orderBookAddress,
+            orderHash: claim.orderHash,
+          };
+        })
+        .filter((h) => h.order && h.signedContext && h.orderBookAddress);
+    } else {
+      // Display-only path: keep the display fields the holdings already carry
+      // (amounts/id/etc.); omit proof fields, which stay undefined.
+      resultHoldings = sortedClaimsData.holdings.map((h) => ({ ...h }));
+    }
 
     return {
-      holdings: holdingsWithProofs,
+      holdings: resultHoldings,
       claims: sortedClaimsData.claims,
       totalClaimed: claimedAmount,
       totalEarned: sortedClaimsData?.totalEarned
@@ -519,9 +543,11 @@ export class ClaimsService {
     }> = [];
     let orderBookAddress: Hex | undefined;
 
-    // Prepare all orders for claiming
+    // Prepare all orders for claiming. Holdings must carry proof fields (only the
+    // withProofs:true pre-claim refresh produces them); skip any that don't.
     for (const group of holdings) {
       for (const h of group.holdings) {
+        if (!h.order || !h.signedContext || !h.orderBookAddress) continue;
         orderBookAddress = (h.orderBookAddress as Hex) || orderBookAddress;
         allOrders.push({
           order: h.order,
