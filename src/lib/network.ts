@@ -397,6 +397,15 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0x81615a4f4dd57a5301c17790c22df7b54ea6cf1e5426d23896fd21f280107af7",
             expectedContentHash:
               "bafkreignjoj7po3ycuqyvwbgsxptv3oyu6y7efzqhxyvear2adenbeilmm",
+          },
+          {
+            orderHash:
+              "0x41e3ca1f4ea1e839539d9f942684904bbd84f534b8894e9031c2291d6375e825",
+            csvLink: `${PINATA_GATEWAY}/bafkreihr5ymyhpq7s357efvtq2af5cooocer4xzgekvwc32xhjfkyg754y`,
+            expectedMerkleRoot:
+              "0x4fe663800243f4ea4269334d7fbe93aa90ba3567415ee15d4c03706b000f73d5",
+            expectedContentHash:
+              "bafkreihr5ymyhpq7s357efvtq2af5cooocer4xzgekvwc32xhjfkyg754y",
           }
         ],
       },
@@ -510,6 +519,15 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0x5b498f2dc12d6fe182cc116d5505f466ccbae6fd5331a3e01fceb8dd810ef97c",
             expectedContentHash:
               "bafkreigq2ang5q4zm4b5zsztym3goq6uk47hrps3gimdiv7ntxxhiabq2y",
+          },
+          {
+            orderHash:
+              "0x7264deb4f653b059bd5cf9516bd26a0f6bf6f51fb3a6df3d89ea19907c318c53",
+            csvLink: `${PINATA_GATEWAY}/bafkreigdcpbpiaroroikdxhunl7dncouea4mhjhxiv5f2jdbbfzngysgvq`,
+            expectedMerkleRoot:
+              "0x96096dca44f395b5d7576273448f6af88f8640067203fe4267e43f5dda2ee43c",
+            expectedContentHash:
+              "bafkreigdcpbpiaroroikdxhunl7dncouea4mhjhxiv5f2jdbbfzngysgvq",
           }
         ],
       },
