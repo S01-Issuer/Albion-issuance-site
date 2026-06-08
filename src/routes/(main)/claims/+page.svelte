@@ -29,7 +29,7 @@
 	} from '$lib/utils/claimExecution';
 	import type { Hex } from 'viem';
 	import { claimsCache } from '$lib/stores/claimsCache';
-	import type { ClaimsHoldingsGroup } from '$lib/services/ClaimsService';
+	import type { ClaimsHoldingsGroup, ClaimsResult } from '$lib/services/ClaimsService';
 	import {
 		recordClaimTransactionHashes,
 		type ClaimHistory
@@ -41,6 +41,7 @@
 	let totalClaimed = 0;
 	let unclaimedPayout = 0;
 	let pageLoading = true;
+	let claimsRefreshing = false;
 	let claimingTarget: 'all' | string | null = null; // 'all' for claim all, token address for single, null for none
 	let confirmingTarget: 'all' | string | null = null;
 	let verifyingTarget: 'all' | string | null = null;
@@ -99,6 +100,14 @@
 		unclaimedPayout = 0;
 	}
 
+	function applyClaimsResult(result: ClaimsResult) {
+		claimHistory = result.claimHistory;
+		holdings = result.holdings;
+		totalEarned = result.totals.earned;
+		totalClaimed = result.totals.claimed;
+		unclaimedPayout = result.totals.unclaimed;
+	}
+
 	onMount(() => {
 		claimSuccess = false;
 		subscribeToWallet();
@@ -116,68 +125,104 @@
 		});
 	}
 
+	async function fetchClaimsData(
+		cacheKey: string,
+		forceFresh: boolean,
+		recentClaimTxHashes?: string[],
+		incremental = false
+	): Promise<ClaimsResult | null> {
+		const result = await claimsService.loadClaimsForWallet(cacheKey, {
+			refreshContextEvents: forceFresh,
+			claimTxHashes: recentClaimTxHashes,
+			onPartialResult: incremental
+				? (partial) => {
+						if (!partial.hasCsvLoadError) {
+							applyClaimsResult(partial);
+						}
+					}
+				: undefined
+		});
+
+		dataLoadError = !!result.hasCsvLoadError;
+		if (!dataLoadError) {
+			claimsCache.set(cacheKey, result);
+			applyClaimsResult(result);
+		}
+		return result;
+	}
+
 	async function loadClaimsData(
 		addressOverride?: string,
 		forceFresh = false,
 		recentClaimTxHashes?: string[]
 	) {
+		const cacheKey = addressOverride ?? $signerAddress ?? '';
+		if (!cacheKey) {
+			pageLoading = false;
+			return;
+		}
+
+		const cached = forceFresh ? null : claimsCache.get(cacheKey);
+		const hasCachedUi = !!cached && !cached.hasCsvLoadError;
+
+		if (hasCachedUi) {
+			dataLoadError = false;
+			applyClaimsResult(cached);
+			pageLoading = false;
+			void refreshClaimsInBackground(cacheKey, forceFresh, recentClaimTxHashes);
+			return;
+		}
+
 		pageLoading = true;
 		dataLoadError = false;
+		claimsRefreshing = false;
+
 		try {
-			// Build catalog to get token metadata for expected next payout
 			if (!catalogRef) {
 				const catalog = useCatalogService();
 				await catalog.build();
 				catalogRef = catalog;
 			}
 
-			const cacheKey = addressOverride ?? $signerAddress ?? '';
-			if (!cacheKey) {
+			if (cached?.hasCsvLoadError) {
+				resetClaimsState();
 				pageLoading = false;
-				return;
-			}
-			const cached = forceFresh ? null : claimsCache.get(cacheKey);
-			if (cached) {
-				dataLoadError = !!cached.hasCsvLoadError;
-				if (dataLoadError) {
-					resetClaimsState();
-					pageLoading = false;
-					return;
-				}
-				claimHistory = cached.claimHistory;
-				holdings = cached.holdings;
-				totalEarned = cached.totals.earned;
-				totalClaimed = cached.totals.claimed;
-				unclaimedPayout = cached.totals.unclaimed;
-				pageLoading = false;
+				dataLoadError = true;
 				return;
 			}
 
-			const result = await claimsService.loadClaimsForWallet(cacheKey, {
-				refreshContextEvents: forceFresh,
-				claimTxHashes: recentClaimTxHashes
-			});
-			
-			// Store in cache
-			dataLoadError = !!result.hasCsvLoadError;
-			if (!dataLoadError) {
-				claimsCache.set(cacheKey, result);
-			}
-			
-			if (!dataLoadError) {
-				claimHistory = result.claimHistory;
-				holdings = result.holdings;
-				totalEarned = result.totals.earned;
-				totalClaimed = result.totals.claimed;
-				unclaimedPayout = result.totals.unclaimed;
-			}
-			// On partial error (hasCsvLoadError), preserve any existing data rather than wiping
+			await fetchClaimsData(cacheKey, forceFresh, recentClaimTxHashes, true);
 		} catch (error) {
 			console.error('Error loading claims:', error);
-			// Preserve existing data on error - only set error flag, don't wipe state
 			dataLoadError = true;
 		} finally {
 			pageLoading = false;
+			claimsRefreshing = false;
+		}
+	}
+
+	async function refreshClaimsInBackground(
+		cacheKey: string,
+		forceFresh: boolean,
+		recentClaimTxHashes?: string[]
+	) {
+		if (!forceFresh && !claimsCache.isStale(cacheKey)) return;
+
+		claimsRefreshing = true;
+		try {
+			if (!catalogRef) {
+				const catalog = useCatalogService();
+				await catalog.build();
+				catalogRef = catalog;
+			}
+			await fetchClaimsData(cacheKey, forceFresh, recentClaimTxHashes, true);
+		} catch (error) {
+			console.error('Error refreshing claims:', error);
+			if (holdings.length === 0 && claimHistory.length === 0) {
+				dataLoadError = true;
+			}
+		} finally {
+			claimsRefreshing = false;
 		}
 	}
 
@@ -580,6 +625,11 @@
 		</ContentSection>
 	{:else}
 		<!-- Error banner when we have existing data but refresh failed -->
+		{#if claimsRefreshing}
+			<div class="bg-light-gray border-b border-black/10 px-4 py-2">
+				<p class="max-w-6xl mx-auto text-sm text-black/70">Refreshing claims data…</p>
+			</div>
+		{/if}
 		{#if dataLoadError}
 			<div class="bg-orange-100 border-b border-orange-300 px-4 py-3">
 				<div class="max-w-6xl mx-auto flex items-center justify-between gap-4">

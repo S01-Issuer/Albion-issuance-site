@@ -471,26 +471,196 @@ function percentageDisplay(value: number): string {
 		downloadCsvFile(filename, csvLines.join('\n'));
 	}
 
-	async function loadAllClaimsData(): Promise<ClaimsResult | null> {
+	function mapClaimsHoldingsFromResult(claimsResult: ClaimsResult): ClaimGroupSummary[] {
+		return claimsResult.holdings.map((group: ClaimsHoldingsGroup) => {
+			const normalizedTokenAddress = group.tokenAddress?.toLowerCase();
+			const groupClaims = claimsResult.claimHistory.filter(
+				(claim) => claim.tokenAddress?.toLowerCase() === normalizedTokenAddress,
+			);
+			const claimedAmount = groupClaims.reduce((sum, claim) => {
+				const amount = Number(claim.amount ?? 0);
+				const isCompleted = !claim.status || claim.status === 'completed';
+				return sum + (isCompleted && Number.isFinite(amount) ? amount : 0);
+			}, 0);
+			const unclaimedAmountRaw = Number(group.totalAmount ?? 0);
+			const unclaimedAmount = Number.isFinite(unclaimedAmountRaw) ? unclaimedAmountRaw : 0;
+			const totalEarned = claimedAmount + unclaimedAmount;
+			return {
+				fieldName: group.fieldName,
+				tokenAddress: group.tokenAddress,
+				unclaimedAmount,
+				claimedAmount,
+				totalEarned,
+				holdings: group.holdings,
+			};
+		});
+	}
+
+	function applyClaimsSnapshot(
+		claimsResult: ClaimsResult,
+		orderHashToMonth: Record<string, string> = {},
+	) {
+		claimHistory = claimsResult.claimHistory;
+		totalPayoutsEarned = claimsResult.totals.earned;
+		unclaimedPayout = claimsResult.totals.unclaimed;
+		claimsHoldings = mapClaimsHoldingsFromResult(claimsResult);
+		latestClaimsSnapshot = claimsResult;
+		claimsDataUnavailable = false;
+
+		if (claimHistory.length > 0 && Object.keys(orderHashToMonth).length > 0) {
+			claimHistory = claimHistory.map((claim) => {
+				if (claim.orderHash) {
+					const month = orderHashToMonth[claim.orderHash.toLowerCase()];
+					if (month) {
+						return { ...claim, date: `${month}-01T00:00:00.000Z` };
+					}
+				}
+				return claim;
+			});
+		}
+	}
+
+	function payoutFieldsForSft(
+		normalizedSftAddress: string,
+	): Pick<
+		PortfolioHolding,
+		| 'totalPayoutsEarned'
+		| 'unclaimedAmount'
+		| 'claimedAmount'
+		| 'lastPayoutAmount'
+		| 'lastPayoutDate'
+		| 'claimHistory'
+		| 'capitalReturned'
+		| 'unrecoveredCapital'
+	> {
+		const sftClaimsGroup = claimsHoldings.find(
+			(group) => group.tokenAddress?.toLowerCase() === normalizedSftAddress,
+		);
+
+		let claimedAmountForSft = 0;
+		let unclaimedAmountForSft = 0;
+		let totalEarnedForSft = 0;
+
+		if (sftClaimsGroup) {
+			claimedAmountForSft = Number(sftClaimsGroup.claimedAmount ?? 0);
+			unclaimedAmountForSft = Number(sftClaimsGroup.unclaimedAmount ?? 0);
+			const groupTotal = Number(sftClaimsGroup.totalEarned ?? 0);
+			totalEarnedForSft = groupTotal || claimedAmountForSft + unclaimedAmountForSft;
+		}
+
+		const sftClaims = claimHistory.filter(
+			(claim) => claim.tokenAddress?.toLowerCase() === normalizedSftAddress,
+		);
+		const totalEarnedFromHistory = sftClaims.reduce((sum, claim) => {
+			const amount = Number(claim?.amount ?? 0);
+			return sum + (Number.isFinite(amount) ? amount : 0);
+		}, 0);
+		const claimedFromHistory = sftClaims.reduce((sum, claim) => {
+			const amount = Number(claim?.amount ?? 0);
+			const isCompleted = !claim?.status || claim.status === 'completed';
+			return sum + (isCompleted && Number.isFinite(amount) ? amount : 0);
+		}, 0);
+
+		if (!claimedAmountForSft && claimedFromHistory) {
+			claimedAmountForSft = claimedFromHistory;
+		}
+		if (!totalEarnedForSft && totalEarnedFromHistory) {
+			totalEarnedForSft = totalEarnedFromHistory;
+		}
+		if (!unclaimedAmountForSft) {
+			const pending = totalEarnedForSft - claimedAmountForSft;
+			unclaimedAmountForSft = pending > 0 ? pending : 0;
+		}
+		totalEarnedForSft = Math.max(
+			totalEarnedForSft,
+			claimedAmountForSft + unclaimedAmountForSft,
+		);
+
+		const lastClaim = sftClaims
+			.filter((claim) => !claim.status || claim.status === 'completed')
+			.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+
+		return {
+			totalPayoutsEarned: totalEarnedForSft,
+			unclaimedAmount: unclaimedAmountForSft,
+			claimedAmount: claimedAmountForSft,
+			lastPayoutAmount: lastClaim ? Number(lastClaim.amount) : 0,
+			lastPayoutDate: lastClaim ? lastClaim.date : null,
+			claimHistory: sftClaims,
+			capitalReturned: 0,
+			unrecoveredCapital: 0,
+		};
+	}
+
+	function rebuildMonthlyPayoutsFromHistory() {
+		monthlyPayouts = [];
+		const monthlyPayoutTotals: Record<string, number> = {};
+
+		for (const claim of claimHistory) {
+			if (claim.date && claim.amount) {
+				const date = new Date(claim.date);
+				const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+				const amount = Number(claim.amount);
+				monthlyPayoutTotals[monthKey] =
+					(monthlyPayoutTotals[monthKey] ?? 0) + (Number.isFinite(amount) ? amount : 0);
+			}
+		}
+
+		for (const [monthKey, amount] of Object.entries(monthlyPayoutTotals)) {
+			monthlyPayouts.push({
+				month: monthKey,
+				amount,
+				assetName: 'Multiple Assets',
+				tokenSymbol: 'MIXED',
+				date: `${monthKey}-01`,
+				txHash: 'Multiple',
+				payoutPerToken: 0,
+			});
+		}
+
+		monthlyPayouts.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+	}
+
+	function patchHoldingsWithClaims() {
+		holdings = holdings.map((holding) => {
+			const payout = payoutFieldsForSft(holding.sftAddress.toLowerCase());
+			const capitalReturned =
+				holding.totalInvested > 0
+					? (payout.totalPayoutsEarned / holding.totalInvested) * 100
+					: 0;
+			const unrecoveredCapital = Math.max(
+				0,
+				holding.totalInvested - payout.totalPayoutsEarned,
+			);
+			return {
+				...holding,
+				...payout,
+				capitalReturned,
+				unrecoveredCapital,
+			};
+		});
+
+		rebuildMonthlyPayoutsFromHistory();
+
+		if (holdings.length > 0) {
+			totalPayoutsEarned = holdings.reduce(
+				(sum, holding) => sum + holding.totalPayoutsEarned,
+				0,
+			);
+			unclaimedPayout = holdings.reduce(
+				(sum, holding) => sum + holding.unclaimedAmount,
+				0,
+			);
+		}
+	}
+
+	async function fetchFreshClaimsData(): Promise<ClaimsResult | null> {
 		const claims = useClaimsService();
 		const address = $signerAddress || '';
-		claimsDataUnavailable = false;
 
 		if (!address) {
 			latestClaimsSnapshot = null;
 			return null;
-		}
-
-		const cached = claimsCache.get(address);
-		if (cached) {
-			logDev('Using cached claims data');
-			claimsDataUnavailable = !!cached.hasCsvLoadError;
-			if (claimsDataUnavailable) {
-				latestClaimsSnapshot = null;
-				return null;
-			}
-			latestClaimsSnapshot = cached;
-			return cached;
 		}
 
 		logDev('Loading fresh claims data');
@@ -552,45 +722,16 @@ function percentageDisplay(value: number): string {
 				field.sftTokens.map(token => token.address.toLowerCase() as Hex)
 			);
 
-			const [claimsResult, depositsResult, balancesResult] = await Promise.all([
-				loadAllClaimsData(),
+			const address = $signerAddress;
+			const cachedClaims = claimsCache.get(address);
+			const hasCachedClaims = !!cachedClaims && !cachedClaims.hasCsvLoadError;
+			let claimsResult: ClaimsResult | null = hasCachedClaims ? cachedClaims : null;
+
+			const freshClaimsPromise = fetchFreshClaimsData();
+			const [depositsResult, balancesResult] = await Promise.all([
 				sftRepository.getDepositsForOwner($signerAddress),
 				getTokenBalancesOnchain(allTokenAddresses, $signerAddress as Hex),
 			]);
-
-			// Apply claims result
-			if (claimsResult) {
-				claimHistory = claimsResult.claimHistory;
-				totalPayoutsEarned = claimsResult.totals.earned;
-				unclaimedPayout = claimsResult.totals.unclaimed;
-
-				// Map holdings to claimsHoldings format with derived totals
-				claimsHoldings = claimsResult.holdings.map((group: ClaimsHoldingsGroup) => {
-					// Filter claims by token address to ensure correct matching per token
-					const normalizedTokenAddress = group.tokenAddress?.toLowerCase();
-					const groupClaims = claimsResult.claimHistory.filter(
-						(claim) => claim.tokenAddress?.toLowerCase() === normalizedTokenAddress,
-					);
-					const claimedAmount = groupClaims.reduce((sum, claim) => {
-						const amount = Number(claim.amount ?? 0);
-						const isCompleted = !claim.status || claim.status === 'completed';
-						return sum + (isCompleted && Number.isFinite(amount) ? amount : 0);
-					}, 0);
-					const unclaimedAmountRaw = Number(group.totalAmount ?? 0);
-					const unclaimedAmount = Number.isFinite(unclaimedAmountRaw)
-						? unclaimedAmountRaw
-						: 0;
-					const totalEarned = claimedAmount + unclaimedAmount;
-					return {
-						fieldName: group.fieldName,
-						tokenAddress: group.tokenAddress,
-						unclaimedAmount,
-						claimedAmount,
-						totalEarned,
-						holdings: group.holdings,
-					};
-				});
-			}
 
 			// Load secondary purchases from localStorage
 			secondaryPurchases = loadSecondaryPurchases();
@@ -634,18 +775,8 @@ function percentageDisplay(value: number): string {
 				}
 			}
 
-			// Update claim history dates using the orderHash -> month lookup
-			if (claimHistory.length > 0 && Object.keys(orderHashToMonth).length > 0) {
-				claimHistory = claimHistory.map((claim) => {
-					if (claim.orderHash) {
-						const month = orderHashToMonth[claim.orderHash.toLowerCase()];
-						if (month) {
-							// Convert month (YYYY-MM) to ISO date (first of month)
-							return { ...claim, date: `${month}-01T00:00:00.000Z` };
-						}
-					}
-					return claim;
-				});
+			if (claimsResult) {
+				applyClaimsSnapshot(claimsResult, orderHashToMonth);
 			}
 
 			// Deduplicate SFTs by ID
@@ -937,34 +1068,7 @@ function percentageDisplay(value: number): string {
 			console.log('[Portfolio DEBUG] Final holdings count:', holdings.length);
 			console.log('[Portfolio DEBUG] Final holdings:', holdings.map(h => ({ id: h.id, name: h.name, tokens: h.tokensOwned })));
 
-			// Populate monthlyPayouts from claim history
-			monthlyPayouts = [];
-			const monthlyPayoutTotals: Record<string, number> = {};
-
-			// Process claim history to get monthly aggregations (all payouts - claimed + unclaimed)
-			// This shows when payouts were made available, not when they were claimed
-			for (const claim of claimHistory) {
-				if (claim.date && claim.amount) {
-					const date = new Date(claim.date);
-					const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-					const amount = Number(claim.amount);
-					monthlyPayoutTotals[monthKey] = (monthlyPayoutTotals[monthKey] ?? 0) + (Number.isFinite(amount) ? amount : 0);
-				}
-			}
-
-			for (const [monthKey, amount] of Object.entries(monthlyPayoutTotals)) {
-				monthlyPayouts.push({
-					month: monthKey,
-					amount: amount,
-					assetName: 'Multiple Assets',
-					tokenSymbol: 'MIXED',
-					date: `${monthKey}-01`,
-					txHash: 'Multiple',
-					payoutPerToken: 0
-				});
-			}
-
-			monthlyPayouts.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+			rebuildMonthlyPayoutsFromHistory();
 
 			// Populate tokenAllocations from holdings
 			const totalPortfolioValue = holdings.reduce(
@@ -999,6 +1103,12 @@ function percentageDisplay(value: number): string {
 			}
 
 			activeAssetsCount = holdings.length;
+
+			void freshClaimsPromise.then((freshClaims) => {
+				if (!freshClaims || freshClaims.hasCsvLoadError) return;
+				applyClaimsSnapshot(freshClaims, orderHashToMonth);
+				patchHoldingsWithClaims();
+			});
 
 		} catch (error) {
 			console.error('[Portfolio] Error loading data:', error);

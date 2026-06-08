@@ -158,6 +158,8 @@ export class ClaimsService {
       refreshContextEvents?: boolean;
       /** Recent claim tx hashes for receipt-log fallback (e.g. after a successful claim). */
       claimTxHashes?: string[];
+      /** Called after each claim batch completes so the UI can render incrementally. */
+      onPartialResult?: (partial: ClaimsResult) => void;
     },
   ): Promise<ClaimsResult> {
     if (!ownerAddress) {
@@ -242,6 +244,14 @@ export class ClaimsService {
       }
     }
 
+    const claimBlock = (claim: Claim): number => {
+      if (claim.deployBlock !== undefined) return claim.deployBlock;
+      const order = ordersByHash.get(claim.orderHash.toLowerCase());
+      const blockNum = order?.addEvents?.[0]?.transaction?.blockNumber;
+      return blockNum ? parseInt(blockNum) : 0;
+    };
+    claimMetadata.sort((a, b) => claimBlock(b.claim) - claimBlock(a.claim));
+
     const storedClaimTxHashes = [
       ...new Set([
         ...getStoredClaimTransactionHashes(),
@@ -303,36 +313,62 @@ export class ClaimsService {
           ),
     );
 
-    // Process claims in batches (6 at a time with 100ms delay between batches)
-    const results = await this.processBatch(claimProcessors, 6, 100);
+    const batchSize = 8;
+    const delayBetweenBatches = 50;
+    const emitPartial = () => {
+      options?.onPartialResult?.({
+        holdings: [...holdings],
+        claimHistory: [...claimHistory],
+        totals: {
+          earned: totalEarned,
+          claimed: totalClaimed,
+          unclaimed: totalUnclaimed,
+        },
+        hasCsvLoadError: csvLoadFailed,
+      });
+    };
 
-    for (let index = 0; index < results.length; index += 1) {
-      const result = results[index];
+    for (let i = 0; i < claimProcessors.length; i += batchSize) {
+      const batch = claimProcessors.slice(i, i + batchSize);
+      const batchResults = await Promise.allSettled(batch.map((fn) => fn()));
 
-      if (result.status === "rejected") {
-        console.error("Error processing claim:", result.reason);
-        csvLoadFailed = true;
-        continue;
+      for (let batchIndex = 0; batchIndex < batchResults.length; batchIndex += 1) {
+        const result = batchResults[batchIndex];
+        const metadataIndex = i + batchIndex;
+
+        if (result.status === "rejected") {
+          console.error("Error processing claim:", result.reason);
+          csvLoadFailed = true;
+          continue;
+        }
+
+        const claimData = result.value;
+        if (!claimData) continue;
+
+        const { fieldName, tokenAddress, symbol } = claimMetadata[metadataIndex];
+
+        claimHistory = [...claimHistory, ...claimData.claims];
+
+        this.mergeHoldingsGroup(
+          holdings,
+          fieldName,
+          tokenAddress,
+          symbol,
+          claimData.holdings,
+        );
+
+        totalClaimed += claimData.totalClaimed;
+        totalEarned += claimData.totalEarned;
+        totalUnclaimed += claimData.totalUnclaimed;
       }
 
-      const claimData = result.value;
-      if (!claimData) continue;
+      emitPartial();
 
-      const { fieldName, tokenAddress, symbol } = claimMetadata[index];
-
-      claimHistory = [...claimHistory, ...claimData.claims];
-
-      this.mergeHoldingsGroup(
-        holdings,
-        fieldName,
-        tokenAddress,
-        symbol,
-        claimData.holdings,
-      );
-
-      totalClaimed += claimData.totalClaimed;
-      totalEarned += claimData.totalEarned;
-      totalUnclaimed += claimData.totalUnclaimed;
+      if (i + batchSize < claimProcessors.length) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, delayBetweenBatches),
+        );
+      }
     }
 
     return {
