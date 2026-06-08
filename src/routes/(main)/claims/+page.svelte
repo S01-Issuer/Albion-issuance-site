@@ -308,6 +308,9 @@
 
 	/** Group holdings (across groups) by their OrderBook address into claim entries. */
 	function groupEntriesByOrderbook(groups: ClaimsHoldingsGroup[]): Map<Hex, OrderEntry[]> {
+		// Local, non-reactive Map built and returned by this pure helper — SvelteMap
+		// (reactive) is unnecessary here.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
 		const byOb = new Map<Hex, OrderEntry[]>();
 		for (const group of groups) {
 			for (const holding of group.holdings) {

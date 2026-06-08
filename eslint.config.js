@@ -45,6 +45,8 @@ export default [
       "vite.config.ts.timestamp-*",
       "dist/**",
       "docs/**",
+      // Local, untracked one-off dev/migration utilities — not shipped app code.
+      "scripts/**",
     ],
   },
   {

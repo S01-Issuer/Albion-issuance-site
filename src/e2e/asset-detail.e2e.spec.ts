@@ -70,6 +70,12 @@ vi.mock("@wagmi/core", () => ({
 // Mock tanstack query
 vi.mock("@tanstack/svelte-query", () => ({
   createQuery: vi.fn(() => ({ subscribe: () => () => {} })),
+  useQueryClient: vi.fn(() => ({
+    invalidateQueries: vi.fn(),
+    refetchQueries: vi.fn(),
+    setQueryData: vi.fn(),
+    getQueryData: vi.fn(),
+  })),
 }));
 
 // Mock onchain client to return test data - use wallet address since that's the authorizer in mock
