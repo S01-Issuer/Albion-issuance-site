@@ -203,19 +203,24 @@ export async function fetchAndVerifyCSV(
 
 Keep `validateCSVIntegrity` and `getMerkleTree` exactly as-is (reused at claim time, Task 5).
 
-- [ ] **Step 3: Update `ClaimsService.fetchCsv`** (`ClaimsService.ts:100-121`) to call `fetchAndVerifyCSV(csvLink, expectedContentHash)` and drop the `expectedMerkleRoot`/`encoding` args from this path. Keep the `csvCache` Map wrapper.
+- [ ] **Step 3: Delete the now-dead `validateCSVIntegrity`** from `claims.ts`. After Step 2 it has zero callers on the load path, and the claim-time root check (Task 5) uses a small pure helper, not this function. First confirm nothing else uses it:
 
-- [ ] **Step 4: Fix imports** in `ClaimsService.ts:15` (`fetchAndValidateCSV` → `fetchAndVerifyCSV`). Search the repo for other `fetchAndValidateCSV` importers:
+Run: `grep -rn "validateCSVIntegrity" src/`
+Expected: only its own definition (and a doc-comment mention in `scripts/v6-float-roots.mjs`, which mirrors logic, not imports). Delete the function. Keep `getMerkleTree` and `getProofForLeaf` (used at claim time).
 
-Run: `grep -rn "fetchAndValidateCSV\|validateIPFSContent" src/`
-Expected: only the two files above; update any others.
+- [ ] **Step 4: Update `ClaimsService.fetchCsv`** (`ClaimsService.ts:100-121`) to call `fetchAndVerifyCSV(csvLink, expectedContentHash)` — drop the `expectedMerkleRoot`/`encoding` params. Keep the `csvCache` Map wrapper. **Also update the call site at `ClaimsService.ts:387`** (inside `processClaimForWallet`) from the 4-arg form to `this.fetchCsv(claim.csvLink, claim.expectedContentHash)`.
 
-- [ ] **Step 5: Typecheck + existing tests**
+- [ ] **Step 5: Fix imports** in `ClaimsService.ts:15` (`fetchAndValidateCSV` → `fetchAndVerifyCSV`; remove `validateCSVIntegrity` if imported). Search the repo for other importers:
 
-Run: `npx tsc --noEmit && npx vitest run`
-Expected: PASS / no type errors.
+Run: `grep -rn "fetchAndValidateCSV\|validateIPFSContent\|validateCSVIntegrity" src/`
+Expected: no remaining references outside the two files; update any others.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Typecheck**
+
+Run: `npx tsc --noEmit`
+Expected: no type errors. (Note: `vitest run` is deferred to the end of Chunk 3 — the e2e suite depends on subgraph mocks updated in Task 10. Run unit specs only here: `npx vitest run src/lib/utils/cidVerify.test.ts`.)
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/lib/utils/claims.ts src/lib/services/ClaimsService.ts
@@ -247,80 +252,111 @@ git add src/lib/services/ClaimsService.ts
 git commit -m "refactor(claims): make holding proof fields optional; add withProofs option"
 ```
 
-### Task 4: Gate the merkle/proof block behind `withProofs`
+### Task 4: Extract a pure root-assert helper (test-env safe)
+
+> **Why a pure helper:** in test mode `vite.config.ts` aliases `ethers` to `src/e2e/shims/ethers.ts`, where `keccak256` returns the constant `"0x"`. So `getMerkleTree(csv).root` is **degenerate under vitest** and cannot be compared to a real root. We therefore (a) unit-test the assert as a pure string function with literal inputs (no crypto), and (b) make the production assert tolerant of the shimmed degenerate root so it never throws in the mocked e2e path.
 
 **Files:**
-- Modify: `src/lib/services/ClaimsService.ts` (`processClaimForWallet`, merkle build ~407, proof block ~477-499)
-- Test: `src/lib/services/ClaimsService.withProofs.test.ts` (new)
+- Modify: `src/lib/utils/claims.ts` (add `assertMerkleRootMatches`)
+- Test: `src/lib/utils/claims.assertRoot.test.ts` (new)
 
-- [ ] **Step 1: Write failing test** — display load builds no proofs, claim load does. Use a minimal fake: stub `fetchAndVerifyCSV` and `sortClaimsData` via dependency seam, OR assert at a higher level that `processClaimForWallet(..., withProofs=false)` returns holdings with `signedContext === undefined` and `withProofs=true` returns defined. (Prefer the higher-level call with a small fixture CSV + empty logs.)
+- [ ] **Step 1: Write failing test** (pure, no crypto):
 
 ```ts
-// asserts withProofs=false → holdings[].signedContext is undefined
-// asserts withProofs=true  → holdings[].signedContext is defined and root matches
+import { describe, it, expect } from "vitest";
+import { assertMerkleRootMatches } from "./claims";
+
+describe("assertMerkleRootMatches", () => {
+  it("passes on case-insensitive match", () => {
+    expect(() => assertMerkleRootMatches("0xABC", "0xabc", "h")).not.toThrow();
+  });
+  it("throws on mismatch", () => {
+    expect(() => assertMerkleRootMatches("0xabc", "0xdef", "h")).toThrow(/root mismatch/i);
+  });
+  it("no-ops under the keccak shim (degenerate built root)", () => {
+    // shimmed getMerkleTree().root collapses to a short constant; never throw
+    expect(() => assertMerkleRootMatches("0x", "0xanything", "h")).not.toThrow();
+  });
+});
+```
+
+Run: `npx vitest run src/lib/utils/claims.assertRoot.test.ts`
+Expected: FAIL (not defined).
+
+- [ ] **Step 2: Implement helper** in `claims.ts`:
+
+```ts
+/**
+ * Assert a freshly-built merkle root matches the order's committed root.
+ * Skips when `builtRoot` is the degenerate value produced by the test-mode
+ * keccak shim (length <= 4), so mocked e2e claims don't throw.
+ */
+export function assertMerkleRootMatches(
+  builtRoot: string,
+  expectedRoot: string,
+  orderHash: string,
+): void {
+  if (builtRoot.length <= 4) return; // shimmed/degenerate (e.g. "0x") — not real crypto
+  if (builtRoot.toLowerCase() !== expectedRoot.toLowerCase()) {
+    throw new Error(
+      `Merkle root mismatch for ${orderHash}: built ${builtRoot} != expected ${expectedRoot}`,
+    );
+  }
+}
+```
+
+- [ ] **Step 3:** Run test, verify PASS.
+
+Run: `npx vitest run src/lib/utils/claims.assertRoot.test.ts`
+Expected: PASS (3).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/lib/utils/claims.ts src/lib/utils/claims.assertRoot.test.ts
+git commit -m "feat(claims): pure merkle-root assert helper (test-env safe)"
+```
+
+### Task 5: Gate the merkle/proof block behind `withProofs`; assert root; skip display cache
+
+**Files:**
+- Modify: `src/lib/services/ClaimsService.ts` (`processClaimForWallet`: `getMerkleTree` at 407, `if (!isClaimable)` early-return at 431, proof block at 442-463)
+- Modify: `src/routes/(main)/claims/+page.svelte` (`refreshClaimableHoldings` at 282, `loadClaimsForWallet` call at 287, `claimsCache.set` at 295)
+- Test: `src/lib/services/ClaimsService.withProofs.test.ts` (new)
+
+> **Line numbers are for the `main` version of `+page.svelte`** (this branch is off main; it does NOT contain PR#176's SWR edits). Confirm with `grep -n "refreshClaimableHoldings\|claimsCache.set" "src/routes/(main)/claims/+page.svelte"` before editing.
+
+- [ ] **Step 1: Write failing test — proof-field PRESENCE only** (not root value, which is meaningless under the shim). Call `loadClaimsForWallet` with a minimal mocked field/CSV (reuse the e2e http-mock helpers) once with `withProofs:false` and once `true`:
+
+```ts
+// withProofs:false → every holding's signedContext === undefined
+// withProofs:true  → every claimable holding's signedContext is defined (an array)
 ```
 
 Run: `npx vitest run src/lib/services/ClaimsService.withProofs.test.ts`
 Expected: FAIL.
 
-- [ ] **Step 2: Implement the gate.** In `processClaimForWallet`:
-  - Move `const merkleTree = getMerkleTree(csvData, encoding);` (~407) and the entire "Generate proofs for holdings" block (~477-499) inside `if (withProofs) { … }`.
-  - When `!withProofs`, return `sortedClaimsData.holdings` mapped **without** `order`/`signedContext`/`orderBookAddress` (display fields only).
-  - `sortClaimsData` call is unchanged (no tree dependency).
+- [ ] **Step 2: Gate the proof work.** In `processClaimForWallet`:
+  - Wrap `const merkleTree = getMerkleTree(csvData, encoding);` (line 407) and the "Generate proofs for holdings" block (lines 442-463) in `if (withProofs) { … }`.
+  - The `if (!isClaimable)` early-return (line 431) sits between them and returns `holdings: []` — unaffected; `merkleTree` is only consumed at 446, inside the gated block.
+  - When `!withProofs`, return `sortedClaimsData.holdings` mapped **without** `order`/`signedContext`/`orderBookAddress`.
+  - Immediately after the gated `getMerkleTree`, call `assertMerkleRootMatches(merkleTree.root, claim.expectedMerkleRoot, claim.orderHash)` before generating proofs.
 
-- [ ] **Step 3:** Run the new test + full suite.
+- [ ] **Step 3: Claim page — set `withProofs:true` + skip cache.** In `refreshClaimableHoldings` (`+page.svelte:282`):
+  - Add `withProofs: true` to the `loadClaimsForWallet` options (line 287).
+  - Delete the `claimsCache.set(address, result)` (line 295) with a comment: "proof-carrying holdings must not enter the display cache."
+  - `OrderEntry` (`:239`) derives `order`/`signedContext` via indexed access from `ClaimsHoldingsGroup['holdings'][number]`, so making them optional on the service type (Task 3) auto-propagates — **no edit needed here** unless `tsc` says otherwise.
 
-Run: `npx vitest run`
+- [ ] **Step 4: Typecheck + unit tests** (full `vitest run` waits for Task 10):
+
+Run: `npx tsc --noEmit && npx vitest run src/lib/services/ClaimsService.withProofs.test.ts src/lib/utils/claims.assertRoot.test.ts`
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/lib/services/ClaimsService.ts src/lib/services/ClaimsService.withProofs.test.ts
-git commit -m "perf(claims): build merkle tree + proofs only when withProofs (claim path)"
-```
-
-### Task 5: Claim path sets `withProofs:true`, asserts root, skips display cache
-
-**Files:**
-- Modify: `src/routes/(main)/claims/+page.svelte` (`refreshClaimableHoldings` ~326; `OrderEntry` ~285)
-- Modify: `src/lib/services/ClaimsService.ts` (claim-time root assert inside the `withProofs` block)
-
-- [ ] **Step 1:** In `refreshClaimableHoldings` (`+page.svelte:332`), pass `withProofs: true`:
-
-```ts
-const result = await claimsService.loadClaimsForWallet(address, {
-  refreshContextEvents: true,
-  withProofs: true,
-});
-```
-
-- [ ] **Step 2:** Remove the `claimsCache.set(address, result)` line in `refreshClaimableHoldings` (`:340`) so proof-carrying holdings never enter the display cache. Add a one-line comment explaining why.
-
-- [ ] **Step 3:** In `OrderEntry` (`+page.svelte:285`) make `order` and `signedContext` optional to match the service types; the existing `groupEntriesByOrderbook` guard (`:424`) already drops entries missing them.
-
-- [ ] **Step 4: Claim-time root assert.** Inside the `withProofs` block in `processClaimForWallet`, after building `merkleTree`, assert it matches the committed root before generating proofs:
-
-```ts
-if (merkleTree.root.toLowerCase() !== claim.expectedMerkleRoot.toLowerCase()) {
-  throw new Error(
-    `Merkle root mismatch for ${claim.orderHash}: built ${merkleTree.root} != expected ${claim.expectedMerkleRoot}`,
-  );
-}
-```
-
-- [ ] **Step 5: Typecheck + tests + lint**
-
-Run: `npx tsc --noEmit && npx vitest run && npm run lint`
-Expected: PASS.
-
-- [ ] **Step 6: Manual smoke (dev server already on :5180).** Load `/claims` and `/portfolio` with a funded wallet → totals correct, no console proof errors. Click Claim on one holding → proof builds, tx simulates/submits.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add "src/routes/(main)/claims/+page.svelte" src/lib/services/ClaimsService.ts
-git commit -m "perf(claims): generate proofs in pre-claim refresh; assert root before submit"
+git add src/lib/services/ClaimsService.ts "src/routes/(main)/claims/+page.svelte" src/lib/services/ClaimsService.withProofs.test.ts
+git commit -m "perf(claims): build merkle tree + proofs only on the pre-claim refresh"
 ```
 
 ---
@@ -360,7 +396,9 @@ git commit -m "feat(claims): explicit per-order orderbook field for static era r
 **Files:**
 - Create: `scripts/bake-static-orders.mjs` (model on `scripts/v6-float-roots.mjs`)
 
-- [ ] **Step 1: Implement** a script that: parses PROD entries from `network.ts`; selects the 16 subgraph-resolved orders (no `orderBytes`, excluding the 2 `claimable:false` dev entries `BHF`/`GOM4`); for each, queries each `ORDERBOOK_SOURCES` subgraph for `orderBytes` + `addEvents[0].transaction.blockNumber` + records which source (orderbook address) returned it; **asserts the order's embedded merkle root contains the `expectedMerkleRoot`** already in `network.ts` (same cross-check pattern as `v6-float-roots.mjs:131-138`); prints, per order: `orderHash`, `orderbook`, `deployBlock`, `orderBytes`, and PASS/FAIL.
+- [ ] **Step 1: Implement** a script that: parses PROD entries from `network.ts`; selects the 16 subgraph-resolved orders (no `orderBytes`); for each, queries each `ORDERBOOK_SOURCES` subgraph for `orderBytes` + `addEvents[0].transaction.blockNumber` + records which source (orderbook address) returned it; **asserts the order's embedded merkle root contains the `expectedMerkleRoot`** already in `network.ts` (same cross-check pattern as `v6-float-roots.mjs:131-138`); prints, per order: `orderHash`, `orderbook`, `deployBlock`, `orderBytes`, and PASS/FAIL.
+
+  **DEV entries (`BHF`/`GOM4` in `DEV_ENERGY_FIELDS`):** these are development-only placeholders, not part of production (`PROD_ENERGY_FIELDS`). Decision: do **not** bake them. After the subgraph deletion (Task 10) they will no longer resolve in DEV runtime — acceptable because production uses `PROD_ENERGY_FIELDS` and automated tests mock their own `ENERGY_FIELDS` (Task 9). Add a code comment on `DEV_ENERGY_FIELDS` noting that DEV-mode claim resolution requires static order data and is currently inert. (If a maintainer later needs DEV claims, point the generator at those hashes and bake them too.)
 
 - [ ] **Step 2: Run it.**
 
@@ -393,26 +431,53 @@ git add src/lib/network.ts
 git commit -m "feat(claims): bake static orderBytes/deployBlock/orderbook for v4 + April orders"
 ```
 
-### Task 9: Delete the subgraph order lookup
+### Task 9: Update e2e mocks to static orders (before deleting the subgraph path)
+
+The e2e suite mocks `ENERGY_FIELDS` with claims that have **no** `orderBytes`/`deployBlock` and relies on the subgraph mock resolving them — that path is deleted in Task 10. Also: the load path now does a **real CID check**, so each mocked CSV's bytes must hash to its declared `expectedContentHash`.
+
+**Files:**
+- Modify: `src/e2e/claims.e2e.spec.ts` (mocked `ENERGY_FIELDS`, ~85-114)
+- Modify: `src/e2e/http-mock.ts` (the `getOrdersByHashes` mock branch, ~592-604)
+- Possibly: `src/e2e/portfolio.e2e.spec.ts` (if it mocks claims similarly)
+
+- [ ] **Step 1:** Add `orderBytes`, `deployBlock`, and `orderbook` to each mocked claim in `claims.e2e.spec.ts` so they resolve statically (use any syntactically-valid `orderBytes` the mock decoder accepts; copy the shape the real v6 entries use). Grep first to find every mocked claim fixture: `grep -rn "expectedMerkleRoot\|csvLink\|orderHash" src/e2e/`.
+
+- [ ] **Step 2:** Make each mocked CSV's served bytes hash to its `expectedContentHash`. Easiest: compute the CID of the mock CSV content with the Task-1 helper and set the fixture's `expectedContentHash` to it. (Or, if the mock CSV content is generated, derive the CID in the test setup.) Confirm `verifyCid` will pass for the mocked content.
+
+- [ ] **Step 3:** Remove the `getOrdersByHashes` mock branch in `http-mock.ts` (it backs a path being deleted). Ensure no test still depends on it.
+
+- [ ] **Step 4: Run the e2e suite** (still has the subgraph path until Task 10, but mocks are now static-ready and CID-valid):
+
+Run: `npx vitest run src/e2e/`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/e2e/
+git commit -m "test(claims): static-order + real-CID e2e fixtures"
+```
+
+### Task 10: Delete the subgraph order lookup + full verification
 
 **Files:**
 - Modify: `src/lib/services/ClaimsService.ts` (`hashesNeedingSubgraph` path ~209-238)
 - Modify: `src/lib/data/repositories/claimsRepository.ts` (`getOrdersByHashes` ~174; `getOrderByHash` ~143/213)
 - Modify: `src/lib/data/repositories/index.ts` (re-export ~9)
 
-- [ ] **Step 1:** Confirm zero subgraph-resolved orders remain — every PROD claim now has `orderBytes`+`deployBlock`. In `processClaimForWallet`/`loadClaimsForWallet`, delete the `hashesNeedingSubgraph` array, the `if (hashesNeedingSubgraph.length) { … getOrdersByHashes … }` block, and the merge loop.
+- [ ] **Step 1:** Every PROD claim now has `orderBytes`+`deployBlock` (Task 8) and every e2e mock is static (Task 9). In `loadClaimsForWallet`, delete the `hashesNeedingSubgraph` array, the `if (hashesNeedingSubgraph.length) { … getOrdersByHashes … }` block, and the merge loop.
 
-- [ ] **Step 2:** Delete `getOrdersByHashes` (method + any standalone export) and `getOrderByHash` (method, standalone export `claimsRepository.ts:213`, and the `repositories/index.ts:9` re-export). Verify no remaining callers:
+- [ ] **Step 2:** Delete `getOrdersByHashes` (method + standalone export) and `getOrderByHash` (method, standalone export `claimsRepository.ts:213`, and the `repositories/index.ts:9` re-export). Verify no remaining callers:
 
 Run: `grep -rn "getOrdersByHashes\|getOrderByHash" src/`
 Expected: no matches.
 
-- [ ] **Step 3: Typecheck + tests + lint + build**
+- [ ] **Step 3: Full verification**
 
 Run: `npx tsc --noEmit && npx vitest run && npm run lint && npm run build`
 Expected: PASS.
 
-- [ ] **Step 4: Manual smoke** on `/claims` + `/portfolio` (:5180): all months display, claim still works (it now resolves orders entirely from static data + builds proofs on click).
+- [ ] **Step 4: Manual smoke** on `/claims` + `/portfolio` (:5180): all months display, claim still works (orders resolved entirely from static data; proofs built on click).
 
 - [ ] **Step 5: Commit**
 

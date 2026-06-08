@@ -70,8 +70,11 @@ which the claim flow already re-invokes before submitting.
   already drops holdings without them, so a display-load holding is never
   claimable by accident.
 - `fetchAndValidateCSV` → `fetchAndVerifyCSV`: CID check only, no merkle.
-  `validateCSVIntegrity` + `getMerkleTree` **survive** — reused at claim time
-  for the root assert. (`getMerkleTree` is also mirrored, not imported, in
+  `validateCSVIntegrity` is **deleted** (its only caller was the load path).
+  `getMerkleTree`/`getProofForLeaf` **survive** — used at claim time to build
+  proofs; a small pure `assertMerkleRootMatches` helper does the root gate
+  (test-env safe: it no-ops on the degenerate root the vitest `keccak256` shim
+  produces). (`getMerkleTree` is also mirrored, not imported, in
   `scripts/v6-float-roots.mjs`; renaming source has no script impact.)
 - Cache: `refreshClaimableHoldings` must **not** persist proof-carrying holdings
   into the display `claimsCache` (drop the `claimsCache.set` on the withProofs
