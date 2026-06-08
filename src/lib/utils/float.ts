@@ -40,6 +40,17 @@ function hexOf(v: string | { value: string }): string {
   return typeof v === "string" ? v : v.value;
 }
 
+/** Encode a fixed-decimal integer as a normalized Float bytes32 hex (`0x` + 64 nibbles). */
+export function floatHexFromFixedDecimal(
+  value: bigint,
+  decimals: number,
+): `0x${string}` {
+  const f = unwrap(Float.fromFixedDecimalLossy(value, decimals));
+  const raw = hexOf(f.asHex());
+  const body = raw.startsWith("0x") ? raw.slice(2) : raw;
+  return `0x${body.padStart(64, "0").slice(-64)}` as `0x${string}`;
+}
+
 /**
  * Encode an 18-decimal integer amount (wei) as a v6 Float bytes32 hex string.
  * `Float.fromFixedDecimalLossy(x, 18)` interprets `x` as x / 1e18, i.e. the human

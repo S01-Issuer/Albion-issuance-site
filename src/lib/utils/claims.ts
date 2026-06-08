@@ -1,5 +1,9 @@
 import { ORDERBOOK_CONTRACT_ADDRESS, type OrderbookSource } from "$lib/network";
-import { floatWordFromAmount18, floatWordFromIndex } from "$lib/utils/float";
+import {
+  floatHexFromFixedDecimal,
+  floatWordFromAmount18,
+  floatWordFromIndex,
+} from "$lib/utils/float";
 import type { Trade } from "$lib/types/graphql";
 
 /** Amount encoding for an OrderBook era: v4 = raw 18-dec integers, v6 = Float bytes32. */
@@ -11,7 +15,6 @@ import { ethers, Signature } from "ethers";
 import { Wallet, keccak256, hashMessage, getBytes, concat, hexlify } from "ethers";
 import { decodeOrderBytes, normalizeOrderForSdk } from "$lib/utils/orderbook";
 import type { OrderV4 as OrderV4Type } from "@rainlanguage/orderbook";
-import { Float } from "@rainlanguage/orderbook";
 import { formatEther, parseEther } from "viem";
 
 // Create a singleton AbiCoder instance for reuse
@@ -455,6 +458,7 @@ export async function sortClaimsData(
   prefetchedLogs?: HypersyncResult[], // Pre-fetched logs to avoid duplicate Hypersync scans
   source?: OrderbookSource, // OrderBook era (drives amount encoding + self-fetch address/topic)
   extraClaimTxHashes?: string[], // Recent claim txs (receipt fallback when subgraph/Hypersync lag)
+  expectedMerkleRoot?: string, // v6: scope Context logs to this order's merkle root
 ): Promise<SortedClaimsResult> {
   const encoding: AmountEncoding = source?.amountEncoding ?? "int18";
   const orderbookAddress =
@@ -534,17 +538,29 @@ export async function sortClaimsData(
     (claim) => claim.address.toLowerCase() === normalizedOwnerAddress,
   );
 
-  // Filter decoded logs by owner address
-  const filteredDecodedLogs = decodedLogs.filter(
-    (log) =>
-      log?.address && log.address.toLowerCase() === normalizedOwnerAddress,
-  );
+  // Filter decoded logs by owner address. For v6, also scope to this order's
+  // merkle root (Context col[1]) so shared per-OrderBook logs do not mark
+  // another order's payout as claimed.
+  const normalizedMerkleRoot = expectedMerkleRoot?.toLowerCase();
+  const filteredDecodedLogs = decodedLogs.filter((log) => {
+    if (!log?.address || log.address.toLowerCase() !== normalizedOwnerAddress) {
+      return false;
+    }
+    // v6: col[1] is this order's merkle root — require it so shared OB logs
+    // cannot mark another monthly order's payout as claimed/unclaimed.
+    if (encoding === "float" && normalizedMerkleRoot) {
+      if (!log.orderHash) return false;
+      return log.orderHash.toLowerCase() === normalizedMerkleRoot;
+    }
+    return true;
+  });
 
   // Filter into claimed and unclaimed arrays
   const { claimedCsv, unclaimedCsv } = filterClaimedAndUnclaimed(
     filteredCsvClaims,
     filteredDecodedLogs,
     encoding,
+    expectedMerkleRoot,
   );
 
   // Calculate total amounts
@@ -861,17 +877,26 @@ function filterClaimedAndUnclaimed(
   csvClaims: CsvClaimRow[],
   decodedLogs: DecodedClaimLog[],
   encoding: AmountEncoding = "int18",
+  expectedMerkleRoot?: string,
 ): {
   claimedCsv: ClaimedCsvRow[];
   unclaimedCsv: UnclaimedCsvRow[];
 } {
   const claimedCsv: ClaimedCsvRow[] = [];
   const unclaimedCsv: UnclaimedCsvRow[] = [];
+  const normalizedMerkleRoot = expectedMerkleRoot?.toLowerCase();
 
   csvClaims.forEach((claim) => {
-    const decodedLog = decodedLogs.find((log) =>
-      decodedLogMatchesClaim(log, claim, encoding),
-    );
+    const decodedLog = decodedLogs.find((log) => {
+      if (
+        encoding === "float" &&
+        normalizedMerkleRoot &&
+        log.orderHash?.toLowerCase() !== normalizedMerkleRoot
+      ) {
+        return false;
+      }
+      return decodedLogMatchesClaim(log, claim, encoding);
+    });
 
     if (decodedLog) {
       claimedCsv.push({
@@ -995,31 +1020,21 @@ export function decodeOrder(
 }
 
 function floatContextSlotIndex(index: string | bigint): string {
-  const result = Float.fromFixedDecimalLossy(BigInt(index), 0);
-  if (!result.float) {
-    throw new Error(`Failed to encode index ${index} as Float`);
-  }
-  return BigInt(result.float.asHex()).toString();
+  return BigInt(floatHexFromFixedDecimal(BigInt(index), 0)).toString();
 }
 
 function floatContextSlotAmount(amountWei: string | bigint): string {
-  const result = Float.fromFixedDecimalLossy(BigInt(amountWei), 18);
-  if (!result.float) {
-    throw new Error(`Failed to encode amount ${amountWei} as Float`);
-  }
-  return BigInt(result.float.asHex()).toString();
+  return BigInt(floatHexFromFixedDecimal(BigInt(amountWei), 18)).toString();
 }
 
 function floatContextSlots(
   index: string | bigint,
   amountWei: string | bigint,
-): [string, string] {
-  const indexResult = Float.fromFixedDecimalLossy(BigInt(index), 0);
-  const amountResult = Float.fromFixedDecimalLossy(BigInt(amountWei), 18);
-  if (!indexResult.float || !amountResult.float) {
-    throw new Error("Failed to encode claim context as Float");
-  }
-  return [indexResult.float.asHex(), amountResult.float.asHex()];
+): [`0x${string}`, `0x${string}`] {
+  return [
+    floatHexFromFixedDecimal(BigInt(index), 0),
+    floatHexFromFixedDecimal(BigInt(amountWei), 18),
+  ];
 }
 
 /** Format uint256 / Float words as bytes32 hex for takeOrders3 signedContext. */

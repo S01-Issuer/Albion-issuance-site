@@ -63,6 +63,7 @@ interface HoldingWithProof extends HoldingRow {
   order: ReturnType<typeof decodeOrder>;
   signedContext: SignedContext;
   orderBookAddress: string;
+  orderHash: string;
 }
 
 interface PendingClaim {
@@ -369,7 +370,10 @@ export class ClaimsService {
     // Resolved BEFORE the CSV fetch: the merkle-root integrity check is era-
     // specific, so the CSV must be validated with this order's amount encoding
     // (v6 against the Float root, v4 against the int18 root).
-    const orderBookAddress = orderDetail.orderbook.id;
+    const orderBookAddress = orderDetail.orderbook?.id?.toLowerCase();
+    if (!orderBookAddress) {
+      return null;
+    }
     const source: OrderbookSource | undefined =
       getOrderbookSource(orderBookAddress);
     const encoding = source?.amountEncoding ?? "int18";
@@ -403,7 +407,7 @@ export class ClaimsService {
     const merkleTree = getMerkleTree(csvData, encoding);
     const sortedClaimsData = (await sortClaimsData(
       csvData,
-      [], // trades no longer used — claimed-state + history come from sharedLogs
+      [], // claimed-state + history come from per-era Context logs (not trades)
       ownerAddress,
       fieldName,
       undefined,
@@ -414,6 +418,7 @@ export class ClaimsService {
       sharedLogs,
       source,
       claimTxHashes,
+      claim.expectedMerkleRoot,
     )) as SortedClaimsData;
 
     const claimedAmount = sortedClaimsData?.totalClaimedAmount
@@ -434,8 +439,8 @@ export class ClaimsService {
     }
 
     // Generate proofs for holdings (active era)
-    const holdingsWithProofs: HoldingWithProof[] =
-      sortedClaimsData.holdings.map((h) => {
+    const holdingsWithProofs: HoldingWithProof[] = sortedClaimsData.holdings
+      .map((h) => {
         const amountWei = h.amountWei ?? h.unclaimedAmount;
         const leaf = getLeaf(h.id, ownerAddress, amountWei, encoding);
         const proofForLeaf = getProofForLeaf(merkleTree, leaf);
@@ -452,8 +457,10 @@ export class ClaimsService {
           order: decodedOrder,
           signedContext: holdingSignedContext,
           orderBookAddress,
+          orderHash: claim.orderHash,
         };
-      });
+      })
+      .filter((h) => h.order && h.signedContext && h.orderBookAddress);
 
     return {
       holdings: holdingsWithProofs,

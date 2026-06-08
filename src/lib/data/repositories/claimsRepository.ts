@@ -121,7 +121,6 @@ export class ClaimsRepository {
           }
         ) {
           order { orderBytes orderHash }
-          orderbook { id }
           tradeEvent {
             transaction { id blockNumber timestamp }
             sender

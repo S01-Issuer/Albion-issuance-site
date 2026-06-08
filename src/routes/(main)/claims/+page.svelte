@@ -241,6 +241,7 @@
 		inputIOIndex: number;
 		outputIOIndex: number;
 		signedContext: readonly ClaimsHoldingsGroup['holdings'][number]['signedContext'][];
+		orderHash?: string;
 	};
 
 	function isRpcRateLimitError(error: unknown): boolean {
@@ -277,6 +278,24 @@
 		return error instanceof Error ? error.message : 'Claim transaction failed';
 	}
 
+	/** Reload claimable holdings from chain/subgraph immediately before submitting. */
+	async function refreshClaimableHoldings(): Promise<ClaimsHoldingsGroup[]> {
+		const address = get(signerAddress) ?? '';
+		if (!address) {
+			throw new Error('Wallet not connected');
+		}
+		const result = await claimsService.loadClaimsForWallet(address, {
+			refreshContextEvents: true
+		});
+		if (result.hasCsvLoadError) {
+			throw new Error('Unable to refresh claim data before submitting');
+		}
+		holdings = result.holdings;
+		unclaimedPayout = result.totals.unclaimed;
+		claimsCache.set(address, result);
+		return result.holdings;
+	}
+
 	/**
 	 * Execute claim txs for ONE OrderBook. Holdings are already filtered off-chain;
 	 * we skip per-holding eth_call preflight (avoids 429s on public Base RPCs).
@@ -310,6 +329,20 @@
 				);
 			}
 
+			const batchSummary = entries.map((e, i) => {
+				const orderHash = e.orderHash?.slice(0, 10) ?? '?';
+				return `#${i} ${orderHash}`;
+			});
+			console.info(
+				`Claim batch: ${claimEntries.length} entries → takeOrders3 on ${orderbookAddress}`,
+				batchSummary.join(', ')
+			);
+			if (claimEntries.length === 1) {
+				console.warn(
+					`Claim batch: only 1 entry for ${orderbookAddress}; expected more if UI shows multiple claims`
+				);
+			}
+
 			// One takeOrders tx: one TakeOrderConfigV4 per payout index, maximumIO = sum.
 			hash = await sendV6Claim(claimEntries);
 		} else {
@@ -324,6 +357,7 @@
 			});
 			hash = await writeContract($wagmiConfig, request);
 		}
+
 		confirmingTarget = confirmLabel;
 		await waitForTransactionReceipt($wagmiConfig, { hash, confirmations: 2 });
 		try {
@@ -342,12 +376,20 @@
 		const byOb = new Map<Hex, OrderEntry[]>();
 		for (const group of groups) {
 			for (const holding of group.holdings) {
-				const ob = holding.orderBookAddress as Hex;
+				if (!holding.order || !holding.signedContext || !holding.orderBookAddress) {
+					console.warn(
+						'Skipping holding missing claim fields',
+						holding.orderHash ?? holding.id
+					);
+					continue;
+				}
+				const ob = holding.orderBookAddress.toLowerCase() as Hex;
 				const entry: OrderEntry = {
 					order: holding.order,
 					inputIOIndex: 0,
 					outputIOIndex: 0,
-					signedContext: [holding.signedContext]
+					signedContext: [holding.signedContext],
+					orderHash: holding.orderHash
 				};
 				const list = byOb.get(ob) ?? [];
 				list.push(entry);
@@ -361,12 +403,21 @@
 		claimingTarget = 'all';
 		verifyingTarget = 'all';
 		try {
-			if (holdings.length === 0 || holdings[0].holdings.length === 0) {
+			const freshHoldings = await refreshClaimableHoldings();
+			const hasClaimable = freshHoldings.some((g) => g.holdings.length > 0);
+			if (!hasClaimable) {
 				throw new Error('No holdings available to claim');
 			}
 
+			console.info(
+				'Claim prep:',
+				freshHoldings
+					.map((g) => `${g.symbol}: ${g.holdings.length} holding(s), $${g.totalAmount.toFixed(2)}`)
+					.join('; ')
+			);
+
 			// Holdings can span multiple OrderBooks (eras); claim each with one tx.
-			const byOb = groupEntriesByOrderbook(holdings);
+			const byOb = groupEntriesByOrderbook(freshHoldings);
 			verifyingTarget = null;
 
 			const claimTxHashes: Hex[] = [];
@@ -406,13 +457,24 @@
 		claimingTarget = group.tokenAddress;
 		verifyingTarget = group.tokenAddress;
 		try {
-			if (!group.holdings.length) {
+			const freshHoldings = await refreshClaimableHoldings();
+			const claimGroup = freshHoldings.find(
+				(g) => g.tokenAddress.toLowerCase() === group.tokenAddress.toLowerCase()
+			);
+
+			if (!claimGroup?.holdings.length) {
 				throw new Error('No orders available for this claim group');
+			}
+
+			if (claimGroup.holdings.length !== group.holdings.length) {
+				console.warn(
+					`Claim group ${group.symbol}: UI showed ${group.holdings.length} holdings, refreshed ${claimGroup.holdings.length}`
+				);
 			}
 
 			// A token's holdings normally sit on one OrderBook, but group by address
 			// defensively so a mixed-era group still claims correctly.
-			const byOb = groupEntriesByOrderbook([group]);
+			const byOb = groupEntriesByOrderbook([claimGroup]);
 			verifyingTarget = null;
 
 			const claimTxHashes: Hex[] = [];
@@ -420,7 +482,7 @@
 				const txHash = await executeClaimsForOrderbook(
 					orderbookAddress,
 					entries,
-					group.tokenAddress
+					claimGroup.tokenAddress
 				);
 				if (txHash) claimTxHashes.push(txHash);
 			}

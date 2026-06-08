@@ -170,9 +170,6 @@ export function buildTakeOrdersConfig(
   };
 }
 
-/**
- * Build raw `takeOrders3` calldata (TakeOrdersConfigV5) for v6 claim orders.
- */
 /** Count signed contexts across all holdings (for diagnostics). */
 export function countClaimSignedContexts(orders: OrderEntry[]): number {
   return orders.reduce((n, o) => n + o.signedContext.length, 0);
