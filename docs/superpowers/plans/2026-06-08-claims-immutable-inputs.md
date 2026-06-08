@@ -254,7 +254,7 @@ git commit -m "refactor(claims): make holding proof fields optional; add withPro
 
 ### Task 4: Extract a pure root-assert helper (test-env safe)
 
-> **Why a pure helper:** in test mode `vite.config.ts` aliases `ethers` to `src/e2e/shims/ethers.ts`, where `keccak256` returns the constant `"0x"`. So `getMerkleTree(csv).root` is **degenerate under vitest** and cannot be compared to a real root. We therefore (a) unit-test the assert as a pure string function with literal inputs (no crypto), and (b) make the production assert tolerant of the shimmed degenerate root so it never throws in the mocked e2e path.
+> **Why a pure helper + zero-root skip:** `getMerkleTree` uses `SimpleMerkleTree.of()` from `@openzeppelin/merkle-tree`, which is **not** shimmed in tests (only `ethers.keccak256` is), so the built root is always a full 66-char value — even under vitest it won't equal a mocked root. The codebase's existing convention (the soon-deleted zero-root escape hatch in `fetchAndValidateCSV`) treats an **all-zeros `expectedMerkleRoot` as "not independently verifiable — skip."** We reuse that: the assert skips when `expectedRoot` is all-zeros. Real on-chain roots are never zero, so production claims are always checked; e2e fixtures keep their zero root and are skipped. The helper is also unit-tested as a pure string function (no crypto).
 
 **Files:**
 - Modify: `src/lib/utils/claims.ts` (add `assertMerkleRootMatches`)
@@ -273,9 +273,11 @@ describe("assertMerkleRootMatches", () => {
   it("throws on mismatch", () => {
     expect(() => assertMerkleRootMatches("0xabc", "0xdef", "h")).toThrow(/root mismatch/i);
   });
-  it("no-ops under the keccak shim (degenerate built root)", () => {
-    // shimmed getMerkleTree().root collapses to a short constant; never throw
-    expect(() => assertMerkleRootMatches("0x", "0xanything", "h")).not.toThrow();
+  it("skips the all-zeros sentinel (unverifiable fixture/order)", () => {
+    // a real 66-char built root vs the zero sentinel must NOT throw
+    expect(() =>
+      assertMerkleRootMatches("0xed428e1c" + "0".repeat(56) + "abcd", "0x" + "0".repeat(64), "h"),
+    ).not.toThrow();
   });
 });
 ```
@@ -288,15 +290,17 @@ Expected: FAIL (not defined).
 ```ts
 /**
  * Assert a freshly-built merkle root matches the order's committed root.
- * Skips when `builtRoot` is the degenerate value produced by the test-mode
- * keccak shim (length <= 4), so mocked e2e claims don't throw.
+ * Skips when `expectedRoot` is the all-zeros sentinel — the codebase's
+ * convention for roots that are not independently verifiable (mirrors the
+ * legacy zero-root escape hatch, and used by e2e fixtures). Real on-chain
+ * roots are never zero, so production claims are always checked.
  */
 export function assertMerkleRootMatches(
   builtRoot: string,
   expectedRoot: string,
   orderHash: string,
 ): void {
-  if (builtRoot.length <= 4) return; // shimmed/degenerate (e.g. "0x") — not real crypto
+  if (/^0x0+$/i.test(expectedRoot)) return; // unverifiable sentinel — skip
   if (builtRoot.toLowerCase() !== expectedRoot.toLowerCase()) {
     throw new Error(
       `Merkle root mismatch for ${orderHash}: built ${builtRoot} != expected ${expectedRoot}`,
@@ -442,7 +446,7 @@ The e2e suite mocks `ENERGY_FIELDS` with claims that have **no** `orderBytes`/`d
 
 - [ ] **Step 1:** Add `orderBytes`, `deployBlock`, and `orderbook` to each mocked claim in `claims.e2e.spec.ts` so they resolve statically (use any syntactically-valid `orderBytes` the mock decoder accepts; copy the shape the real v6 entries use). Grep first to find every mocked claim fixture: `grep -rn "expectedMerkleRoot\|csvLink\|orderHash" src/e2e/`.
 
-- [ ] **Step 2:** Make each mocked CSV's served bytes hash to its `expectedContentHash`. Easiest: compute the CID of the mock CSV content with the Task-1 helper and set the fixture's `expectedContentHash` to it. (Or, if the mock CSV content is generated, derive the CID in the test setup.) Confirm `verifyCid` will pass for the mocked content.
+- [ ] **Step 2:** Make each mocked CSV's served bytes hash to its `expectedContentHash`. Easiest: compute the CID of the mock CSV content with the Task-1 helper and set the fixture's `expectedContentHash` to it. (Or, if the mock CSV content is generated, derive the CID in the test setup.) Confirm `verifyCid` will pass for the mocked content. **Leave each fixture's `expectedMerkleRoot` as the all-zeros sentinel** — `assertMerkleRootMatches` (Task 4) skips zero roots, so the `withProofs:true` proof path runs without a real-root match. (The CID check is the real integrity gate; the root is unverifiable for synthetic fixtures.)
 
 - [ ] **Step 3:** Remove the `getOrdersByHashes` mock branch in `http-mock.ts` (it backs a path being deleted). Ensure no test still depends on it.
 

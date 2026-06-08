@@ -13,7 +13,7 @@ client-side and re-done every load:
 
 1. Each CSV's merkle tree is rebuilt **twice** — once to re-validate the root,
    once to pre-generate claim proofs (`ClaimsService.processClaimForWallet`,
-   `claims.ts:287` + `ClaimsService.ts:443`). ~30 CSVs × O(n log n) × 2.
+   `claims.ts:287` + `ClaimsService.ts:407`). ~30 CSVs × O(n log n) × 2.
 2. v4 orders resolve their `orderBytes` + deploy block from the orderbook
    subgraph on every load (`getOrdersByHashes`) — a network round-trip and a
    live dependency, for data that is immutable.
@@ -56,7 +56,7 @@ which the claim flow already re-invokes before submitting.
   (CID-verified, no merkle), `sortClaimsData` for claimed/unclaimed. Build no
   tree, no proofs. Holdings carry display fields only.
 - **Claim refresh** (`withProofs:true`): `refreshClaimableHoldings`
-  (`claims/+page.svelte:326`) already calls `loadClaimsForWallet` immediately
+  (`claims/+page.svelte:282`) already calls `loadClaimsForWallet` immediately
   before every claim and reads proofs off the returned holdings. Pass
   `withProofs:true` there. Only then build the tree **once** per order,
   generate proof + `signedContext`, and **assert computed root ===
@@ -64,17 +64,18 @@ which the claim flow already re-invokes before submitting.
   claim path itself (`executeClaimsForOrderbook`) is unchanged.
 - Types: `signedContext`, `order`, `orderBookAddress`, `orderHash` become
   **optional** on `HoldingWithProof` / `ClaimsHoldingsGroup`; on the page-level
-  `OrderEntry` (`claims/+page.svelte:285`) make `order` + `signedContext`
+  `OrderEntry` (`claims/+page.svelte:239`) make `order` + `signedContext`
   optional (`orderHash` already is). Populated only on the `withProofs`
-  path; the `groupEntriesByOrderbook` "missing claim fields" guard (`:424`)
+  path; the `groupEntriesByOrderbook` "missing claim fields" guard (`:379`)
   already drops holdings without them, so a display-load holding is never
   claimable by accident.
 - `fetchAndValidateCSV` → `fetchAndVerifyCSV`: CID check only, no merkle.
   `validateCSVIntegrity` is **deleted** (its only caller was the load path).
   `getMerkleTree`/`getProofForLeaf` **survive** — used at claim time to build
   proofs; a small pure `assertMerkleRootMatches` helper does the root gate
-  (test-env safe: it no-ops on the degenerate root the vitest `keccak256` shim
-  produces). (`getMerkleTree` is also mirrored, not imported, in
+  (skips the all-zeros sentinel root used by synthetic e2e fixtures — real
+  on-chain roots are never zero, so prod is always checked). (`getMerkleTree`
+  is also mirrored, not imported, in
   `scripts/v6-float-roots.mjs`; renaming source has no script impact.)
 - Cache: `refreshClaimableHoldings` must **not** persist proof-carrying holdings
   into the display `claimsCache` (drop the `claimsCache.set` on the withProofs
@@ -89,7 +90,7 @@ belt-and-suspenders.
 
 ### C. Static v4 + April orders (drop the subgraph)
 The static-resolution path currently **infers v6 from `orderBytes` presence**
-and hardcodes `orderbook.id = ORDERBOOK_V6` (`ClaimsService.ts:211-216`).
+and hardcodes `orderbook.id = ORDERBOOK_V6` (`ClaimsService.ts:208-224`).
 Downstream era logic (amount encoding int18-v4 vs float-v6, `claimable`) keys off
 `orderbook.id`. So baking `orderBytes` into a v4 entry without more would
 misclassify it as v6 and break both root verification and claimed-state
@@ -140,7 +141,7 @@ proofs → unaffected by the `withProofs` split.
   regression that the **display** load (`withProofs:false`) calls no
   `getMerkleTree`; regression that `groupEntriesByOrderbook` still receives
   populated `order`/`signedContext` after a `withProofs:true` refresh (the
-  "skip missing fields" warn at `:424` is the silent-failure mode this change is
+  "skip missing fields" warn at `:379` is the silent-failure mode this change is
   most likely to trip); e2e claim on preview before merge.
 
 ## PR description (dev-facing, short)
