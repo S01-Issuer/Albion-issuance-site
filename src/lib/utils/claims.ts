@@ -198,11 +198,16 @@ async function fetchWithRetry(url: string): Promise<Response> {
  * Validates CSV data integrity against on-chain merkle root
  * @param csvData - Raw CSV data to validate
  * @param expectedMerkleRoot - Expected merkle root from on-chain data
+ * @param encoding - Amount encoding for the order's era. The merkle root is era-
+ *   specific: v4 orders hash raw 18-dec amounts ("int18"), v6 orders hash the
+ *   Float-encoded amount ("float"). `expectedMerkleRoot` therefore equals the
+ *   order's actual on-chain root only when computed with the matching encoding.
  * @returns Validation result with details
  */
 export function validateCSVIntegrity(
   csvData: CsvClaimRow[],
   expectedMerkleRoot: string,
+  encoding: AmountEncoding = "int18",
 ): CSVValidationResult {
   try {
     // Validate CSV structure
@@ -240,8 +245,8 @@ export function validateCSVIntegrity(
       }
     }
 
-    // Generate merkle tree from CSV data
-    const tree = getMerkleTree(csvData);
+    // Generate merkle tree from CSV data (era-specific amount encoding)
+    const tree = getMerkleTree(csvData, encoding);
     const calculatedMerkleRoot = tree.root;
 
     // Compare with expected merkle root
@@ -320,12 +325,14 @@ export async function validateIPFSContent(
  * @param csvLink - IPFS link to CSV file
  * @param expectedMerkleRoot - Expected merkle root for validation
  * @param expectedContentHash - Expected IPFS content hash
+ * @param encoding - Amount encoding for the order's era (int18 v4 / float v6)
  * @returns Validated CSV data or null if validation fails
  */
 export async function fetchAndValidateCSV(
   csvLink: string,
   expectedMerkleRoot: string,
   expectedContentHash: string,
+  encoding: AmountEncoding = "int18",
 ): Promise<CsvClaimRow[] | null> {
   try {
     // Step 1: Validate IPFS content integrity
@@ -347,7 +354,11 @@ export async function fetchAndValidateCSV(
     const csvData = parseCSVData(csvText);
 
     // Step 3: Validate CSV data integrity
-    const csvValidation = validateCSVIntegrity(csvData, expectedMerkleRoot);
+    const csvValidation = validateCSVIntegrity(
+      csvData,
+      expectedMerkleRoot,
+      encoding,
+    );
     if (!csvValidation.isValid) {
       if (
         expectedMerkleRoot ===

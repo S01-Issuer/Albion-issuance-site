@@ -20,6 +20,7 @@ import {
   sortClaimsData,
   fetchLogs,
   HYPERSYNC_URL,
+  type AmountEncoding,
   type ClaimHistory,
   type CsvClaimRow,
   type HypersyncResult,
@@ -100,6 +101,7 @@ export class ClaimsService {
     csvLink: string,
     expectedMerkleRoot: string,
     expectedContentHash: string,
+    encoding: AmountEncoding = "int18",
   ): Promise<CsvClaimRow[] | null> {
     const cached = this.csvCache.get(csvLink);
     if (cached) {
@@ -110,6 +112,7 @@ export class ClaimsService {
       csvLink,
       expectedMerkleRoot,
       expectedContentHash,
+      encoding,
     );
     if (data) {
       this.csvCache.set(csvLink, data);
@@ -334,6 +337,17 @@ export class ClaimsService {
     const orderDetail = ordersByHash.get(claim.orderHash.toLowerCase());
     if (!orderDetail) return null;
 
+    // Determine which OrderBook era this order lives on (v4 int18 / v6 Float).
+    // Resolved BEFORE the CSV fetch: the merkle-root integrity check is era-
+    // specific, so the CSV must be validated with this order's amount encoding
+    // (v6 against the Float root, v4 against the int18 root).
+    const orderBookAddress = orderDetail.orderbook.id;
+    const source: OrderbookSource | undefined =
+      getOrderbookSource(orderBookAddress);
+    const encoding = source?.amountEncoding ?? "int18";
+    const version = source?.version ?? "v4";
+    const isClaimable = source?.claimable ?? true;
+
     // Fetch CSV data (order is already available). Claimed-state AND history both
     // come from the shared per-OB Context scan (sharedLogs) below, so no per-order
     // `trades` subgraph query is needed — the Context log carries its own txHash +
@@ -342,19 +356,13 @@ export class ClaimsService {
       claim.csvLink,
       claim.expectedMerkleRoot,
       claim.expectedContentHash,
+      encoding,
     );
 
     if (!csvData) {
       throw new ClaimsCsvLoadError();
     }
 
-    const orderBookAddress = orderDetail.orderbook.id;
-    // Determine which OrderBook era this order lives on (v4 int18 / v6 Float).
-    const source: OrderbookSource | undefined =
-      getOrderbookSource(orderBookAddress);
-    const encoding = source?.amountEncoding ?? "int18";
-    const version = source?.version ?? "v4";
-    const isClaimable = source?.claimable ?? true;
     const sharedLogs = logsByOb.get(orderBookAddress.toLowerCase()) ?? [];
 
     const decodedOrder = decodeOrder(orderDetail.orderBytes, version);

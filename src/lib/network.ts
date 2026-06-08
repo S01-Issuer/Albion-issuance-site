@@ -218,7 +218,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0x15fba827674bf560223757b0b4a498d5f0c7f4c094aacfce56f2a36a8446b72b",
             csvLink: `${PINATA_GATEWAY}/bafkreifz5rjmpszq4l7774r34um2xv42fj2tb3eggdppqe6pu4vdhy34na`,
             expectedMerkleRoot:
-              "0xc67f3b3b51db9234e4ab62e9a5f93644a09c41d0cfb94e339604cf0a1b22e421",
+              "0x9db977f553e0bb3e272d5781792ca503a3b2c03d4396c74d1ee853b74ac91fc8",
             expectedContentHash:
               "bafkreifz5rjmpszq4l7774r34um2xv42fj2tb3eggdppqe6pu4vdhy34na",
             orderBytes:
@@ -230,7 +230,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0x6338eee0369663da61ee3b3021e1b10a3b3c811a2c94fb54f7c85545e1d14382",
             csvLink: `${PINATA_GATEWAY}/bafkreifiqfqmprpqsptsgulta3mbi7znj37hslij4a5vzbdrvh22bs5bde`,
             expectedMerkleRoot:
-              "0x75c1d2f9e48c0f3992c63a081d557ece2c7a47100f35ead2a0a03666a976b918",
+              "0xc73148a8cbc20703a1b94300b38a460135804617eec2ffbe6a6fa12064dd30b5",
             expectedContentHash:
               "bafkreifiqfqmprpqsptsgulta3mbi7znj37hslij4a5vzbdrvh22bs5bde",
             orderBytes:
@@ -242,7 +242,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0xadf4ea83b7e66eef36c9fef1efeeac7cd3bb7cbf5e42ca10e6076e3010c7c6ec",
             csvLink: `${PINATA_GATEWAY}/bafkreifqmqdrgk5ja3ztq7nucdbn4nny5aizy2ssajrzbmbo2qukpaqcv4`,
             expectedMerkleRoot:
-              "0x7dd70bc5b4ffc72955239b440fa6db8c240e0e17322ba5f376eaadb6c05034b6",
+              "0xdb05d63206a268eb740b16adb579a58c98381415e6b4dd2dbaa06e99f8931c2f",
             expectedContentHash:
               "bafkreifqmqdrgk5ja3ztq7nucdbn4nny5aizy2ssajrzbmbo2qukpaqcv4",
             orderBytes:
@@ -254,7 +254,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0x8fdb6bc1abf92d8660eb503d91f845c48607a045409145870b16204a08272228",
             csvLink: `${PINATA_GATEWAY}/bafkreih47ka6dalromjjndwvbq5gubtvlxqh3tgk7whil64xbhsrltwvsu`,
             expectedMerkleRoot:
-              "0x11263b5436ecf3a13551f847e4236952348845bf7d5643a2eba51077b8fabd5d",
+              "0x7a03b325b7df557e00ae17ea8d98063ecd1adac268ea94c42557420299589287",
             expectedContentHash:
               "bafkreih47ka6dalromjjndwvbq5gubtvlxqh3tgk7whil64xbhsrltwvsu",
             orderBytes:
@@ -266,7 +266,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0xd10be7269000c81ddbaa4821f6148035aa66f12f8f1abdfeb1b8d4610371c9ac",
             csvLink: `${PINATA_GATEWAY}/bafkreickvfeocvpm6vlvbfujeqd5de35taqpxrw7yqfy7vd2zffrotvft4`,
             expectedMerkleRoot:
-              "0x4b1fdfe82b22ea3365a9176f626720a2aeb0939bb566f3da3fb8bcff48a59e68",
+              "0x0e0ecdda19ab9fa0c43b742c59b383ba31cc25d7860cd7699129f266653fffda",
             expectedContentHash:
               "bafkreickvfeocvpm6vlvbfujeqd5de35taqpxrw7yqfy7vd2zffrotvft4",
             orderBytes:
@@ -278,7 +278,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0xf1c6dbb3d1558926f5059610e991216cdac21b26b23102f2e789b8846cdf0bba",
             csvLink: `${PINATA_GATEWAY}/bafkreihwlwi3phxrzt5npo5csxqyeekp5mw62hwlhexxupchlhu3nycpve`,
             expectedMerkleRoot:
-              "0xc122f67f8b735801959a34ff7f67312ee7fae4472f542e87e1602e36b3395994",
+              "0xb295c3916fb8ac313633c71aadddd1a7237f6623af0e14fdf098be877d28bca2",
             expectedContentHash:
               "bafkreihwlwi3phxrzt5npo5csxqyeekp5mw62hwlhexxupchlhu3nycpve",
             orderBytes:
@@ -290,7 +290,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0xfa6bfaaeca644380baed2b34d995c16e9778f59f62f236ecc1faad03a044ac86",
             csvLink: `${PINATA_GATEWAY}/bafkreico327kbcmx4ttbqeorllcabvjzsskosojy4otv35744bblag5dxy`,
             expectedMerkleRoot:
-              "0x63fcd0d38eb476615c126c8912a37e49d42c545dbcfadc48e570f7f225dd87bf",
+              "0x6cc99da4ffc0fd7f2c9843a613bab051a4db97e45f4c8136efeebb5e5fd6c106",
             expectedContentHash:
               "bafkreico327kbcmx4ttbqeorllcabvjzsskosojy4otv35744bblag5dxy",
             orderBytes:
@@ -302,7 +302,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0x1628f48805c2b5d4a350c95d9feec26fa95c8625bea9d9178339e1a80b7ade36",
             csvLink: `${PINATA_GATEWAY}/bafkreiehhfetwynwpo2o62oq4xqifsnzecmctppycg5577k7ho3y7puxo4`,
             expectedMerkleRoot:
-              "0x7cd3ee3c19e9c793761e507610b1d7350dc46010ce71c5605eb16683404eb4e4",
+              "0x850f7b125540bdd314ab8fb48c5adb8c498b568a3d2bbc8d76e3fdefc8171c1a",
             expectedContentHash:
               "bafkreiehhfetwynwpo2o62oq4xqifsnzecmctppycg5577k7ho3y7puxo4",
             orderBytes:
@@ -314,7 +314,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0xb0ffec19ad519822fbae8d55992ea56368b5942cbae9b55dc879b6c2272066b8",
             csvLink: `${PINATA_GATEWAY}/bafkreidxv46f7hio6mwer2fpktrh3pdpsiiohx4f6vo4yo2ghko6xpzn7q`,
             expectedMerkleRoot:
-              "0x36d69d9cd213c87bb427b79532d33e60704080b8725b78cdfeb45e3af359d843",
+              "0xc8fb48ae078c61e79e73888d5ec3ff1bc2bb5d9b5c28309f486057f51d2f8b9c",
             expectedContentHash:
               "bafkreidxv46f7hio6mwer2fpktrh3pdpsiiohx4f6vo4yo2ghko6xpzn7q",
             orderBytes:
@@ -407,7 +407,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0x41e3ca1f4ea1e839539d9f942684904bbd84f534b8894e9031c2291d6375e825",
             csvLink: `${PINATA_GATEWAY}/bafkreihr5ymyhpq7s357efvtq2af5cooocer4xzgekvwc32xhjfkyg754y`,
             expectedMerkleRoot:
-              "0xda6ca6453b9d355697ad9797f76d9e42665bafa6ae6c24befe17ff32ef89b4ad",
+              "0x4fe663800243f4ea4269334d7fbe93aa90ba3567415ee15d4c03706b000f73d5",
             expectedContentHash:
               "bafkreihr5ymyhpq7s357efvtq2af5cooocer4xzgekvwc32xhjfkyg754y",
           }
@@ -424,7 +424,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0x8abf786461b3f134fef3fcfb0b46a819f15f1283aeebba96ef21e88e4652473d",
             csvLink: `${PINATA_GATEWAY}/bafkreiarn7ml4pfnhoz7l5y2vorija7ht2seo3zqlinxdvpt44pbwi7xee`,
             expectedMerkleRoot:
-              "0xc6f48f19e5ab8e9249620fa26cd85fba65a88d17c681b5c0f82f4ff0f0abf6ad",
+              "0x849fcb2584c3709d6bd3df03774564abb0a4200fed9303a48f476175c3083dcc",
             expectedContentHash:
               "bafkreiarn7ml4pfnhoz7l5y2vorija7ht2seo3zqlinxdvpt44pbwi7xee",
             orderBytes:
@@ -436,7 +436,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0x9de30c7fc4bcf87bbff4c7f4fba0a93bce264ec9b41347b237250dd8f5d7c31f",
             csvLink: `${PINATA_GATEWAY}/bafkreie44yucx6z7mkezff4j3wjjrbgzitcfztbqvzll4juok2itbif7xy`,
             expectedMerkleRoot:
-              "0x43eecf030f4ac417fbc9e4b745098a492991e47e3d39f1000ea0163e0f9650a8",
+              "0xada3d01f8ad34ee689bec5a43f842d4e8fad11369993661d52b14cd32c36b884",
             expectedContentHash:
               "bafkreie44yucx6z7mkezff4j3wjjrbgzitcfztbqvzll4juok2itbif7xy",
             orderBytes:
@@ -448,7 +448,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0xe18d862fcf15f39df42932a1acd9063b0b8f1906674b780a20a8839b11885fd8",
             csvLink: `${PINATA_GATEWAY}/bafkreiczyzm4eixl6tkpsngovynb7uhgbv43jd23r535cpciazsfmgf3n4`,
             expectedMerkleRoot:
-              "0x507fb81141164d81cb689bee603fcd8f316e7904b83240a2e9472005086a7452",
+              "0xaa26dcd04133b78247c5718d606128e89dff465a1eac8abde4a067ad99c0ff1f",
             expectedContentHash:
               "bafkreiczyzm4eixl6tkpsngovynb7uhgbv43jd23r535cpciazsfmgf3n4",
             orderBytes:
@@ -460,7 +460,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0xda9e5049957dde14b4d5295ac57f1034af576eb48119b8a9440bd9aa3e0a0c29",
             csvLink: `${PINATA_GATEWAY}/bafkreibugukssy4ciplcqwqm437mmwymxoqy2lhqtplx4nng7xgdoabuwy`,
             expectedMerkleRoot:
-              "0x44b3026055d8a1b60efe379e73c32f56dfe61112af6c59a8105c2d5f0cddb710",
+              "0x407c6550981067fe18202355f151bf50bc90ae91c19161234f3b667482fa9098",
             expectedContentHash:
               "bafkreibugukssy4ciplcqwqm437mmwymxoqy2lhqtplx4nng7xgdoabuwy",
             orderBytes:
@@ -472,7 +472,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0x63c751aaedffdc792836f43db0b359bae1e5e92820224e2712f1f9e4e2131eab",
             csvLink: `${PINATA_GATEWAY}/bafkreieoyi67ruqst5sh2zei62523jwecbavn7qsq3g6zluy727tg7r264`,
             expectedMerkleRoot:
-              "0x30c34887a4a17d8cb89b83d088b1503d2712592b29f14d3a222a42c759ab657f",
+              "0x708c1d61a6a38530837c2a066057c363116538a8c798ac28428eeeab59d2cad8",
             expectedContentHash:
               "bafkreieoyi67ruqst5sh2zei62523jwecbavn7qsq3g6zluy727tg7r264",
             orderBytes:
@@ -529,7 +529,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
               "0x7264deb4f653b059bd5cf9516bd26a0f6bf6f51fb3a6df3d89ea19907c318c53",
             csvLink: `${PINATA_GATEWAY}/bafkreigdcpbpiaroroikdxhunl7dncouea4mhjhxiv5f2jdbbfzngysgvq`,
             expectedMerkleRoot:
-              "0x04514b757cd1b139f25e6db32e0512c5075ff75153363e62b5c00e328afdfa2a",
+              "0x96096dca44f395b5d7576273448f6af88f8640067203fe4267e43f5dda2ee43c",
             expectedContentHash:
               "bafkreigdcpbpiaroroikdxhunl7dncouea4mhjhxiv5f2jdbbfzngysgvq",
           }
