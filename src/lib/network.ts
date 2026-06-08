@@ -146,6 +146,12 @@ export type Claim = {
    */
   orderBytes?: string;
   deployBlock?: number;
+  /**
+   * OB contract address this order lives on. Explicit era marker for static
+   * orders; resolution falls back to the v6 OrderBook when absent (existing
+   * v6 entries don't set it).
+   */
+  orderbook?: string;
 };
 
 export type SftToken = {

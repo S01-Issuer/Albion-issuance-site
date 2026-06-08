@@ -205,8 +205,9 @@ export class ClaimsService {
         ordersByHash.set(claim.orderHash.toLowerCase(), {
           orderBytes: claim.orderBytes,
           orderHash: claim.orderHash,
-          // Static orders are v6-era (only v6 deploys capture orderBytes).
-          orderbook: { id: ORDERBOOK_V6_CONTRACT_ADDRESS.toLowerCase() },
+          // Static orders use the explicit claim.orderbook field (era marker);
+          // fallback to v6 when absent (existing v6 entries don't set it).
+          orderbook: { id: (claim.orderbook ?? ORDERBOOK_V6_CONTRACT_ADDRESS).toLowerCase() },
           addEvents: [
             {
               transaction: {
