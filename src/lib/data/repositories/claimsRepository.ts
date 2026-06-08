@@ -21,15 +21,30 @@ async function queryAllOrderbookSubgraphs<T>(
   pick: (data: T | null) => unknown[],
 ): Promise<unknown[]> {
   const results = await Promise.allSettled(
-    ORDERBOOK_SOURCES.map(({ subgraphUrls }) => {
+    ORDERBOOK_SOURCES.map(async ({ address, subgraphUrls }) => {
       const [primaryUrl, ...fallbackUrls] = subgraphUrls;
-      if (!primaryUrl) return Promise.resolve(null);
-      return executeGraphQL<T>(primaryUrl, query, variables, { fallbackUrls });
+      if (!primaryUrl) return { address, items: [] as unknown[] };
+      const data = await executeGraphQL<T>(primaryUrl, query, variables, {
+        fallbackUrls,
+      });
+      return { address, items: pick(data) };
     }),
   );
   const merged: unknown[] = [];
   for (const r of results) {
-    if (r.status === "fulfilled") merged.push(...pick(r.value as T | null));
+    if (r.status !== "fulfilled") continue;
+    const { address, items } = r.value;
+    // Each era's subgraph indexes a single OrderBook, so tag every result with its
+    // source address. This lets the shared query omit an `orderbook { id }` field —
+    // the v6 raindex subgraph is single-OB and doesn't expose one — while callers
+    // (ClaimsService) still resolve each order's era from `orderbook.id`.
+    for (const it of items) {
+      merged.push(
+        it && typeof it === "object" && !("orderbook" in it)
+          ? { ...(it as Record<string, unknown>), orderbook: { id: address } }
+          : it,
+      );
+    }
   }
   return merged;
 }
@@ -110,7 +125,6 @@ export class ClaimsRepository {
         orders(where: { orderHash: $orderHash }) {
           orderBytes
           orderHash
-          orderbook { id }
           addEvents {
             transaction {
               id
@@ -145,7 +159,6 @@ export class ClaimsRepository {
         orders(where: { orderHash_in: $orderHashes }) {
           orderBytes
           orderHash
-          orderbook { id }
           addEvents {
             transaction {
               id

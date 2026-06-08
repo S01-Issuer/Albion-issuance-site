@@ -5,9 +5,13 @@ export const BASE_SFT_SUBGRAPH_URL =
   "https://api.goldsky.com/api/public/project_cm153vmqi5gke01vy66p4ftzf/subgraphs/sft-offchainassetvaulttest-base/1.0.5/gn";
 export const BASE_ORDERBOOK_SUBGRAPH_URL =
   "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/ob4-base/2024-12-13-9c39/gn";
-// New Raindex v6 OrderBook subgraph (Float era). Separate endpoint from v4.
+// Raindex v6 OrderBook subgraph (Float era), indexing the finalized v6 OB
+// 0xb05D…. Single-OB raindex schema (no `orderbook { id }` field — the era is
+// inferred per source in claimsRepository). v6 claims are otherwise resolved
+// subgraph-free from orderBytes + deployBlock in network.ts; this endpoint backs
+// getOrdersByHashes for completeness/redundancy.
 export const BASE_ORDERBOOK_V6_SUBGRAPH_URL =
-  "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/ob4-base/2026-02-05-c4ef/gn";
+  "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/raindex-base/0xb05D73E6BCc26AEB5b67Ff68C6E9C6151073e3cE-a99d05e/gn";
 export const BASE_METADATA_SUBGRAPH_URL =
   "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/metadata-base/2025-07-06-594f/gn";
 
@@ -47,9 +51,9 @@ export const ORDERBOOK_CONTRACT_ADDRESS =
 // 0xe522…: claims must be built with the SDK's getTakeOrders3Calldata
 // (TakeOrdersConfigV5, IOIsInput=true) — see utils/claimExecution.ts. Anvil-verified
 // claimable end-to-end (2026-06).
-// NOTE: BASE_ORDERBOOK_V6_SUBGRAPH_URL(S) must point at a subgraph that indexes THIS
-// address — the existing ob4-base/2026-02-05-c4ef subgraph indexes only 0xe522, so the
-// UI cannot detect v6 holdings until the new subgraph is live.
+// BASE_ORDERBOOK_V6_SUBGRAPH_URL points at the raindex subgraph indexing THIS
+// address (live as of 2026-06). v6 holdings/claims are also resolvable subgraph-free
+// from orderBytes + deployBlock in each Claim entry.
 export const ORDERBOOK_V6_CONTRACT_ADDRESS =
   "0xb05D73E6BCc26AEB5b67Ff68C6E9C6151073e3cE";
 
