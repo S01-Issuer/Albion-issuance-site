@@ -52,6 +52,10 @@ interface CachedLog {
 
 interface BlobCacheData {
   logs: CachedLog[];
+  // Lowest block the cache has been scanned FROM. Without this, a request for an
+  // older range than was previously cached would be served a truncated set (the
+  // cache only knew its upper bound). Older blobs may omit it — inferred on read.
+  lowWaterBlock?: number;
   highWaterBlock: number;
   updatedAt: number;
 }
@@ -213,8 +217,25 @@ export async function POST({ request }: RequestEvent) {
     // Try to load existing cache (in-memory → Blob), keyed per OrderBook contract
     const cached = await loadCache(contractAddress);
 
-    if (cached && cached.highWaterBlock >= requestedFrom) {
-      // Cache covers the requested range — check if we need a delta fetch
+    // Lower bound of what the cache actually scanned. Older blobs predate
+    // `lowWaterBlock`, so infer it from the lowest cached log; if there are no
+    // logs we can't know how low it scanned, so treat it as "covers nothing"
+    // (null) and force a fresh scan rather than serve a possibly-truncated set.
+    const cachedLow =
+      cached == null
+        ? null
+        : cached.lowWaterBlock ??
+          (cached.logs.length ? Number(cached.logs[0].block_number) : null);
+
+    // Fast path: the cache fully covers [requestedFrom, tip] — its lower bound is
+    // known AND at/below the requested block, and its high-water mark is at/above it.
+    if (
+      cached &&
+      cachedLow !== null &&
+      cachedLow <= requestedFrom &&
+      cached.highWaterBlock >= requestedFrom
+    ) {
+      // check if we need a delta fetch forward
       if (now - cached.updatedAt > MIN_REFETCH_INTERVAL_MS) {
         const delta = await fetchFromHypersync(
           contractAddress,
@@ -241,13 +262,15 @@ export async function POST({ request }: RequestEvent) {
       return json({ logs: filtered, fromCache: true });
     }
 
-    // Cache miss — full scan from requested block
+    // Cache miss, OR the cache doesn't reach down to requestedFrom (an older range
+    // was requested than what was previously scanned), OR requestedFrom is newer
+    // than the cached tip. Scan from the lowest of {requestedFrom, existing lower
+    // bound} so we never lose coverage we already had, and rebuild the cache with
+    // an explicit lowWaterBlock. This makes a stale high-floored cache self-heal:
+    // the next request for an older block backfills instead of silently truncating.
     const scanFrom =
-      cached && cached.highWaterBlock > 0
-        ? Math.min(
-            requestedFrom,
-            Number(cached.logs[0]?.block_number || requestedFrom),
-          )
+      cached && cachedLow !== null
+        ? Math.min(requestedFrom, cachedLow)
         : requestedFrom;
 
     const result = await fetchFromHypersync(
@@ -258,6 +281,7 @@ export async function POST({ request }: RequestEvent) {
 
     const newCache: BlobCacheData = {
       logs: result.logs,
+      lowWaterBlock: scanFrom,
       highWaterBlock: result.nextBlock,
       updatedAt: now,
     };
