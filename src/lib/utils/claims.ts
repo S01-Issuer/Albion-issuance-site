@@ -817,6 +817,26 @@ export function getLeaf(
   return keccak256("0x" + packed);
 }
 
+/**
+ * Assert a freshly-built merkle root matches the order's committed root.
+ * Skips when `expectedRoot` is the all-zeros sentinel — the codebase's
+ * convention for roots that are not independently verifiable (mirrors the
+ * legacy zero-root escape hatch, and used by e2e fixtures). Real on-chain
+ * roots are never zero, so production claims are always checked.
+ */
+export function assertMerkleRootMatches(
+  builtRoot: string,
+  expectedRoot: string,
+  orderHash: string,
+): void {
+  if (/^0x0+$/i.test(expectedRoot)) return; // unverifiable sentinel — skip
+  if (builtRoot.toLowerCase() !== expectedRoot.toLowerCase()) {
+    throw new Error(
+      `Merkle root mismatch for ${orderHash}: built ${builtRoot} != expected ${expectedRoot}`,
+    );
+  }
+}
+
 export function getMerkleTree(
   csvInput: CsvClaimRow[],
   encoding: AmountEncoding = "int18",
