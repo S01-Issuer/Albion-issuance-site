@@ -34,6 +34,7 @@
 		recordClaimTransactionHashes,
 		type ClaimHistory
 	} from '$lib/utils/claims';
+	import { getClaimsBundle } from '$lib/utils/claimsBundle';
 
 	const claimsService = useClaimsService();
 
@@ -100,6 +101,9 @@
 	}
 
 	onMount(() => {
+		// Wallet-independent: start the bulk CSV fetch now so it runs in
+		// parallel with wallet autoconnect instead of after it.
+		void getClaimsBundle();
 		claimSuccess = false;
 		subscribeToWallet();
 	});

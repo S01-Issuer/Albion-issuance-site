@@ -33,6 +33,14 @@ import type { DepositWithReceipt } from '$lib/types/graphql';
 import type { Hex } from 'viem';
 import { getTokenBalancesOnchain } from '$lib/data/clients/onchain';
 import { ENERGY_FIELDS } from '$lib/network';
+import { getClaimsBundle } from '$lib/utils/claimsBundle';
+import { onMount } from 'svelte';
+
+onMount(() => {
+	// Wallet-independent: start the bulk CSV fetch now so it runs in
+	// parallel with wallet autoconnect instead of after it.
+	void getClaimsBundle();
+});
 
 const isDev = import.meta.env.DEV;
 const logDev = (...messages: unknown[]) => {

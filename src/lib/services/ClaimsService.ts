@@ -11,8 +11,10 @@ import {
   type Claim,
   type OrderbookSource,
 } from "$lib/network";
+import { getClaimsBundle } from "$lib/utils/claimsBundle";
 import {
   fetchAndVerifyCSV,
+  verifyAndParseCsvBytes,
   getMerkleTree,
   assertMerkleRootMatches,
   getLeaf,
@@ -107,6 +109,20 @@ export class ClaimsService {
     const cached = this.csvCache.get(csvLink);
     if (cached) {
       return cached;
+    }
+
+    // Bundle-first: one bulk request replaces ~30 per-CSV fetches. Bytes are
+    // re-verified against the pinned CID here, so the bundle server is an
+    // untrusted transport; any miss or verification failure falls back to the
+    // unchanged per-CSV path.
+    const bundle = await getClaimsBundle();
+    const bundled = bundle.get(expectedContentHash);
+    if (bundled) {
+      const data = await verifyAndParseCsvBytes(bundled, expectedContentHash);
+      if (data) {
+        this.csvCache.set(csvLink, data);
+        return data;
+      }
     }
 
     const data = await fetchAndVerifyCSV(csvLink, expectedContentHash);
