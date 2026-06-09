@@ -244,6 +244,19 @@ export async function validateIPFSContent(
 }
 
 /**
+ * Verify already-fetched CSV bytes against the pinned CID, then parse.
+ * One verification path for both transports: per-CSV fetch and claims bundle.
+ */
+export async function verifyAndParseCsvBytes(
+  bytes: Uint8Array,
+  expectedContentHash: string,
+): Promise<CsvClaimRow[] | null> {
+  const check = await validateIPFSContent(bytes, expectedContentHash);
+  if (!check.isValid) return null;
+  return parseCSVData(new TextDecoder().decode(bytes));
+}
+
+/**
  * Fetch a CSV from IPFS and verify its bytes against the pinned content hash.
  * The CID is the integrity gate — the merkle tree is rebuilt only later, at
  * claim time, not on this load path.
@@ -259,9 +272,7 @@ export async function fetchAndVerifyCSV(
     const response = await fetchWithRetry(csvLink);
     if (!response.ok) return null;
     const bytes = new Uint8Array(await response.arrayBuffer());
-    const check = await validateIPFSContent(bytes, expectedContentHash);
-    if (!check.isValid) return null;
-    return parseCSVData(new TextDecoder().decode(bytes));
+    return await verifyAndParseCsvBytes(bytes, expectedContentHash);
   } catch {
     return null;
   }
