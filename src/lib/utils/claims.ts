@@ -63,9 +63,6 @@ export function getStoredClaimTransactionHashes(): string[] {
 const IO = "(address token, uint8 decimals, uint256 vaultId)";
 const EvaluableV3 = "(address interpreter, address store, bytes bytecode)";
 const OrderV3 = `(address owner, ${EvaluableV3} evaluable, ${IO}[] validInputs, ${IO}[] validOutputs, bytes32 nonce)`;
-// v6 OrderV4: IO drops the `decimals` field and vaultId becomes bytes32.
-const IOV2 = "(address token, bytes32 vaultId)";
-const OrderV4_ABI = `(address owner, ${EvaluableV3} evaluable, ${IOV2}[] validInputs, ${IOV2}[] validOutputs, bytes32 nonce)`;
 
 type OrderV3Type = [
   string,
@@ -352,7 +349,6 @@ export async function sortClaimsData(
 
   const logs = [...hypersyncLogs, ...receiptFromTrades, ...receiptFromTxs];
 
-  const normalizedOrderHash = orderHash?.toLowerCase();
   const decodedLogs = logs
     .map((log) => {
       const decodedData = decodeLogData(log.data, encoding);
