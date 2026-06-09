@@ -162,12 +162,19 @@ for (const source of SOURCES) {
   for (const o of orders) {
     const key = o.orderHash?.toLowerCase();
     if (!key || !found.has(key)) continue;
-    const deployBlock = o.addEvents?.[0]?.transaction?.blockNumber ?? null;
+    // Earliest add-event block — the subgraph does not guarantee chronological
+    // order, and deployBlock too high makes the claimed-event scan start late
+    // and miss earlier claims. An order is normally added once, but take the
+    // min defensively in case it was removed and re-added.
+    const deployBlock = (o.addEvents ?? [])
+      .map((ev) => Number.parseInt(ev?.transaction?.blockNumber ?? "", 10))
+      .filter((n) => Number.isFinite(n))
+      .reduce((min, n) => (min === null || n < min ? n : min), null);
     found.get(key).push({
       orderbook: source.address,
       version: source.version,
       orderBytes: o.orderBytes ?? "",
-      deployBlock: deployBlock !== null ? parseInt(deployBlock, 10) : null,
+      deployBlock,
     });
   }
 }
