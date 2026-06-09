@@ -41,8 +41,12 @@ not needing to stream the load at all.
 ### A. Real content-hash integrity (replaces the no-op)
 Replace `validateIPFSContent`'s string compare with genuine verification via
 `multiformats`: `sha256(bytes)` → `CID.create(1, raw.code, hash)` → assert
-`=== expectedContentHash`. Cache verified CIDs in `localStorage`
-(`albion-verified-cids`); CIDs are immutable, so verify-once-trust-forever.
+`=== expectedContentHash`. Hash on **every** load: the CID is immutable but the
+bytes a gateway returns are not guaranteed to match it, so the hash must run
+against the actual bytes of each response. (An earlier revision cached verified
+CIDs in `localStorage` to verify-once-trust-forever; that was removed — it
+trusted the gateway and defeated the check, per Codex review. A single sha-256
+over a CSV is cheap, so there is nothing worth caching.)
 **Why:** the current check proves nothing; this proves the bytes are the pinned
 content, and is cheaper than the merkle rebuild it replaces.
 
