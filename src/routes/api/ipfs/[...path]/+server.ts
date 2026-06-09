@@ -47,21 +47,20 @@ async function writeToBlob(
   path: string,
   body: Uint8Array,
   contentType: string,
-): Promise<string> {
+): Promise<void> {
   try {
-    const res = await put(blobKey(path), Buffer.from(body), {
+    await put(blobKey(path), Buffer.from(body), {
       access: "public",
       addRandomSuffix: false,
       allowOverwrite: true, // immutable content — idempotent re-writes are fine
       contentType,
     });
-    return `ok:${res.pathname}`;
   } catch (err) {
-    // Blob is an optimization; the in-memory cache + edge still serve this hit.
+    // Blob is an optimization; the in-memory cache + edge still serve this hit,
+    // and the gateways remain the source of truth. Requires BLOB_READ_WRITE_TOKEN
+    // in the deployment's runtime env (present on production; absent on previews
+    // unless the Blob store is linked to the Preview environment).
     console.warn("IPFS proxy: failed to persist to Blob:", err);
-    return `err:${err instanceof Error ? err.message : String(err)}`
-      .replace(/[^\x20-\x7e]/g, " ")
-      .slice(0, 180);
   }
 }
 
@@ -221,14 +220,13 @@ export const GET: RequestHandler = async ({ params, setHeaders }) => {
     }
     cache.set(path, { body, contentType, timestamp: Date.now() });
     cleanCache();
-    const blobWrite = await writeToBlob(path, body, contentType);
+    await writeToBlob(path, body, contentType);
     setHeaders({
       "Content-Type": contentType,
       ...CACHE_HEADERS,
       "X-Cache": "MISS",
       "X-Gateway": gateway,
       "X-Cid-Verified": verdict === "ok" ? "true" : "unverifiable",
-      "X-Blob-Write": blobWrite,
     });
     return new Response(body);
   };
