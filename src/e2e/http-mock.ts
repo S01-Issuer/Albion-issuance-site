@@ -115,7 +115,7 @@ export function installHttpMocks(cfg: HttpMockConfig) {
     // Second CSV file from IPFS - for other claims
     if (
       url.startsWith(`${cfg.ipfsGateway}/`) &&
-      url.includes("bafkreiothercsvfile")
+      url.includes("bafkreigo7j3zwkoxeusgu2z3r2m3wcuxgffypaemmsfgi4idaaf73cqbs4")
     ) {
       const csv = `index,address,amount\n0,${cfg.wallet.toLowerCase()},250000000000000000000\n1,${cfg.wallet.toLowerCase()},180000000000000000000\n2,0x3333333333333333333333333333333333333333,150000000000000000000`;
       return new Response(csv, {
@@ -589,20 +589,9 @@ export function installHttpMocks(cfg: HttpMockConfig) {
             };
             return jsonRes(data);
           }
-          if (query.includes("orders")) {
-            const data = {
-              data: {
-                orders: [
-                  {
-                    orderBytes: "0x",
-                    orderHash: cfg.orderHash,
-                    orderbook: { id: "0xorderbook" },
-                  },
-                ],
-              },
-            };
-            return jsonRes(data);
-          }
+          // NOTE: the getOrdersByHashes `orders` subgraph branch was removed.
+          // Claims now resolve statically from orderBytes + deployBlock, so no
+          // `orders` query is issued during these tests.
         }
       } catch (err) {
         // Log error in test mode
