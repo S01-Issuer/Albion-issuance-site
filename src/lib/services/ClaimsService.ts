@@ -195,11 +195,10 @@ export class ClaimsService {
       };
     }
 
-    // Phase 1: Resolve order details. Claims that carry a static order (orderBytes +
-    // deployBlock — the v6 subgraph-free path) are resolved locally; only the rest
-    // (v4 legacy) are batch-queried from the subgraph.
+    // Phase 1: Resolve order details. Every claim carries a static order
+    // (orderBytes + deployBlock) baked into network.ts, so orders are resolved
+    // entirely locally — no subgraph lookup.
     const ordersByHash = new Map<string, OrderDetail>();
-    const hashesNeedingSubgraph: string[] = [];
     for (const { claim } of claimMetadata) {
       if (claim.orderBytes && claim.deployBlock !== undefined) {
         ordersByHash.set(claim.orderHash.toLowerCase(), {
@@ -218,23 +217,6 @@ export class ClaimsService {
             },
           ],
         });
-      } else {
-        hashesNeedingSubgraph.push(claim.orderHash);
-      }
-    }
-    if (hashesNeedingSubgraph.length > 0) {
-      const fetched = await this.repository.getOrdersByHashes(
-        hashesNeedingSubgraph,
-      );
-      for (const order of fetched) {
-        const key = order.orderHash.toLowerCase();
-        const existing = ordersByHash.get(key);
-        if (
-          !existing ||
-          (order.orderBytes?.length ?? 0) > (existing.orderBytes?.length ?? 0)
-        ) {
-          ordersByHash.set(key, order);
-        }
       }
     }
 

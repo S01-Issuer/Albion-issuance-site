@@ -4,11 +4,7 @@
 
 import { executeGraphQL } from "../clients/cachedGraphqlClient";
 import { ORDERBOOK_SOURCES } from "$lib/network";
-import type {
-  Trade,
-  GetTradesResponse,
-  GetOrdersResponse,
-} from "$lib/types/graphql";
+import type { Trade, GetTradesResponse } from "$lib/types/graphql";
 
 /**
  * Run a GraphQL query against EVERY OrderBook era's subgraph (v4 + v6) and flatten
@@ -62,31 +58,6 @@ export type OrderDetail = {
   }>;
 };
 
-/** Prefer the order carrying the longest orderBytes when subgraphs return duplicates. */
-function pickBestOrderForHash(orders: OrderDetail[]): OrderDetail | undefined {
-  if (orders.length === 0) return undefined;
-  const scored = [...orders].sort((a, b) => {
-    const aLen = a.orderBytes?.length ?? 0;
-    const bLen = b.orderBytes?.length ?? 0;
-    return bLen - aLen;
-  });
-  return scored.find((o) => o.orderBytes && o.orderBytes.length > 2) ?? scored[0];
-}
-
-function mergeOrdersByHash(orders: OrderDetail[]): OrderDetail[] {
-  const byHash = new Map<string, OrderDetail[]>();
-  for (const order of orders) {
-    const key = order.orderHash?.toLowerCase();
-    if (!key) continue;
-    const list = byHash.get(key) ?? [];
-    list.push(order);
-    byHash.set(key, list);
-  }
-  return [...byHash.values()]
-    .map((group) => pickBestOrderForHash(group))
-    .filter((o): o is OrderDetail => o !== undefined);
-}
-
 export class ClaimsRepository {
   /**
    * Validate order hash format
@@ -137,70 +108,6 @@ export class ClaimsRepository {
     return trades as Trade[];
   }
 
-  /**
-   * Get order details by hash
-   */
-  async getOrderByHash(orderHash: string): Promise<OrderDetail[]> {
-    const cleanOrderHash = this.validateOrderHash(orderHash);
-    if (!cleanOrderHash) return [];
-
-    const query = `
-      query GetOrderByHash($orderHash: String!) {
-        orders(where: { orderHash: $orderHash }) {
-          orderBytes
-          orderHash
-          addEvents {
-            transaction {
-              id
-              timestamp
-              blockNumber
-            }
-          }
-        }
-      }
-    `;
-
-    const orders = await queryAllOrderbookSubgraphs<GetOrdersResponse>(
-      query,
-      { orderHash: cleanOrderHash },
-      (data) => data?.orders || [],
-    );
-    return mergeOrdersByHash(orders as OrderDetail[]);
-  }
-
-  /**
-   * Batch fetch order details for multiple hashes in a single query
-   */
-  async getOrdersByHashes(orderHashes: string[]): Promise<OrderDetail[]> {
-    const cleanHashes = orderHashes
-      .map((h) => this.validateOrderHash(h))
-      .filter((h): h is string => h !== null);
-
-    if (cleanHashes.length === 0) return [];
-
-    const query = `
-      query GetOrdersByHashes($orderHashes: [String!]!) {
-        orders(where: { orderHash_in: $orderHashes }) {
-          orderBytes
-          orderHash
-          addEvents {
-            transaction {
-              id
-              timestamp
-              blockNumber
-            }
-          }
-        }
-      }
-    `;
-
-    const orders = await queryAllOrderbookSubgraphs<GetOrdersResponse>(
-      query,
-      { orderHashes: cleanHashes },
-      (data) => data?.orders || [],
-    );
-    return mergeOrdersByHash(orders as OrderDetail[]);
-  }
 }
 
 // Export singleton instance
@@ -209,6 +116,3 @@ export const claimsRepository = new ClaimsRepository();
 // Export convenience functions for backwards compatibility
 export const getTradesForClaims = (orderHash: string, ownerAddress: string) =>
   claimsRepository.getTradesForClaims(orderHash, ownerAddress);
-
-export const getOrderByHash = (orderHash: string) =>
-  claimsRepository.getOrderByHash(orderHash);

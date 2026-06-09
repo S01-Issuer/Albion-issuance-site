@@ -3,11 +3,7 @@
  */
 
 export { sftRepository } from "./sftRepository";
-export {
-  claimsRepository,
-  getTradesForClaims,
-  getOrderByHash,
-} from "./claimsRepository";
+export { claimsRepository, getTradesForClaims } from "./claimsRepository";
 
 // Export types
 export type { SftRepository } from "./sftRepository";

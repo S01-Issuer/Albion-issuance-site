@@ -194,13 +194,6 @@ export type ClaimSignedContext = {
 export const CLAIM_MERKLE_PROOF_DEPTH = 8;
 
 // Security validation types
-export type CSVValidationResult = {
-  isValid: boolean;
-  error?: string;
-  merkleRoot?: string;
-  expectedMerkleRoot?: string;
-};
-
 export type IPFSValidationResult = {
   isValid: boolean;
   error?: string;
