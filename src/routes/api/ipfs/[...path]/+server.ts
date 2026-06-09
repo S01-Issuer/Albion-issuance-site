@@ -19,6 +19,21 @@ const fallbackGateways = [
   "https://eu.orbitor.dev/ipfs",
 ].filter((gateway): gateway is string => Boolean(gateway));
 
+// CIDs are immutable. `Cache-Control: max-age` caches in the browser; the
+// `CDN-Cache-Control: s-maxage` makes Vercel's edge CDN cache the response too
+// (max-age alone is browser-only). So the first global request per CID warms
+// the edge, and every later request — any user, cold or warm instance — is
+// served from the edge, skipping Pinata and the function entirely. Safe because
+// the client re-hashes the bytes against the CID (verifyCid), so a poisoned or
+// corrupt cached body is rejected rather than trusted.
+const CACHE_HEADERS = {
+  "Cache-Control": "public, max-age=31536000, immutable",
+  "CDN-Cache-Control": "public, s-maxage=31536000, immutable",
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+} as const;
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const cleanCache = () => {
   if (cache.size <= 100) return;
@@ -119,10 +134,7 @@ export const GET: RequestHandler = async ({ params, setHeaders }) => {
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     setHeaders({
       "Content-Type": cached.contentType,
-      "Cache-Control": "public, max-age=31536000, immutable",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      ...CACHE_HEADERS,
       "X-Cache": "HIT",
     });
     return new Response(cached.body);
@@ -136,10 +148,7 @@ export const GET: RequestHandler = async ({ params, setHeaders }) => {
       cleanCache();
       setHeaders({
         "Content-Type": contentType,
-        "Cache-Control": "public, max-age=31536000, immutable",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        ...CACHE_HEADERS,
         "X-Cache": "MISS",
         "X-Gateway": "pinata",
       });
@@ -156,10 +165,7 @@ export const GET: RequestHandler = async ({ params, setHeaders }) => {
         cleanCache();
         setHeaders({
           "Content-Type": contentType,
-          "Cache-Control": "public, max-age=31536000, immutable",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
+          ...CACHE_HEADERS,
           "X-Cache": "MISS",
           "X-Gateway": gateway,
         });
@@ -196,10 +202,7 @@ export const HEAD: RequestHandler = async ({ params }) => {
       status: 200,
       headers: {
         "Content-Type": contentType,
-        "Cache-Control": "public, max-age=31536000, immutable",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        ...CACHE_HEADERS,
       },
     });
   } catch (err) {
