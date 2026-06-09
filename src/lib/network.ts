@@ -7,9 +7,9 @@ export const BASE_ORDERBOOK_SUBGRAPH_URL =
   "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/ob4-base/2024-12-13-9c39/gn";
 // Raindex v6 OrderBook subgraph (Float era), indexing the finalized v6 OB
 // 0xb05D…. Single-OB raindex schema (no `orderbook { id }` field — the era is
-// inferred per source in claimsRepository). v6 claims are otherwise resolved
-// subgraph-free from orderBytes + deployBlock in network.ts; this endpoint backs
-// getOrdersByHashes for completeness/redundancy.
+// inferred per source in claimsRepository). All claim orders are resolved
+// subgraph-free from orderBytes + deployBlock in network.ts; this endpoint is
+// still used by the Context/trades scan, not for order resolution.
 export const BASE_ORDERBOOK_V6_SUBGRAPH_URL =
   "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/raindex-base/0xb05D73E6BCc26AEB5b67Ff68C6E9C6151073e3cE-a99d05e/gn";
 export const BASE_METADATA_SUBGRAPH_URL =
@@ -140,9 +140,9 @@ export type Claim = {
    *    decoded for `takeOrders3`.
    *  - `deployBlock`: the order's deploy block, used as the lower bound of the
    *    Hypersync Context scan.
-   * When both are present, ClaimsService skips the subgraph order lookup entirely
-   * (claimed-state + history come from the Context scan). v4 legacy entries omit
-   * these and continue to resolve via the subgraph.
+   * ClaimsService resolves every order from these static fields (claimed-state +
+   * history come from the Context scan). All PROD claims — v4 legacy and v6 alike
+   * — carry orderBytes + deployBlock; there is no runtime subgraph order lookup.
    */
   orderBytes?: string;
   deployBlock?: number;
@@ -174,7 +174,11 @@ export const PRODUCTION_METABOARD_ADMIN =
 export const DEVELOPMENT_METABOARD_ADMIN =
   "0xD2843D9E7738d46D90CB6Dff8D6C83db58B9c165";
 
-// Development/Preview energy fields
+// Development/Preview energy fields.
+// NOTE: these entries lack static orderBytes/deployBlock, and the runtime
+// subgraph order lookup has been removed — so DEV-mode claims do not resolve
+// (claims rendering is inert in DEV). PROD uses PROD_ENERGY_FIELDS; tests mock
+// their own ENERGY_FIELDS. To revive DEV claims, bake static order data here too.
 const DEV_ENERGY_FIELDS: EnergyField[] = [
   {
     name: "Bakken Horizon Field",
