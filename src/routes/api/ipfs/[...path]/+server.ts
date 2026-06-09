@@ -2,8 +2,15 @@ import type { RequestHandler } from "./$types";
 import { error } from "@sveltejs/kit";
 import { env as publicEnv } from "$env/dynamic/public";
 import { pinata } from "$lib/server/pinata";
+import { put, head, type HeadBlobResult } from "@vercel/blob";
+import { verifyCidBytes } from "$lib/server/cidContent";
 
-// Simple in-memory cache to reduce gateway requests
+// Three-layer origin for immutable IPFS content, fastest first:
+//   1. in-memory Map  — instant, but lost on cold start / per-instance
+//   2. Vercel Blob    — durable, ~ms, survives cold starts + deployments
+//   3. Pinata / public gateways — slow (~2s), the source of truth
+// The edge CDN (Cache-Control headers below) sits in front of all three, so a
+// warm edge skips the function entirely; Blob makes the cold-edge misses cheap.
 const cache = new Map<
   string,
   { body: Uint8Array; contentType: string; timestamp: number }
@@ -12,6 +19,47 @@ const CACHE_TTL = 1000 * 60 * 30; // 30 minutes
 const MAX_RETRIES = 2;
 const TIMEOUT_MS = 15_000;
 const RETRY_DELAY_MS = 250;
+
+const blobKey = (path: string) => `ipfs/${path}`;
+
+async function readFromBlob(
+  path: string,
+): Promise<{ body: Uint8Array; contentType: string } | null> {
+  try {
+    const meta: HeadBlobResult | null = await head(blobKey(path)).catch(
+      () => null,
+    );
+    if (!meta?.url) return null;
+    const response = await fetch(meta.url);
+    if (!response.ok) return null;
+    const body = new Uint8Array(await response.arrayBuffer());
+    const contentType =
+      meta.contentType ||
+      response.headers.get("content-type") ||
+      "application/octet-stream";
+    return { body, contentType };
+  } catch {
+    return null;
+  }
+}
+
+async function writeToBlob(
+  path: string,
+  body: Uint8Array,
+  contentType: string,
+): Promise<void> {
+  try {
+    await put(blobKey(path), Buffer.from(body), {
+      access: "public",
+      addRandomSuffix: false,
+      allowOverwrite: true, // immutable content — idempotent re-writes are fine
+      contentType,
+    });
+  } catch (err) {
+    // Blob is an optimization; the in-memory cache + edge still serve this hit.
+    console.warn("IPFS proxy: failed to persist to Blob:", err);
+  }
+}
 
 const fallbackGateways = [
   publicEnv.PUBLIC_IPFS_FALLBACK_GATEWAY,
@@ -129,7 +177,7 @@ export const GET: RequestHandler = async ({ params, setHeaders }) => {
     throw error(400, "Path is required");
   }
 
-  // Check cache first
+  // L1: in-memory (per-instance, lost on cold start)
   const cached = cache.get(path);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     setHeaders({
@@ -140,19 +188,51 @@ export const GET: RequestHandler = async ({ params, setHeaders }) => {
     return new Response(cached.body);
   }
 
+  // L2: Vercel Blob (durable, ~ms, survives cold starts + deployments). Blob
+  // only ever holds CID-verified bytes (see persist() below), so it's trusted.
+  const fromBlob = await readFromBlob(path);
+  if (fromBlob) {
+    cache.set(path, { ...fromBlob, timestamp: Date.now() });
+    cleanCache();
+    setHeaders({
+      "Content-Type": fromBlob.contentType,
+      ...CACHE_HEADERS,
+      "X-Cache": "HIT",
+      "X-Store": "blob",
+    });
+    return new Response(fromBlob.body);
+  }
+
+  // L3: origin gateways. Verify the CID BEFORE caching/persisting so a corrupt
+  // or malicious gateway response is never written to Blob or served — a
+  // mismatch is treated as a gateway failure and we fall through to the next.
+  const persist = async (
+    body: Uint8Array,
+    contentType: string,
+    gateway: string,
+  ): Promise<Response> => {
+    const verdict = await verifyCidBytes(path, body);
+    if (verdict === "mismatch") {
+      throw new Error(`CID mismatch from ${gateway}: bytes do not hash to ${path}`);
+    }
+    cache.set(path, { body, contentType, timestamp: Date.now() });
+    cleanCache();
+    await writeToBlob(path, body, contentType);
+    setHeaders({
+      "Content-Type": contentType,
+      ...CACHE_HEADERS,
+      "X-Cache": "MISS",
+      "X-Gateway": gateway,
+      "X-Cid-Verified": verdict === "ok" ? "true" : "unverifiable",
+    });
+    return new Response(body);
+  };
+
   try {
     // Try primary Pinata gateway first
     try {
       const { body, contentType } = await fetchFromPinata(path);
-      cache.set(path, { body, contentType, timestamp: Date.now() });
-      cleanCache();
-      setHeaders({
-        "Content-Type": contentType,
-        ...CACHE_HEADERS,
-        "X-Cache": "MISS",
-        "X-Gateway": "pinata",
-      });
-      return new Response(body);
+      return await persist(body, contentType, "pinata");
     } catch (primaryError) {
       console.error("IPFS proxy Pinata error:", primaryError);
     }
@@ -161,15 +241,7 @@ export const GET: RequestHandler = async ({ params, setHeaders }) => {
     for (const gateway of fallbackGateways) {
       try {
         const { body, contentType } = await fetchFromHttpGateway(gateway, path);
-        cache.set(path, { body, contentType, timestamp: Date.now() });
-        cleanCache();
-        setHeaders({
-          "Content-Type": contentType,
-          ...CACHE_HEADERS,
-          "X-Cache": "MISS",
-          "X-Gateway": gateway,
-        });
-        return new Response(body);
+        return await persist(body, contentType, gateway);
       } catch (fallbackError) {
         console.error(`IPFS proxy fallback error (${gateway}):`, fallbackError);
         continue;
