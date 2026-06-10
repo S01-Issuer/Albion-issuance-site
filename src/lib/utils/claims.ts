@@ -360,39 +360,19 @@ export async function sortClaimsData(
 
   const logs = [...hypersyncLogs, ...receiptFromTrades, ...receiptFromTxs];
 
-  const decodedLogs = logs
-    .map((log) => {
-      const decodedData = decodeLogData(log.data, encoding);
-      if (!decodedData) {
-        return null;
-      }
-
-      if (log.block?.timestamp !== undefined) {
-        const timestampValue =
-          typeof log.block.timestamp === "string"
-            ? Number.parseInt(log.block.timestamp, 16)
-            : log.block.timestamp;
-        if (!Number.isNaN(timestampValue)) {
-          decodedData.timestamp = new Date(timestampValue * 1000).toISOString();
-        }
-      } else if (typeof log.timestamp === "number") {
-        decodedData.timestamp = new Date(log.timestamp * 1000).toISOString();
-      }
-
-      return {
-        ...decodedData,
-        txHash: log.transaction_hash,
-      };
-    })
-    .filter((log) => {
-      if (!log) return false;
-      const address = log.address;
-      if (!address) return false;
-      if (address === ZERO_ADDRESS) return false;
-      // Do not filter by col[1] order hash — on v6 it is often merkle metadata,
-      // not the subgraph orderHash. This call is already scoped to one order's CSV.
-      return true;
-    }) as DecodedClaimLog[];
+  // Decoding the shared per-OrderBook Context logs dominates a claims load: the
+  // same log set is handed to sortClaimsData once per claim, and ABI-decoding
+  // thousands of logs per call adds up to ~20s for a typical wallet. The decode
+  // is pure in (logs, encoding), so when the caller passed prefetched per-era
+  // logs (the display path) we reuse a memoised decode keyed on that array's
+  // identity. Receipt-augmented loads (post-claim refresh) build a unique,
+  // small combined set that isn't worth caching — decode it directly.
+  const decodedLogs =
+    prefetchedLogs &&
+    receiptFromTrades.length === 0 &&
+    receiptFromTxs.length === 0
+      ? decodeClaimLogsMemoised(prefetchedLogs, encoding)
+      : decodeClaimLogs(logs, encoding);
 
   // Filter by owner address (required parameter)
   const normalizedOwnerAddress = ownerAddress.toLowerCase();
@@ -443,28 +423,16 @@ export async function sortClaimsData(
   // Create claims array with the same structure as the claims page
   // Include orderHash so caller can look up payout date from metadata
   const claims: ClaimHistory[] = claimedCsv.map((claim) => {
-    const originalLog = logs.find((log) => {
-      const decodedData = decodeLogData(log.data, encoding);
-      if (!decodedData) return false;
-      return decodedLogMatchesClaim(
-        { ...decodedData, txHash: log.transaction_hash },
-        claim,
-        encoding,
-      );
-    });
+    // claim.decodedLog is the Context log this claim matched in
+    // filterClaimedAndUnclaimed; it already carries this log's ISO timestamp
+    // (from block.timestamp) and txHash. Re-scanning + re-decoding the full raw
+    // log set here to recover the same log was an O(claims × logs) hotspot that
+    // re-ran thousands of ABI decodes per claimed row — drop it.
 
     // Default to current date - caller should update using orderHash lookup from metadata
     let claimDate = new Date().toISOString();
     if (claim.decodedLog?.timestamp) {
       claimDate = claim.decodedLog.timestamp;
-    } else if (originalLog?.block?.timestamp) {
-      const timestampValue =
-        typeof originalLog.block.timestamp === "number"
-          ? originalLog.block.timestamp
-          : Number.parseInt(originalLog.block.timestamp, 16);
-      if (Number.isFinite(timestampValue)) {
-        claimDate = new Date(timestampValue * 1000).toISOString();
-      }
     } else if (orderTimestamp) {
       // Use the order timestamp (when the order was added to the orderbook)
       const orderTsNumber = Number(orderTimestamp);
@@ -490,7 +458,6 @@ export async function sortClaimsData(
       // more accurate than a per-order trade); trades[0] is the legacy fallback.
       txHash:
         claim.decodedLog?.txHash ||
-        originalLog?.transaction_hash ||
         trades[0]?.tradeEvent?.transaction?.id ||
         "N/A",
       status: "completed",
@@ -714,6 +681,77 @@ function decodeLogData(
     // Return null instead of a fake entry - don't mask real claim data
     return null;
   }
+}
+
+/**
+ * Decode + normalise a raw Context log set into DecodedClaimLogs (drops
+ * undecodable / zero-address entries). Pure in (logs, encoding).
+ */
+export function decodeClaimLogs(
+  logs: HypersyncResult[],
+  encoding: AmountEncoding,
+): DecodedClaimLog[] {
+  return logs
+    .map((log) => {
+      const decodedData = decodeLogData(log.data, encoding);
+      if (!decodedData) {
+        return null;
+      }
+
+      if (log.block?.timestamp !== undefined) {
+        const timestampValue =
+          typeof log.block.timestamp === "string"
+            ? Number.parseInt(log.block.timestamp, 16)
+            : log.block.timestamp;
+        if (!Number.isNaN(timestampValue)) {
+          decodedData.timestamp = new Date(timestampValue * 1000).toISOString();
+        }
+      } else if (typeof log.timestamp === "number") {
+        decodedData.timestamp = new Date(log.timestamp * 1000).toISOString();
+      }
+
+      return {
+        ...decodedData,
+        txHash: log.transaction_hash,
+      };
+    })
+    .filter((log) => {
+      if (!log) return false;
+      const address = log.address;
+      if (!address) return false;
+      if (address === ZERO_ADDRESS) return false;
+      // Do not filter by col[1] order hash — on v6 it is often merkle metadata,
+      // not the subgraph orderHash. This call is already scoped to one order's CSV.
+      return true;
+    }) as DecodedClaimLog[];
+}
+
+// Memoise decoded logs on the raw-log array identity. ClaimsService scans each
+// OrderBook era once and hands the SAME array to every claim of that era, so a
+// WeakMap keyed on that reference collapses ~30× redundant decodes into one.
+const decodedLogsCache = new WeakMap<
+  HypersyncResult[],
+  Map<AmountEncoding, DecodedClaimLog[]>
+>();
+
+export function decodeClaimLogsMemoised(
+  logs: HypersyncResult[],
+  encoding: AmountEncoding,
+): DecodedClaimLog[] {
+  let byEncoding = decodedLogsCache.get(logs);
+  if (!byEncoding) {
+    byEncoding = new Map();
+    decodedLogsCache.set(logs, byEncoding);
+  }
+  let decoded = byEncoding.get(encoding);
+  if (!decoded) {
+    decoded = decodeClaimLogs(logs, encoding);
+    byEncoding.set(encoding, decoded);
+  }
+  // Hand out fresh shallow clones: the expensive ABI decode is shared, but each
+  // caller gets its own log objects so downstream mutation of a matched log
+  // can't leak across claims that share this OrderBook's log set.
+  return decoded.map((log) => ({ ...log }));
 }
 
 // Function to filter CSV claims into claimed and unclaimed arrays.

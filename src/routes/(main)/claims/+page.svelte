@@ -104,6 +104,11 @@
 		// Wallet-independent: start the bulk CSV fetch now so it runs in
 		// parallel with wallet autoconnect instead of after it.
 		void getClaimsBundle();
+		// Catalog (SFTs + metadata subgraphs) is also wallet-independent and is the
+		// serial gate before claims load. Prefetch it now so its subgraph latency
+		// overlaps wallet connection. build() is memoised, so loadClaimsData()
+		// reuses this in-flight/cached result.
+		void useCatalogService().build();
 		claimSuccess = false;
 		subscribeToWallet();
 	});

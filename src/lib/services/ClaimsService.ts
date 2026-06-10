@@ -95,6 +95,19 @@ export interface ClaimsResult {
   hasCsvLoadError: boolean;
 }
 
+/**
+ * True when every CSV the claim load needs is already present in the bundle, so
+ * processing will be network-free and the IPFS rate-limit throttle can be
+ * skipped. A miss (or an empty/failed bundle) means at least one CSV will fall
+ * back to a per-CID IPFS fetch, so the throttle must stay on.
+ */
+export function allCidsBundled(
+  bundle: { size: number; has: (cid: string) => boolean },
+  cids: string[],
+): boolean {
+  return bundle.size > 0 && cids.every((cid) => bundle.has(cid));
+}
+
 export class ClaimsService {
   private csvCache = new Map<string, CsvClaimRow[]>();
   private repository = claimsRepository;
@@ -298,8 +311,20 @@ export class ClaimsService {
           ),
     );
 
-    // Process claims in batches (6 at a time with 100ms delay between batches)
-    const results = await this.processBatch(claimProcessors, 6, 100);
+    // The 100ms inter-batch delay exists to rate-limit the IPFS gateway on the
+    // per-CSV fallback path. When the bundle already holds every CSV we need,
+    // processing is pure local CPU (decode + CID re-verify + parse) with zero
+    // network, so the throttle is dead weight — skip it and process in one batch.
+    // (csvCache hits would also be network-free, but bundle coverage is the
+    // common cold-load case and the cheap thing to check here.)
+    const bundle = await getClaimsBundle();
+    const allBundled = allCidsBundled(
+      bundle,
+      claimMetadata.map(({ claim }) => claim.expectedContentHash),
+    );
+    const results = allBundled
+      ? await this.processBatch(claimProcessors, claimProcessors.length, 0)
+      : await this.processBatch(claimProcessors, 6, 100);
 
     for (let index = 0; index < results.length; index += 1) {
       const result = results[index];

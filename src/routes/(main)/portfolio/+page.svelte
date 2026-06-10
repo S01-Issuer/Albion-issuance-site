@@ -40,6 +40,11 @@ onMount(() => {
 	// Wallet-independent: start the bulk CSV fetch now so it runs in
 	// parallel with wallet autoconnect instead of after it.
 	void getClaimsBundle();
+	// Catalog (SFTs + metadata subgraphs) is also wallet-independent and is the
+	// serial gate before claims/balances load. Prefetch it now so its ~400ms of
+	// subgraph latency overlaps wallet connection. build() is memoised, so the
+	// later loadSftData() call reuses this in-flight/cached result.
+	void useCatalogService().build();
 });
 
 const isDev = import.meta.env.DEV;
@@ -687,29 +692,57 @@ function percentageDisplay(value: number): string {
 
 			const uniqueSfts = Object.values(uniqueSftsMap);
 
+			// Pre-index per-SFT lookups so the loop below is O(SFTs) instead of
+			// O(SFTs × metadata/claims) repeated .find()/.filter() scans. Behaviour-
+			// preserving: metadata keeps the original padded/unpadded find() as a
+			// fallback on a map miss; the claim lookups are exact lowercase matches.
+			const metaBySftAddress: Record<string, (typeof decodedMeta)[number]> = {};
+			for (const meta of decodedMeta) {
+				if (!meta.contractAddress) continue;
+				const a = meta.contractAddress.toLowerCase();
+				const key = a.length === 66 ? `0x${a.slice(26)}` : a;
+				if (!metaBySftAddress[key]) metaBySftAddress[key] = meta;
+			}
+			const claimsGroupByToken: Record<string, (typeof claimsHoldings)[number]> = {};
+			for (const group of claimsHoldings) {
+				const k = group.tokenAddress?.toLowerCase();
+				if (k && !claimsGroupByToken[k]) claimsGroupByToken[k] = group;
+			}
+			const claimsByToken: Record<string, typeof claimHistory> = {};
+			for (const claim of claimHistory) {
+				const k = claim.tokenAddress?.toLowerCase();
+				if (!k) continue;
+				const arr = claimsByToken[k];
+				if (arr) arr.push(claim);
+				else claimsByToken[k] = [claim];
+			}
+
 			console.log('[Portfolio DEBUG] Unique SFTs to process:', uniqueSfts.length);
 			console.log('[Portfolio DEBUG] Unique SFT IDs:', uniqueSfts.map(s => s.id));
 
 			// Process each individual SFT token
 			for (const sft of uniqueSfts) {
 				console.log('[Portfolio DEBUG] Processing SFT:', sft.id);
-				// Find metadata for this SFT
-				const pinnedMetadata = decodedMeta.find((meta) => {
-					if (!meta.contractAddress) return false;
-					const metaAddress = meta.contractAddress.toLowerCase();
-					const sftAddress = sft.id.toLowerCase();
-					if (metaAddress === sftAddress) {
-						return true;
-					}
-					const targetAddress = `0x000000000000000000000000${sft.id
-						.slice(2)
-						.toLowerCase()}`;
-					if (metaAddress === targetAddress) {
-						return true;
-					}
-					const unpaddedMetaAddress = metaAddress.replace(/^0x0+/, '0x');
-					return unpaddedMetaAddress === sftAddress;
-				});
+				// Find metadata for this SFT (pre-indexed; fall back to the original
+				// padded/unpadded scan on a map miss to preserve exact behaviour).
+				const pinnedMetadata =
+					metaBySftAddress[sft.id.toLowerCase()] ??
+					decodedMeta.find((meta) => {
+						if (!meta.contractAddress) return false;
+						const metaAddress = meta.contractAddress.toLowerCase();
+						const sftAddress = sft.id.toLowerCase();
+						if (metaAddress === sftAddress) {
+							return true;
+						}
+						const targetAddress = `0x000000000000000000000000${sft.id
+							.slice(2)
+							.toLowerCase()}`;
+						if (metaAddress === targetAddress) {
+							return true;
+						}
+						const unpaddedMetaAddress = metaAddress.replace(/^0x0+/, '0x');
+						return unpaddedMetaAddress === sftAddress;
+					});
 				
 				console.log('[Portfolio DEBUG] SFT', sft.id, '- metadata found:', !!pinnedMetadata);
 
@@ -760,9 +793,7 @@ function percentageDisplay(value: number): string {
 
 					// Find claims data for this specific SFT by matching the token address
 					const normalizedSftAddress = sft.id.toLowerCase();
-					const sftClaimsGroup = claimsHoldings.find(
-						(group) => group.tokenAddress?.toLowerCase() === normalizedSftAddress,
-					);
+					const sftClaimsGroup = claimsGroupByToken[normalizedSftAddress];
 
 					// Use data from claimsGroup if available (this is the source of truth)
 				if (sftClaimsGroup) {
@@ -773,9 +804,7 @@ function percentageDisplay(value: number): string {
 				}
 
 					// Get claim history for this asset by matching token address
-					const sftClaims = claimHistory.filter(
-						(claim) => claim.tokenAddress?.toLowerCase() === normalizedSftAddress,
-					);
+					const sftClaims = claimsByToken[normalizedSftAddress] ?? [];
 					const totalEarnedFromHistory = sftClaims.reduce((sum, claim) => {
 						const amount = Number(claim?.amount ?? 0);
 						return sum + (Number.isFinite(amount) ? amount : 0);
