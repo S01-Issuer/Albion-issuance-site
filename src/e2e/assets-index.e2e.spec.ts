@@ -89,6 +89,13 @@ vi.mock("$lib/network", async () => {
     BASE_SFT_SUBGRAPH_URL: "https://example.com/sft",
     BASE_METADATA_SUBGRAPH_URL: "https://example.com/meta",
     BASE_ORDERBOOK_SUBGRAPH_URL: "https://example.com/orderbook",
+    // Repositories read the plural *_URLS arrays (primary + fallbacks), not the
+    // singular constants. Override these too or the real goldsky URLs leak through
+    // `...actual`, the http-mock's exact-match misses, and fetch falls through.
+    BASE_SFT_SUBGRAPH_URLS: ["https://example.com/sft"],
+    BASE_METADATA_SUBGRAPH_URLS: ["https://example.com/meta"],
+    BASE_ORDERBOOK_SUBGRAPH_URLS: ["https://example.com/orderbook"],
+    BASE_ORDERBOOK_V6_SUBGRAPH_URLS: ["https://example.com/orderbook"],
     PINATA_GATEWAY: "https://gateway.pinata.cloud/ipfs",
     ENERGY_FIELDS: [
       {
@@ -216,11 +223,16 @@ describe("Assets Index E2E Tests", () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       const bodyText = document.body.textContent || "";
-      // Test that sharePercentage from metadata is displayed
-      expect(bodyText).toMatch(/2\.5%/); // Wressle R1 sharePercentage from CBOR
+      // The AssetCard renders the royalty percentage decoded from the CBOR metadata
+      // as the asset's headline financial figure.
+      expect(bodyText).toMatch(/4\.5%/); // Wressle royalty percentage from CBOR
 
-      // Test that first payment date from metadata is shown (format: "2025-05" from CBOR)
-      expect(bodyText).toMatch(/2025-05/); // From CBOR decoded firstPaymentDate
+      // ...alongside the computed Returns section and the key-stat labels. These
+      // replaced the old raw firstPaymentDate display when the card was redesigned,
+      // so assert the stable labels rather than a date that drifts with "now".
+      expect(bodyText).toMatch(/Returns/);
+      expect(bodyText).toMatch(/Exp\. Remaining/);
+      expect(bodyText).toMatch(/End Date/);
     });
   });
 

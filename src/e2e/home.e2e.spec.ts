@@ -61,6 +61,13 @@ vi.mock("$lib/network", async () => {
     BASE_SFT_SUBGRAPH_URL: "https://example.com/sft",
     BASE_METADATA_SUBGRAPH_URL: "https://example.com/meta",
     BASE_ORDERBOOK_SUBGRAPH_URL: "https://example.com/orderbook",
+    // Repositories read the plural *_URLS arrays (primary + fallbacks), not the
+    // singular constants. Override these too or the real goldsky URLs leak through
+    // `...actual`, the http-mock's exact-match misses, and fetch falls through.
+    BASE_SFT_SUBGRAPH_URLS: ["https://example.com/sft"],
+    BASE_METADATA_SUBGRAPH_URLS: ["https://example.com/meta"],
+    BASE_ORDERBOOK_SUBGRAPH_URLS: ["https://example.com/orderbook"],
+    BASE_ORDERBOOK_V6_SUBGRAPH_URLS: ["https://example.com/orderbook"],
     PINATA_GATEWAY: "https://gateway.pinata.cloud/ipfs",
     ENERGY_FIELDS: [
       {

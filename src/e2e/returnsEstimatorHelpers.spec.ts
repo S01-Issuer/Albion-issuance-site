@@ -9,7 +9,39 @@ import {
 } from "$lib/utils/returnsEstimatorHelpers";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
 import { ProductionStatus, TokenType } from "$lib/types/MetaboardTypes";
-import type { ISODateTimeString } from "$lib/types/sharedTypes";
+import type {
+  ISODateTimeString,
+  ISOYearMonthString,
+} from "$lib/types/sharedTypes";
+
+/**
+ * Build a YYYY-MM string `offsetMonths` away from the current month. Keeping the
+ * fixture relative to "now" stops these tests from rotting: calculateMonthlyTokenCashflows
+ * only projects the current + future months, so hardcoded calendar dates silently
+ * turn every projection into the past and the function returns [].
+ */
+function ym(offsetMonths: number): ISOYearMonthString {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + offsetMonths);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}` as ISOYearMonthString;
+}
+
+// 12 months of declining production, starting at the current month.
+const PROJECTION_PRODUCTIONS = [
+  1000, 950, 900, 850, 800, 750, 700, 650, 600, 550, 500, 450,
+];
+function makeProjections(): Array<{
+  month: ISOYearMonthString;
+  production: number;
+}> {
+  return PROJECTION_PRODUCTIONS.map((production, i) => ({
+    month: ym(i),
+    production,
+  }));
+}
 
 /**
  * Helper function to create a test token with customizable properties
@@ -20,7 +52,7 @@ function makeToken(overrides: Partial<TokenMetadata> = {}): TokenMetadata {
     symbol: "TEST1",
     releaseName: "Test Token Release 1",
     tokenType: TokenType.Royalty,
-    firstPaymentDate: "2025-01",
+    firstPaymentDate: ym(0),
     sharePercentage: 10,
     payoutData: [],
     asset: {
@@ -52,20 +84,7 @@ function makeToken(overrides: Partial<TokenMetadata> = {}): TokenMetadata {
       status: ProductionStatus.Producing,
       plannedProduction: {
         oilPriceAssumption: 80,
-        projections: [
-          { month: "2025-01", production: 1000 },
-          { month: "2025-02", production: 950 },
-          { month: "2025-03", production: 900 },
-          { month: "2025-04", production: 850 },
-          { month: "2025-05", production: 800 },
-          { month: "2025-06", production: 750 },
-          { month: "2025-07", production: 700 },
-          { month: "2025-08", production: 650 },
-          { month: "2025-09", production: 600 },
-          { month: "2025-10", production: 550 },
-          { month: "2025-11", production: 500 },
-          { month: "2025-12", production: 450 },
-        ],
+        projections: makeProjections(),
       },
       historicalProduction: [],
       receiptsData: [],
