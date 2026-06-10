@@ -141,3 +141,6 @@ vite.config.ts.timestamp-*
 
 metaboard-files/
 .env*.local
+
+# macOS
+.DS_Store
