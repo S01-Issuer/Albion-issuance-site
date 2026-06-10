@@ -13,6 +13,13 @@ import { json, type RequestEvent } from "@sveltejs/kit";
 import { put, head, type HeadBlobResult } from "@vercel/blob";
 import axios from "axios";
 import { PRIVATE_HYPERSYNC_API_KEY } from "$env/static/private";
+import {
+  mergeLogs,
+  planFullScanResult,
+  type BlobCacheData,
+  type CachedLog,
+  type ScanResult,
+} from "./cache";
 
 interface HypersyncBlock {
   number: string;
@@ -37,27 +44,6 @@ interface HypersyncEntry {
 interface HypersyncResponseData {
   data: HypersyncEntry[];
   next_block: number;
-}
-
-interface CachedLog {
-  block_number: string;
-  log_index: string;
-  transaction_index: string;
-  transaction_hash: string;
-  data: string;
-  address: string;
-  topic0: string;
-  timestamp: number | null;
-}
-
-interface BlobCacheData {
-  logs: CachedLog[];
-  // Lowest block the cache has been scanned FROM. Without this, a request for an
-  // older range than was previously cached would be served a truncated set (the
-  // cache only knew its upper bound). Older blobs may omit it — inferred on read.
-  lowWaterBlock?: number;
-  highWaterBlock: number;
-  updatedAt: number;
 }
 
 const HYPERSYNC_URL = "https://8453.hypersync.xyz/query";
@@ -86,6 +72,13 @@ function blobKey(contractAddress: string, eventTopics: string[]): string {
 
 // In-memory layer (fast path, avoids Blob reads on warm instances), keyed per contract.
 const memCache = new Map<string, BlobCacheData>();
+
+// Single-flight for full re-scans, keyed by `${blobKey}:${scanFrom}`. A cold or
+// stale-floored cache hit by several requests at once (e.g. portfolio + claims pages
+// loading together for the same wallet) would otherwise each kick off a 20-100s scan,
+// hammering Hypersync — which raises the rate-limit/error odds that poison the cache —
+// and racing each other's writes. Concurrent callers with the same floor share one scan.
+const inFlightFullScan = new Map<string, Promise<BlobCacheData | null>>();
 
 /**
  * Load cache: try in-memory first, then Vercel Blob
@@ -141,7 +134,7 @@ async function fetchFromHypersync(
   contractAddress: string,
   eventTopics: string[],
   fromBlock: number,
-): Promise<{ logs: CachedLog[]; nextBlock: number }> {
+): Promise<ScanResult> {
   const allLogs: CachedLog[] = [];
   let currentBlock = fromBlock;
 
@@ -180,7 +173,11 @@ async function fetchFromHypersync(
       );
 
       const responseData = res.data;
-      if (!responseData?.data) break;
+      // Malformed/empty page mid-scan: treat as a FAILED scan, not "this range has
+      // these (partial) logs". Returning ok:false stops the caller persisting it.
+      if (!responseData?.data) {
+        return { ok: false, logs: allLogs, nextBlock: currentBlock };
+      }
 
       for (const entry of responseData.data) {
         const blockMap = new Map(
@@ -203,6 +200,7 @@ async function fetchFromHypersync(
         responseData.next_block <= currentBlock
       ) {
         return {
+          ok: true,
           logs: allLogs,
           nextBlock: responseData.next_block || currentBlock,
         };
@@ -211,11 +209,10 @@ async function fetchFromHypersync(
       currentBlock = responseData.next_block;
     } catch (error) {
       console.warn("Hypersync fetch error in context-events:", error);
-      break;
+      // Bail with whatever we have, flagged as incomplete so it isn't persisted.
+      return { ok: false, logs: allLogs, nextBlock: currentBlock };
     }
   }
-
-  return { logs: allLogs, nextBlock: currentBlock };
 }
 
 export async function POST({ request }: RequestEvent) {
@@ -262,24 +259,30 @@ export async function POST({ request }: RequestEvent) {
       cachedLow <= requestedFrom &&
       cached.highWaterBlock >= requestedFrom
     ) {
-      // Delta fetch after a claim (forceRefresh) or on the refetch interval
+      // Delta fetch after a claim (forceRefresh) or on the refetch interval.
       if (shouldDelta) {
+        // Scan from highWaterBlock *inclusive*: it holds Hypersync's next_block (the
+        // next block to scan), so the old `+ 1` skipped that block every delta,
+        // silently dropping any claim event that landed on a watermark. mergeLogs
+        // de-dupes the boundary overlap.
         const delta = await fetchFromHypersync(
           contractAddress,
           topics,
-          cached.highWaterBlock + 1,
-        );
-
-        if (delta.logs.length > 0) {
-          cached.logs.push(...delta.logs);
-        }
-        cached.highWaterBlock = Math.max(
           cached.highWaterBlock,
-          delta.nextBlock,
         );
-        cached.updatedAt = now;
 
-        saveCache(contractAddress, topics, cached).catch(() => {});
+        // Only advance + persist when the scan actually completed. A failed/partial
+        // delta (ok:false) is ignored so we keep serving the good cache rather than
+        // dropping logs or advancing the watermark past an unscanned range.
+        if (delta.ok) {
+          cached.logs = mergeLogs(cached.logs, delta.logs);
+          cached.highWaterBlock = Math.max(
+            cached.highWaterBlock,
+            delta.nextBlock,
+          );
+          cached.updatedAt = now;
+          saveCache(contractAddress, topics, cached).catch(() => {});
+        }
       }
 
       const filtered = cached.logs.filter(
@@ -299,26 +302,46 @@ export async function POST({ request }: RequestEvent) {
         ? Math.min(requestedFrom, cachedLow)
         : requestedFrom;
 
-    const result = await fetchFromHypersync(
-      contractAddress,
-      topics,
-      scanFrom,
-    );
+    // Single-flight the rebuild (keyed by contract+topics+floor) so concurrent
+    // requests for the same range share one scan instead of racing.
+    const flightKey = `${blobKey(contractAddress, topics)}:${scanFrom}`;
+    let flight = inFlightFullScan.get(flightKey);
+    if (!flight) {
+      flight = (async (): Promise<BlobCacheData | null> => {
+        const result = await fetchFromHypersync(contractAddress, topics, scanFrom);
+        // planFullScanResult refuses to overwrite a good cache or persist a
+        // partial/empty set when the scan failed (ok:false) — the fix for the
+        // 867 -> 0 -> 867 flicker. On failure it returns the existing cache (stale).
+        const { cache, persist } = planFullScanResult(
+          cached,
+          result,
+          scanFrom,
+          Date.now(),
+        );
+        if (persist && cache) {
+          saveCache(contractAddress, topics, cache).catch(() => {});
+        }
+        return cache;
+      })().finally(() => inFlightFullScan.delete(flightKey));
+      inFlightFullScan.set(flightKey, flight);
+    }
 
-    const newCache: BlobCacheData = {
-      logs: result.logs,
-      lowWaterBlock: scanFrom,
-      highWaterBlock: result.nextBlock,
-      updatedAt: now,
-    };
+    const rebuilt = await flight;
 
-    // Save to both layers (fire-and-forget)
-    saveCache(contractAddress, topics, newCache).catch(() => {});
+    // Scan failed and there was no prior cache to fall back to: serve nothing this
+    // time WITHOUT persisting, so the next request retries a clean scan rather than
+    // inheriting a poisoned empty cache. 503 signals "transient, retry".
+    if (!rebuilt) {
+      return json(
+        { logs: [], fromCache: false, error: "scan_unavailable" },
+        { status: 503 },
+      );
+    }
 
-    const filtered = result.logs.filter(
+    const filtered = rebuilt.logs.filter(
       (log) => Number(log.block_number) >= requestedFrom,
     );
-    return json({ logs: filtered, fromCache: false });
+    return json({ logs: filtered, fromCache: rebuilt === cached });
   } catch (err) {
     console.error("Context events error:", err);
     return json({ error: "Failed to fetch context events" }, { status: 500 });
