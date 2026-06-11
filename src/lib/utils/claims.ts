@@ -11,12 +11,12 @@ export type AmountEncoding = "int18" | "float";
 import { SimpleMerkleTree } from "@openzeppelin/merkle-tree";
 import { AbiCoder } from "ethers";
 import axios from "axios";
-import { ethers, Signature } from "ethers";
+import { Signature } from "ethers";
 import { Wallet, keccak256, hashMessage, getBytes, concat, hexlify } from "ethers";
 import { decodeOrderBytes, normalizeOrderForSdk } from "$lib/utils/orderbook";
 import { verifyCid } from "./cidVerify";
 import type { OrderV4 as OrderV4Type } from "@rainlanguage/orderbook";
-import { formatEther, parseEther } from "viem";
+import { decodeAbiParameters, formatEther, parseEther } from "viem";
 
 // Create a singleton AbiCoder instance for reuse
 // This works in both production and test environments
@@ -81,7 +81,7 @@ interface DecodedClaimLog {
   index: string;
   address: string;
   amount: string;
-  /** Order hash from Context column 1 when present (may be metadata, not deploy hash). */
+  /** Order hash from Context calling-context col[1][0] ([orderHash, owner, counterparty]). */
   orderHash?: string;
   txHash?: string;
   timestamp?: string;
@@ -323,7 +323,6 @@ export async function sortClaimsData(
   prefetchedLogs?: HypersyncResult[], // Pre-fetched logs to avoid duplicate Hypersync scans
   source?: OrderbookSource, // OrderBook era (drives amount encoding + self-fetch address/topic)
   extraClaimTxHashes?: string[], // Recent claim txs (receipt fallback when subgraph/Hypersync lag)
-  expectedMerkleRoot?: string, // v6: scope Context logs to this order's merkle root
 ): Promise<SortedClaimsResult> {
   const encoding: AmountEncoding = source?.amountEncoding ?? "int18";
   const orderbookAddress =
@@ -383,18 +382,22 @@ export async function sortClaimsData(
   );
 
   // Filter decoded logs by owner address. For v6, also scope to this order's
-  // merkle root (Context col[1]) so shared per-OrderBook logs do not mark
-  // another order's payout as claimed.
-  const normalizedMerkleRoot = expectedMerkleRoot?.toLowerCase();
+  // hash (Context calling-context col[1][0]) so shared per-OrderBook logs do
+  // not mark another order's payout as claimed.
+  // NB: col[1][0] is the ORDER HASH, not the order's merkle root — verified
+  // against on-chain ContextV2 logs (e.g. tx 0x0bb856c8…, block 47078524).
+  // Scoping by merkle root never matched, so claimed v6 rows were re-offered
+  // as claimable after a successful claim.
+  const normalizedOrderHash = orderHash?.toLowerCase();
   const filteredDecodedLogs = decodedLogs.filter((log) => {
     if (!log?.address || log.address.toLowerCase() !== normalizedOwnerAddress) {
       return false;
     }
-    // v6: col[1] is this order's merkle root — require it so shared OB logs
-    // cannot mark another monthly order's payout as claimed/unclaimed.
-    if (encoding === "float" && normalizedMerkleRoot) {
+    // v6: require this order's hash so shared OB logs cannot mark another
+    // monthly order's payout as claimed/unclaimed.
+    if (encoding === "float" && normalizedOrderHash) {
       if (!log.orderHash) return false;
-      return log.orderHash.toLowerCase() === normalizedMerkleRoot;
+      return log.orderHash.toLowerCase() === normalizedOrderHash;
     }
     return true;
   });
@@ -404,7 +407,7 @@ export async function sortClaimsData(
     filteredCsvClaims,
     filteredDecodedLogs,
     encoding,
-    expectedMerkleRoot,
+    orderHash,
   );
 
   // Calculate total amounts
@@ -628,7 +631,8 @@ function toBytes32Hex(v: unknown): string {
 // Both v4 (Context(address,uint256[][])) and v6 (ContextV2(address,bytes32[][])) have
 // the same on-wire 32-byte-per-element format, so we always decode as uint256[][].
 // The signed claim context (index, amount, …proof) sits at column 6 (sometimes 5/7/8);
-// col[1][0] is the order hash, used to scope claims to a specific order.
+// col[1] is the calling context [orderHash, orderOwner, counterparty] — col[1][0]
+// scopes claims to a specific order.
 // For v6, slot[0] is Float(index,0) and slot[1] is Float(amount,18) — we convert both
 // back to their plain integer forms so they match raw CSV values.
 function decodeLogData(
@@ -639,10 +643,12 @@ function decodeLogData(
     return null;
   }
   try {
-    const logBytes = ethers.getBytes(data);
-    const decodedData = abiCoder.decode(["address", "uint256[][]"], logBytes);
-
-    const contextColumns = decodedData[1] as bigint[][];
+    // viem (not ethers' AbiCoder) so the decode also runs under vitest —
+    // ethers' Result proxy breaks in the vite test transform.
+    const [sender, contextColumns] = decodeAbiParameters(
+      [{ type: "address" }, { type: "uint256[][]" }],
+      data as `0x${string}`,
+    );
     const orderHash =
       contextColumns[1] && contextColumns[1].length >= 1
         ? toBytes32Hex(contextColumns[1][0])
@@ -674,7 +680,7 @@ function decodeLogData(
     return {
       orderHash,
       index: claimIndex,
-      address: decodedData[0] as string,
+      address: sender,
       amount: claimAmount,
     };
   } catch {
@@ -720,8 +726,8 @@ export function decodeClaimLogs(
       const address = log.address;
       if (!address) return false;
       if (address === ZERO_ADDRESS) return false;
-      // Do not filter by col[1] order hash — on v6 it is often merkle metadata,
-      // not the subgraph orderHash. This call is already scoped to one order's CSV.
+      // No per-order filtering here: this decodes the SHARED per-OrderBook log
+      // set. Scoping to one order's hash (col[1][0]) happens in sortClaimsData.
       return true;
     }) as DecodedClaimLog[];
 }
@@ -779,21 +785,24 @@ function filterClaimedAndUnclaimed(
   csvClaims: CsvClaimRow[],
   decodedLogs: DecodedClaimLog[],
   encoding: AmountEncoding = "int18",
-  expectedMerkleRoot?: string,
+  scopeOrderHash?: string,
 ): {
   claimedCsv: ClaimedCsvRow[];
   unclaimedCsv: UnclaimedCsvRow[];
 } {
   const claimedCsv: ClaimedCsvRow[] = [];
   const unclaimedCsv: UnclaimedCsvRow[] = [];
-  const normalizedMerkleRoot = expectedMerkleRoot?.toLowerCase();
+  const normalizedOrderHash = scopeOrderHash?.toLowerCase();
 
   csvClaims.forEach((claim) => {
     const decodedLog = decodedLogs.find((log) => {
+      // v6: a log only proves THIS order's row claimed if its calling-context
+      // order hash (col[1][0]) matches — multi-order claim txs emit one
+      // Context log per order, all visible in the shared per-OB log set.
       if (
         encoding === "float" &&
-        normalizedMerkleRoot &&
-        log.orderHash?.toLowerCase() !== normalizedMerkleRoot
+        normalizedOrderHash &&
+        log.orderHash?.toLowerCase() !== normalizedOrderHash
       ) {
         return false;
       }

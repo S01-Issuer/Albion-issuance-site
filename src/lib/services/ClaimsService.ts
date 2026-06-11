@@ -446,7 +446,6 @@ export class ClaimsService {
       sharedLogs,
       source,
       claimTxHashes,
-      claim.expectedMerkleRoot,
     )) as SortedClaimsData;
 
     const claimedAmount = sortedClaimsData?.totalClaimedAmount
