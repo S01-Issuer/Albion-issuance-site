@@ -16,7 +16,8 @@ import { Wallet, keccak256, hashMessage, getBytes, concat, hexlify } from "ether
 import { decodeOrderBytes, normalizeOrderForSdk } from "$lib/utils/orderbook";
 import { verifyCid } from "./cidVerify";
 import type { OrderV4 as OrderV4Type } from "@rainlanguage/orderbook";
-import { decodeAbiParameters, formatEther, parseEther } from "viem";
+import { formatEther, parseEther } from "viem";
+import { decodeContextData, type DecodedContext } from "$lib/utils/contextLogDecode";
 
 // Create a singleton AbiCoder instance for reuse
 // This works in both production and test environments
@@ -112,12 +113,16 @@ interface HypersyncBlock {
 
 interface HypersyncLog {
   block_number: string;
-  log_index: string;
-  transaction_index: string;
   transaction_hash: string;
-  data: string;
-  address: string;
-  topic0: string;
+  // Raw scan fields. Optional because the /api/context-events response now ships
+  // pre-decoded `ctx` INSTEAD of the heavy raw `data` blob (and drops the other
+  // raw-only fields it no longer needs). Only the receipt-fallback path still
+  // populates `data`, which `decodeContextData` reads when `ctx` is absent.
+  log_index?: string;
+  transaction_index?: string;
+  data?: string;
+  address?: string;
+  topic0?: string;
   block?: {
     timestamp: number | string;
   };
@@ -135,6 +140,13 @@ export interface HypersyncResponseData {
 
 export type HypersyncResult = HypersyncLog & {
   timestamp: number | null;
+  /**
+   * Server-pre-decoded Context payload. When present, `decodeClaimLogs` uses it
+   * directly and SKIPS the per-log viem ABI decode — the ~16.5k×/load hot path
+   * that shipped 30MB+ of raw `data` to the browser. Absent on the small
+   * receipt-fallback path, which still decodes `data` client-side.
+   */
+  ctx?: DecodedContext | null;
 };
 
 function formatAmountWei(value: string | bigint): string {
@@ -618,106 +630,52 @@ export function getBlockRangeFromTrades(trades: Trade[]): {
   return { lowest, highest };
 }
 
-function toBytes32Hex(v: unknown): string {
-  return (
-    "0x" +
-    BigInt(v as string | bigint)
-      .toString(16)
-      .padStart(64, "0")
-  );
-}
-
-// Decode a Context / ContextV2 event log from either era.
-// Both v4 (Context(address,uint256[][])) and v6 (ContextV2(address,bytes32[][])) have
-// the same on-wire 32-byte-per-element format, so we always decode as uint256[][].
-// The signed claim context (index, amount, …proof) sits at column 6 (sometimes 5/7/8);
-// col[1] is the calling context [orderHash, orderOwner, counterparty] — col[1][0]
-// scopes claims to a specific order.
-// For v6, slot[0] is Float(index,0) and slot[1] is Float(amount,18) — we convert both
-// back to their plain integer forms so they match raw CSV values.
-function decodeLogData(
-  data: string,
-  encoding: AmountEncoding = "int18",
-): DecodedClaimLog | null {
-  if (!data || data === "0x") {
-    return null;
-  }
-  try {
-    // viem (not ethers' AbiCoder) so the decode also runs under vitest —
-    // ethers' Result proxy breaks in the vite test transform.
-    const [sender, contextColumns] = decodeAbiParameters(
-      [{ type: "address" }, { type: "uint256[][]" }],
-      data as `0x${string}`,
-    );
-    const orderHash =
-      contextColumns[1] && contextColumns[1].length >= 1
-        ? toBytes32Hex(contextColumns[1][0])
-        : undefined;
-
-    let claimIndex: string | undefined;
-    let claimAmount: string | undefined;
-
-    const columnsToCheck = [6, 5, 7, 8, 0, 1, 2, 3, 4, 9];
-    for (const colIdx of columnsToCheck) {
-      const col = contextColumns[colIdx];
-      if (col && col.length >= 2) {
-        if (encoding === "float") {
-          // v6: on-wire Float words as uint256; match via floatContextSlot* helpers
-          claimIndex = col[0].toString();
-          claimAmount = col[1].toString();
-        } else {
-          claimIndex = col[0].toString();
-          claimAmount = col[1].toString();
-        }
-        break;
-      }
-    }
-
-    if (claimIndex === undefined || claimAmount === undefined) {
-      return null;
-    }
-
-    return {
-      orderHash,
-      index: claimIndex,
-      address: sender,
-      amount: claimAmount,
-    };
-  } catch {
-    // Return null instead of a fake entry - don't mask real claim data
-    return null;
-  }
-}
-
 /**
  * Decode + normalise a raw Context log set into DecodedClaimLogs (drops
  * undecodable / zero-address entries). Pure in (logs, encoding).
+ *
+ * `encoding` is retained for signature stability but the on-wire decode is
+ * era-independent (see `decodeContextData`); the era only matters later, in
+ * `decodedLogMatchesClaim`. Logs carrying a server-pre-decoded `ctx` skip the
+ * viem ABI decode entirely — that decode is the ~16.5k×/load hot path.
  */
 export function decodeClaimLogs(
   logs: HypersyncResult[],
-  encoding: AmountEncoding,
+  _encoding: AmountEncoding,
 ): DecodedClaimLog[] {
   return logs
     .map((log) => {
-      const decodedData = decodeLogData(log.data, encoding);
-      if (!decodedData) {
+      // Fast path: server already decoded this log's Context payload. `ctx` is
+      // `null` when the server decode failed (undecodable/non-claim) — treat it
+      // the same as a client-side decode miss and drop the log. Only `undefined`
+      // (field absent, e.g. receipt-fallback logs) falls through to viem.
+      const decoded =
+        log.ctx !== undefined ? log.ctx : decodeContextData(log.data);
+      if (!decoded) {
         return null;
       }
 
+      // Build a fresh result object — never mutate `decoded`, which on the fast
+      // path is the shared server-decoded `ctx` (cloned only shallowly upstream).
+      let timestamp: string | undefined;
       if (log.block?.timestamp !== undefined) {
         const timestampValue =
           typeof log.block.timestamp === "string"
             ? Number.parseInt(log.block.timestamp, 16)
             : log.block.timestamp;
         if (!Number.isNaN(timestampValue)) {
-          decodedData.timestamp = new Date(timestampValue * 1000).toISOString();
+          timestamp = new Date(timestampValue * 1000).toISOString();
         }
       } else if (typeof log.timestamp === "number") {
-        decodedData.timestamp = new Date(log.timestamp * 1000).toISOString();
+        timestamp = new Date(log.timestamp * 1000).toISOString();
       }
 
       return {
-        ...decodedData,
+        orderHash: decoded.orderHash,
+        index: decoded.index,
+        address: decoded.address,
+        amount: decoded.amount,
+        timestamp,
         txHash: log.transaction_hash,
       };
     })

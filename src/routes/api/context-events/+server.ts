@@ -20,6 +20,57 @@ import {
   type CachedLog,
   type ScanResult,
 } from "./cache";
+import {
+  decodeContextData,
+  type DecodedContext,
+} from "$lib/utils/contextLogDecode";
+
+/**
+ * Compact per-log wire shape returned to the client. The heavy `data` ABI blob
+ * (the bulk of a 30MB+ v4 scan) is dropped in favour of `ctx`, the pre-decoded
+ * Context payload — so the browser never re-decodes ~16.5k logs on every load.
+ */
+interface WireLog {
+  block_number: string;
+  transaction_hash: string;
+  timestamp: number | null;
+  ctx: DecodedContext | null;
+}
+
+// Decode a scanned log set exactly ONCE per process, keyed on the log ARRAY
+// identity. `mergeLogs` returns a fresh array on every delta, so a changed set
+// misses the cache and re-decodes; a warm no-delta request hits it and just
+// filters + serializes. This is the server-side twin of the client's
+// `decodeClaimLogsMemoised`, moved here so the decode cost is paid once total
+// rather than once per browser per load.
+const decodedCtxCache = new WeakMap<CachedLog[], (DecodedContext | null)[]>();
+
+function decodedCtxFor(logs: CachedLog[]): (DecodedContext | null)[] {
+  let decoded = decodedCtxCache.get(logs);
+  if (!decoded) {
+    decoded = logs.map((log) => decodeContextData(log.data));
+    decodedCtxCache.set(logs, decoded);
+  }
+  return decoded;
+}
+
+// Build the compact response for a cache: pre-decoded Context payloads, no raw
+// `data`, filtered to [requestedFrom, tip].
+function toWireLogs(cache: BlobCacheData, requestedFrom: number): WireLog[] {
+  const ctxAll = decodedCtxFor(cache.logs);
+  const out: WireLog[] = [];
+  for (let i = 0; i < cache.logs.length; i += 1) {
+    const log = cache.logs[i];
+    if (Number(log.block_number) < requestedFrom) continue;
+    out.push({
+      block_number: log.block_number,
+      transaction_hash: log.transaction_hash,
+      timestamp: log.timestamp,
+      ctx: ctxAll[i] ?? null,
+    });
+  }
+  return out;
+}
 
 interface HypersyncBlock {
   number: string;
@@ -285,10 +336,7 @@ export async function POST({ request }: RequestEvent) {
         }
       }
 
-      const filtered = cached.logs.filter(
-        (log) => Number(log.block_number) >= requestedFrom,
-      );
-      return json({ logs: filtered, fromCache: true });
+      return json({ logs: toWireLogs(cached, requestedFrom), fromCache: true });
     }
 
     // Cache miss, OR the cache doesn't reach down to requestedFrom (an older range
@@ -338,10 +386,10 @@ export async function POST({ request }: RequestEvent) {
       );
     }
 
-    const filtered = rebuilt.logs.filter(
-      (log) => Number(log.block_number) >= requestedFrom,
-    );
-    return json({ logs: filtered, fromCache: rebuilt === cached });
+    return json({
+      logs: toWireLogs(rebuilt, requestedFrom),
+      fromCache: rebuilt === cached,
+    });
   } catch (err) {
     console.error("Context events error:", err);
     return json({ error: "Failed to fetch context events" }, { status: 500 });

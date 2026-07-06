@@ -144,3 +144,5 @@ metaboard-files/
 
 # macOS
 .DS_Store
+
+.playwright-mcp/
