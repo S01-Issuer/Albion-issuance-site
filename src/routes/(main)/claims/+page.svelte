@@ -3,7 +3,7 @@
 	import { derived, get } from 'svelte/store';
 	import { onMount, onDestroy } from 'svelte';
 	import { web3Modal, signerAddress, connected, wagmiConfig, chainId } from 'svelte-wagmi';
-	import { Card, CardContent, PrimaryButton, SecondaryButton, StatusBadge, StatsCard, SectionTitle, CollapsibleSection, FormattedNumber } from '$lib/components/components';
+	import { Card, CardContent, PrimaryButton, SecondaryButton, StatusBadge, StatsCard, SectionTitle, CollapsibleSection, FormattedNumber, PayoutAlertsCard } from '$lib/components/components';
 	import { PageLayout, HeroSection, ContentSection } from '$lib/components/layout';
 	import { graphQLCache } from '$lib/data/clients/cachedGraphqlClient';
 	import { formatCurrency, calculateExpectedNextPayout, formatExpectedNextPayout } from '$lib/utils/formatters';
@@ -662,6 +662,10 @@
 					✅ Claim successful! Tokens have been sent to your wallet.
 				</div>
 			{/if}
+
+			<!-- Payout email alerts: signup lives where payout attention already is;
+			     doubles as the post-claim nudge since it sits under the success banner. -->
+			<PayoutAlertsCard address={$signerAddress ?? null} />
 		</HeroSection>
 
 		<!-- Available Claims by Asset -->

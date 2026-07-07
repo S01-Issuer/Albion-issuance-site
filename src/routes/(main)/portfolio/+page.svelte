@@ -15,7 +15,8 @@
 		PieChart,
 		StatusBadge,
 		ActionCard,
-		Modal
+		Modal,
+		PayoutAlertsCard
 	} from '$lib/components/components';
 	import { PageLayout, HeroSection, ContentSection, FullWidthSection } from '$lib/components/layout';
 	import { formatCurrency, formatPercentage, formatNumber, calculateExpectedNextPayout, formatExpectedNextPayout } from '$lib/utils/formatters';
@@ -1104,6 +1105,11 @@ function percentageDisplay(value: number): string {
 						Some data could not be loaded. Please try again later.
 					</div>
 				{/if}
+
+				<!-- Slim payout-alerts entry point; full signup card lives on the claims page. -->
+				<div class="max-w-md mx-auto mt-4 text-center">
+					<PayoutAlertsCard address={$signerAddress ?? null} variant="row" />
+				</div>
 			{/if}
 		</HeroSection>
 
