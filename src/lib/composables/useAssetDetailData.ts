@@ -7,7 +7,7 @@ import { writable, type Writable, get } from "svelte/store";
 import type { Asset } from "$lib/types/uiTypes";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";
 import { ENERGY_FIELDS } from "$lib/network";
-import { useCatalogService } from "$lib/services";
+import { useCatalogService } from "$lib/services/CatalogService";
 import { hasAvailableSupplySync } from "$lib/utils/supplyHelpers";
 
 interface AssetDetailState {

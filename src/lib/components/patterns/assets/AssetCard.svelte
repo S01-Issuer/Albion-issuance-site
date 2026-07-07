@@ -4,7 +4,7 @@ import { createEventDispatcher, onMount } from 'svelte';
 import type { Asset } from '$lib/types/uiTypes';
 import { Card, CardContent, PrimaryButton } from '$lib/components/components';
 	import { formatCurrency, formatEndDate, formatSmartNumber } from '$lib/utils/formatters';
-	import { useCatalogService } from '$lib/services';
+	import { useCatalogService } from '$lib/services/CatalogService';
 	import { sfts } from '$lib/stores';
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import FormattedReturn from '$lib/components/components/FormattedReturn.svelte';

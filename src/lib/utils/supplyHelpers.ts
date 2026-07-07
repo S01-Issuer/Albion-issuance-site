@@ -7,7 +7,7 @@
 import { get } from "svelte/store";
 import { sfts } from "$lib/stores";
 import { sftRepository } from "$lib/data/repositories";
-import { catalogService } from "$lib/services";
+import { catalogService } from "$lib/services/CatalogService";
 import { getMaxSharesSupplyMap } from "$lib/data/clients/onchain";
 import authorizerAbi from "$lib/abi/authorizer.json";
 import type { TokenMetadata } from "$lib/types/MetaboardTypes";

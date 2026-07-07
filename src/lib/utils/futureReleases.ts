@@ -1,5 +1,5 @@
 import { ENERGY_FIELDS } from "$lib/network";
-import { catalogService } from "$lib/services";
+import { catalogService } from "$lib/services/CatalogService";
 
 /**
  * Check if an energy field has incomplete releases (< 100% shares allocated)

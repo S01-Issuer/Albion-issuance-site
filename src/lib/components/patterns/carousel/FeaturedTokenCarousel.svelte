@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createEventDispatcher, onDestroy } from 'svelte';
-	import { useCatalogService } from '$lib/services';
+	import { useCatalogService } from '$lib/services/CatalogService';
 	import type { Asset } from '$lib/types/uiTypes';
 	import { PrimaryButton, SecondaryButton, FormattedNumber, FormattedReturn } from '$lib/components/components';
 	import { sftMetadata, sfts } from '$lib/stores';
