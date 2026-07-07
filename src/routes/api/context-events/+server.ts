@@ -8,6 +8,13 @@
  * High-water-mark pattern: stores all events up to block N.
  * On each request, only fetches blocks N+1 → chain tip.
  * Even after weeks of no traffic, cold start only fetches the delta.
+ *
+ * Storage format v2: logs are persisted in the compact pre-decoded form
+ * (`ctx`, no raw ABI `data`) under a v2 blob key, shrinking the v4 blob from
+ * ~30MB to ~4MB — the cold-start cost is one small fetch + parse, with zero
+ * per-request ABI decoding. Legacy (v1) blobs under the old key are migrated
+ * on first read (one decode pass, no Hypersync rescan) and left untouched so
+ * a rolled-back deployment still finds its own format.
  */
 import { json, type RequestEvent } from "@sveltejs/kit";
 import { put, head, type HeadBlobResult } from "@vercel/blob";
@@ -15,62 +22,15 @@ import axios from "axios";
 import { PRIVATE_HYPERSYNC_API_KEY } from "$env/static/private";
 import {
   mergeLogs,
+  migrateCacheData,
   planFullScanResult,
+  toCompactLog,
+  toWireLogs,
   type BlobCacheData,
   type CachedLog,
+  type LegacyBlobCacheData,
   type ScanResult,
 } from "./cache";
-import {
-  decodeContextData,
-  type DecodedContext,
-} from "$lib/utils/contextLogDecode";
-
-/**
- * Compact per-log wire shape returned to the client. The heavy `data` ABI blob
- * (the bulk of a 30MB+ v4 scan) is dropped in favour of `ctx`, the pre-decoded
- * Context payload — so the browser never re-decodes ~16.5k logs on every load.
- */
-interface WireLog {
-  block_number: string;
-  transaction_hash: string;
-  timestamp: number | null;
-  ctx: DecodedContext | null;
-}
-
-// Decode a scanned log set exactly ONCE per process, keyed on the log ARRAY
-// identity. `mergeLogs` returns a fresh array on every delta, so a changed set
-// misses the cache and re-decodes; a warm no-delta request hits it and just
-// filters + serializes. This is the server-side twin of the client's
-// `decodeClaimLogsMemoised`, moved here so the decode cost is paid once total
-// rather than once per browser per load.
-const decodedCtxCache = new WeakMap<CachedLog[], (DecodedContext | null)[]>();
-
-function decodedCtxFor(logs: CachedLog[]): (DecodedContext | null)[] {
-  let decoded = decodedCtxCache.get(logs);
-  if (!decoded) {
-    decoded = logs.map((log) => decodeContextData(log.data));
-    decodedCtxCache.set(logs, decoded);
-  }
-  return decoded;
-}
-
-// Build the compact response for a cache: pre-decoded Context payloads, no raw
-// `data`, filtered to [requestedFrom, tip].
-function toWireLogs(cache: BlobCacheData, requestedFrom: number): WireLog[] {
-  const ctxAll = decodedCtxFor(cache.logs);
-  const out: WireLog[] = [];
-  for (let i = 0; i < cache.logs.length; i += 1) {
-    const log = cache.logs[i];
-    if (Number(log.block_number) < requestedFrom) continue;
-    out.push({
-      block_number: log.block_number,
-      transaction_hash: log.transaction_hash,
-      timestamp: log.timestamp,
-      ctx: ctxAll[i] ?? null,
-    });
-  }
-  return out;
-}
 
 interface HypersyncBlock {
   number: string;
@@ -113,12 +73,29 @@ function normalizeEventTopics(
 }
 
 // Cache key is per OrderBook + topic set — eras must not share a cache entry.
-function blobKey(contractAddress: string, eventTopics: string[]): string {
-  const topicKey = eventTopics
+function topicKeyOf(eventTopics: string[]): string {
+  return eventTopics
     .map((t) => t.slice(2, 10))
     .sort()
     .join("-");
-  return `hypersync-context-events-${contractAddress.toLowerCase()}-${topicKey}.json`;
+}
+
+/**
+ * v2 (compact-format) blob key. Deliberately DIFFERENT from the legacy key:
+ * an older deployment reading a compact blob would decode the missing `data`
+ * field to ctx=null on every log and serve claimed=0 for everyone. Separate
+ * keys make both directions of a deploy/rollback read a format they understand.
+ */
+function blobKey(contractAddress: string, eventTopics: string[]): string {
+  return `hypersync-context-events-v2-${contractAddress.toLowerCase()}-${topicKeyOf(eventTopics)}.json`;
+}
+
+/** Legacy (v1, raw-log) blob key — read-only fallback for migration. */
+function legacyBlobKey(
+  contractAddress: string,
+  eventTopics: string[],
+): string {
+  return `hypersync-context-events-${contractAddress.toLowerCase()}-${topicKeyOf(eventTopics)}.json`;
 }
 
 // In-memory layer (fast path, avoids Blob reads on warm instances), keyed per contract.
@@ -131,8 +108,25 @@ const memCache = new Map<string, BlobCacheData>();
 // and racing each other's writes. Concurrent callers with the same floor share one scan.
 const inFlightFullScan = new Map<string, Promise<BlobCacheData | null>>();
 
+async function fetchBlobJson<T>(key: string): Promise<T | null> {
+  try {
+    const blobMeta: HeadBlobResult | null = await head(key).catch(() => null);
+    if (!blobMeta?.url) return null;
+
+    const response = await fetch(blobMeta.url);
+    if (!response.ok) return null;
+
+    return (await response.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Load cache: try in-memory first, then Vercel Blob
+ * Load cache: in-memory → v2 Blob → legacy (v1) Blob. A legacy hit is migrated
+ * to the compact format (one decode pass) and persisted under the v2 key so the
+ * cost is paid once, not per cold instance. The legacy blob is never written
+ * again — it just goes stale, which is harmless.
  */
 async function loadCache(
   contractAddress: string,
@@ -142,20 +136,21 @@ async function loadCache(
   const mem = memCache.get(key);
   if (mem) return mem;
 
-  try {
-    // Check if blob exists
-    const blobMeta: HeadBlobResult | null = await head(key).catch(() => null);
-    if (!blobMeta?.url) return null;
-
-    const response = await fetch(blobMeta.url);
-    if (!response.ok) return null;
-
-    const data: BlobCacheData = await response.json();
-    memCache.set(key, data);
-    return data;
-  } catch {
-    return null;
+  const v2 = await fetchBlobJson<BlobCacheData>(key);
+  if (v2) {
+    memCache.set(key, v2);
+    return v2;
   }
+
+  const legacy = await fetchBlobJson<LegacyBlobCacheData>(
+    legacyBlobKey(contractAddress, eventTopics),
+  );
+  if (!legacy) return null;
+
+  const { cache } = migrateCacheData(legacy);
+  // Persist the migrated compact blob fire-and-forget; serving doesn't wait on it.
+  saveCache(contractAddress, eventTopics, cache).catch(() => {});
+  return cache;
 }
 
 /**
@@ -239,10 +234,13 @@ async function fetchFromHypersync(
         );
 
         for (const log of entry.logs) {
-          allLogs.push({
-            ...log,
-            timestamp: blockMap.get(log.block_number) ?? null,
-          });
+          // Decode at scan time — the raw ABI `data` never leaves this loop.
+          allLogs.push(
+            toCompactLog({
+              ...log,
+              timestamp: blockMap.get(log.block_number) ?? null,
+            }),
+          );
         }
       }
 
@@ -269,8 +267,14 @@ async function fetchFromHypersync(
 export async function POST({ request }: RequestEvent) {
   try {
     const body = await request.json();
-    const { contractAddress, eventTopic, eventTopics, fromBlock, forceRefresh } =
-      body;
+    const {
+      contractAddress,
+      eventTopic,
+      eventTopics,
+      fromBlock,
+      forceRefresh,
+      owner,
+    } = body;
 
     const topics = normalizeEventTopics(eventTopic, eventTopics);
 
@@ -283,6 +287,11 @@ export async function POST({ request }: RequestEvent) {
         { status: 400 },
       );
     }
+
+    // Optional response filter: only logs whose Context sender is this wallet.
+    // Purely a serialization-time filter — the shared cache stays wallet-independent.
+    const ownerFilter =
+      typeof owner === "string" && owner.startsWith("0x") ? owner : undefined;
 
     const requestedFrom = Number(fromBlock);
     const now = Date.now();
@@ -336,7 +345,10 @@ export async function POST({ request }: RequestEvent) {
         }
       }
 
-      return json({ logs: toWireLogs(cached, requestedFrom), fromCache: true });
+      return json({
+        logs: toWireLogs(cached, requestedFrom, ownerFilter),
+        fromCache: true,
+      });
     }
 
     // Cache miss, OR the cache doesn't reach down to requestedFrom (an older range
@@ -387,7 +399,7 @@ export async function POST({ request }: RequestEvent) {
     }
 
     return json({
-      logs: toWireLogs(rebuilt, requestedFrom),
+      logs: toWireLogs(rebuilt, requestedFrom, ownerFilter),
       fromCache: rebuilt === cached,
     });
   } catch (err) {

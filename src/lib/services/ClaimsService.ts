@@ -276,12 +276,17 @@ export class ClaimsService {
         const ob = src.address.toLowerCase();
         const earliest = earliestByOb.get(ob);
         if (earliest === undefined) return;
+        // Owner-scoped: the server filters the shared per-era log set down to
+        // this wallet's Context events (a few KB instead of the ~3.5MB
+        // every-wallet set). All downstream use of logsByOb — claimed-detection
+        // and claim history — is scoped to this same ownerAddress.
         const logs = await fetchLogs(
           HYPERSYNC_URL,
           src.address,
           getContextEventTopics(src),
           earliest,
           options?.refreshContextEvents ?? false,
+          ownerAddress,
         );
         logsByOb.set(ob, logs);
       }),

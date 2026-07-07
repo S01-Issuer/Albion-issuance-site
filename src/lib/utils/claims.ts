@@ -354,6 +354,8 @@ export async function sortClaimsData(
             ? source.contextEventTopics
             : (source?.contextEventTopic ?? CONTEXT_EVENT_TOPIC),
           startBlock,
+          false,
+          ownerAddress,
         )
       : []);
 
@@ -524,6 +526,7 @@ export async function fetchLogs(
   eventTopic: string | string[],
   startBlock: number,
   forceRefresh = false,
+  owner?: string,
 ): Promise<HypersyncResult[]> {
   if (!startBlock || startBlock <= 0) {
     return [];
@@ -540,6 +543,11 @@ export async function fetchLogs(
       eventTopics,
       fromBlock: startBlock,
       forceRefresh,
+      // Server-side response filter: claimed-detection only ever matches logs
+      // whose Context sender equals the CSV row's owner (decodedLogMatchesClaim),
+      // so scoping the response to this wallet cuts the every-wallet ~3.5MB log
+      // set down to a few KB without touching the shared server cache.
+      ...(owner ? { owner } : {}),
     });
 
     return response.data?.logs || [];
