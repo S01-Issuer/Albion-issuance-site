@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
+	import { onDestroy } from 'svelte';
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import {
 		calculateMonthlyTokenCashflows,
@@ -9,9 +10,36 @@
 		calculateLifetimeIRR,
 		getLifetimeCashflows,
 	} from '$lib/utils/returnsEstimatorHelpers';
-	import { Chart, registerables } from 'chart.js';
+	import {
+		Chart,
+		BarController,
+		BarElement,
+		LineController,
+		LineElement,
+		PointElement,
+		CategoryScale,
+		LinearScale,
+		Tooltip,
+		Legend
+	} from 'chart.js';
 
-	Chart.register(...registerables);
+	// This modal renders a single combo chart (bar + line datasets sharing one 'y'
+	// scale, month labels on a category 'x' scale), with legend + tooltip plugins.
+	// Register only those pieces instead of the full chart.js registerables bundle:
+	// BarController/BarElement for the monthly cashflow bars, LineController/
+	// LineElement/PointElement for the cumulative return line, CategoryScale/
+	// LinearScale for the axes, Tooltip/Legend for the plugins used in the config.
+	Chart.register(
+		BarController,
+		BarElement,
+		LineController,
+		LineElement,
+		PointElement,
+		CategoryScale,
+		LinearScale,
+		Tooltip,
+		Legend
+	);
 
 	// Props
 	export let isOpen = false;
@@ -103,7 +131,7 @@
 			key: 'npv',
 			label: `NPV @ ${discountRate}%`,
 			value: remainingNPV,
-			formatted: `$${remainingNPV.toFixed(2)}`,
+			formatted: `${isFinite(remainingNPV) ? `$${remainingNPV.toFixed(2)}` : '—'}`,
 			tooltip: tooltips.npv
 		},
 		{
@@ -134,7 +162,7 @@
 			key: 'npv',
 			label: `NPV @ ${discountRate}%`,
 			value: lifetimeNPV,
-			formatted: `$${lifetimeNPV.toFixed(2)}`,
+			formatted: `${isFinite(lifetimeNPV) ? `$${lifetimeNPV.toFixed(2)}` : '—'}`,
 			tooltip: tooltips.npv
 		},
 		{
@@ -324,6 +352,18 @@
 		isOpen = false;
 		onClose();
 	}
+
+	// Clean up the chart instance and any pending tooltip timer on unmount, so
+	// they don't leak if this modal component is ever torn down while open
+	// (createTokenChart() only ever destroys the *previous* chart, never the
+	// final one, and tooltipTimer was never cleared outside of hideTooltip()).
+	onDestroy(() => {
+		tokenChart?.destroy();
+		if (tooltipTimer) {
+			clearTimeout(tooltipTimer);
+			tooltipTimer = null;
+		}
+	});
 
 	function setFullyDilutedReturns() {
 		numberOfTokens = availableSupply;

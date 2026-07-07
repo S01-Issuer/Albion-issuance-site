@@ -84,12 +84,19 @@
 	}));
 
 	let unsubscribeWallet: (() => void) | null = null;
+	// Tracks in-flight subgraph-polling intervals so they can be cleared on
+	// unmount instead of leaking (they normally self-clear at maxAttempts).
+	const activeSubgraphPollIntervals = new Set<ReturnType<typeof setInterval>>();
 
-	function invalidateClaimData() {
+	function invalidateClaimData(address: string) {
 		graphQLCache.invalidate(BASE_ORDERBOOK_SUBGRAPH_URL);
 		graphQLCache.invalidate(BASE_ORDERBOOK_V6_SUBGRAPH_URL);
 		claimsService.clearCache();
-		claimsCache.clear();
+		// Invalidate only the connected wallet's cached entry (rather than a blanket
+		// clear()) so a just-confirmed claim can't keep showing as claimable from a
+		// cached read for up to CACHE_DURATION; the forceFresh reload below then
+		// repopulates the cache with the post-claim result.
+		claimsCache.delete(address);
 	}
 
 	function resetClaimsState() {
@@ -115,6 +122,8 @@
 
 	onDestroy(() => {
 		unsubscribeWallet?.();
+		activeSubgraphPollIntervals.forEach((interval) => clearInterval(interval));
+		activeSubgraphPollIntervals.clear();
 	});
 
 	function subscribeToWallet() {
@@ -130,27 +139,35 @@
 		forceFresh = false,
 		recentClaimTxHashes?: string[]
 	) {
+		// Capture which wallet this load is for up front. addressOverride is always
+		// supplied by every call site today, but fall back to the live store just
+		// in case. isStale() is re-checked after every await below so a slower,
+		// earlier load for a wallet the user has since switched away from can't
+		// write its (possibly wrong-wallet) results into state/cache/flags after
+		// a newer load for the current wallet has already started or finished.
+		const cacheKey = addressOverride ?? $signerAddress ?? '';
+		const isStale = () => cacheKey !== ($signerAddress ?? '');
+
 		pageLoading = true;
 		dataLoadError = false;
 		try {
+			if (!cacheKey) {
+				return;
+			}
+
 			// Build catalog to get token metadata for expected next payout
 			if (!catalogRef) {
 				const catalog = useCatalogService();
 				await catalog.build();
 				catalogRef = catalog;
 			}
+			if (isStale()) return;
 
-			const cacheKey = addressOverride ?? $signerAddress ?? '';
-			if (!cacheKey) {
-				pageLoading = false;
-				return;
-			}
 			const cached = forceFresh ? null : claimsCache.get(cacheKey);
 			if (cached) {
 				dataLoadError = !!cached.hasCsvLoadError;
 				if (dataLoadError) {
 					resetClaimsState();
-					pageLoading = false;
 					return;
 				}
 				claimHistory = cached.claimHistory;
@@ -158,7 +175,6 @@
 				totalEarned = cached.totals.earned;
 				totalClaimed = cached.totals.claimed;
 				unclaimedPayout = cached.totals.unclaimed;
-				pageLoading = false;
 				return;
 			}
 
@@ -166,13 +182,14 @@
 				refreshContextEvents: forceFresh,
 				claimTxHashes: recentClaimTxHashes
 			});
-			
+			if (isStale()) return;
+
 			// Store in cache
 			dataLoadError = !!result.hasCsvLoadError;
 			if (!dataLoadError) {
 				claimsCache.set(cacheKey, result);
 			}
-			
+
 			if (!dataLoadError) {
 				claimHistory = result.claimHistory;
 				holdings = result.holdings;
@@ -182,11 +199,16 @@
 			}
 			// On partial error (hasCsvLoadError), preserve any existing data rather than wiping
 		} catch (error) {
+			if (isStale()) return;
 			console.error('Error loading claims:', error);
 			// Preserve existing data on error - only set error flag, don't wipe state
 			dataLoadError = true;
 		} finally {
-			pageLoading = false;
+			// Don't clear the loading flag on behalf of a newer, still in-flight
+			// load for the wallet the user has since switched to.
+			if (!isStale()) {
+				pageLoading = false;
+			}
 		}
 	}
 
@@ -226,22 +248,26 @@
 
 					if (json?.data?.transaction?.id) {
 						clearInterval(interval);
+						activeSubgraphPollIntervals.delete(interval);
 						resolve();
 						return;
 					}
-					
+
 					if (attempts >= maxAttempts) {
 						clearInterval(interval);
+						activeSubgraphPollIntervals.delete(interval);
 						reject(new Error(`Transaction not found in subgraph after ${maxAttempts} attempts`));
 					}
 				} catch (error) {
 					// Don't fail on individual polling errors, just continue
 					if (attempts >= maxAttempts) {
 						clearInterval(interval);
+						activeSubgraphPollIntervals.delete(interval);
 						reject(error);
 					}
 				}
 			}, 2000);
+			activeSubgraphPollIntervals.add(interval);
 		});
 	}
 
@@ -444,8 +470,8 @@
 
 			claimSuccess = true;
 			recordClaimTransactionHashes(claimTxHashes);
-			invalidateClaimData();
 			const address = get(signerAddress) ?? '';
+			invalidateClaimData(address);
 			if (address) {
 				await loadClaimsData(address, true, claimTxHashes);
 			}
@@ -505,8 +531,8 @@
 
 			claimSuccess = true;
 			recordClaimTransactionHashes(claimTxHashes);
-			invalidateClaimData();
 			const address = get(signerAddress) ?? '';
+			invalidateClaimData(address);
 			if (address) {
 				await loadClaimsData(address, true, claimTxHashes);
 			}

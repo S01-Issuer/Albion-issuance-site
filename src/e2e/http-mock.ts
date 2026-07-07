@@ -640,6 +640,23 @@ export function installHttpMocks(cfg: HttpMockConfig) {
           return response;
         }
 
+        // Client-side Context-event fetch (`fetchLogs`) posts to this server
+        // route. Return a legitimate empty-logs 200 so claimed-detection sees "no
+        // claims yet" (all rows unclaimed). fetchLogs now THROWS on a failed scan
+        // rather than swallowing it to [], so without this the page would render a
+        // load-error state instead of the expected payouts.
+        if (typeof url === "string" && url.includes("/api/context-events")) {
+          const response: AxiosResponse<unknown> = {
+            data: { logs: [], fromCache: true },
+            status: 200,
+            statusText: "OK",
+            headers: {},
+            config: {} as InternalAxiosRequestConfig<unknown>,
+            request: undefined,
+          };
+          return response;
+        }
+
         return boundOriginalAxiosPost(url, data, config) as Promise<
           AxiosResponse<unknown>
         >;

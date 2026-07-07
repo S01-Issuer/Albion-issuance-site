@@ -218,9 +218,15 @@ export const GET: RequestHandler = async ({ params, setHeaders }) => {
     if (verdict === "mismatch") {
       throw new Error(`CID mismatch from ${gateway}: bytes do not hash to ${path}`);
     }
-    cache.set(path, { body, contentType, timestamp: Date.now() });
-    cleanCache();
-    await writeToBlob(path, body, contentType);
+    // Only a positive CID match is written to the in-memory cache / Blob — an
+    // "unverifiable" path (not a bare raw+sha256 CIDv1) is still proxied back to
+    // the caller below, but must not be persisted: anyone could otherwise use an
+    // arbitrary non-CID path to fill the cache/Blob with junk (memory/storage DoS).
+    if (verdict === "ok") {
+      cache.set(path, { body, contentType, timestamp: Date.now() });
+      cleanCache();
+      await writeToBlob(path, body, contentType);
+    }
     setHeaders({
       "Content-Type": contentType,
       ...CACHE_HEADERS,

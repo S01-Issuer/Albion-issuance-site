@@ -148,6 +148,11 @@ let hasPortfolioHistory = false;
 let catalogRef: ReturnType<typeof useCatalogService> | null = null;
 let latestClaimsSnapshot: ClaimsResult | null = null;
 let claimsDataUnavailable = false;
+// True when a data source (deposits, balances, etc.) threw during load. Distinct
+// from claimsDataUnavailable: this covers the case where holdings/totals could
+// not be computed at all, so an empty-looking portfolio is not mistaken for an
+// empty wallet. Reset at the start of every load attempt.
+let portfolioDataError = false;
 let allDepositsData: DepositWithReceipt[] = [];
 let onchainBalances: Record<string, string> = {}; // token address -> balance (wei string)
 
@@ -166,22 +171,35 @@ let editModalOpen = false;
 let editModalHolding: PortfolioHolding | null = null;
 let editModalPurchases: SecondaryPurchaseEntry[] = [];
 
-// Load secondary purchases from localStorage
-function loadSecondaryPurchases(): Record<string, SecondaryPurchaseEntry[]> {
+// Secondary purchases are scoped per connected wallet so cost-basis entries
+// from one wallet never bleed into another wallet's Total Invested on the
+// same browser (they were previously stored under one shared key, keyed only
+// by token address).
+function getSecondaryPurchasesStorageKey(address: string | null | undefined): string | null {
+	if (!address) return null;
+	return `albion-secondary-purchases-v2-${address.toLowerCase()}`;
+}
+
+// Load secondary purchases from localStorage for a given wallet address
+function loadSecondaryPurchases(address: string | null | undefined): Record<string, SecondaryPurchaseEntry[]> {
 	if (typeof window === 'undefined') return {};
+	const key = getSecondaryPurchasesStorageKey(address);
+	if (!key) return {};
 	try {
-		const stored = localStorage.getItem('albion-secondary-purchases-v2');
+		const stored = localStorage.getItem(key);
 		return stored ? JSON.parse(stored) : {};
 	} catch {
 		return {};
 	}
 }
 
-// Save secondary purchases to localStorage
-function saveSecondaryPurchases(data: Record<string, SecondaryPurchaseEntry[]>) {
+// Save secondary purchases to localStorage for a given wallet address
+function saveSecondaryPurchases(address: string | null | undefined, data: Record<string, SecondaryPurchaseEntry[]>) {
 	if (typeof window === 'undefined') return;
+	const key = getSecondaryPurchasesStorageKey(address);
+	if (!key) return;
 	try {
-		localStorage.setItem('albion-secondary-purchases-v2', JSON.stringify(data));
+		localStorage.setItem(key, JSON.stringify(data));
 	} catch {
 		console.error('Failed to save secondary purchases to localStorage');
 	}
@@ -227,7 +245,7 @@ function saveEditModal() {
 	// Filter out empty entries
 	const validPurchases = editModalPurchases.filter(p => p.month && p.amount > 0);
 	secondaryPurchases[address] = validPurchases;
-	saveSecondaryPurchases(secondaryPurchases);
+	saveSecondaryPurchases($signerAddress, secondaryPurchases);
 
 	// Calculate total secondary amount
 	const secondaryTotal = validPurchases.reduce((sum, p) => sum + p.amount, 0);
@@ -527,14 +545,20 @@ function percentageDisplay(value: number): string {
 	}
 
 	async function loadSftData() {
-		if (!$signerAddress) return;
+		// Capture the address this load is for up front. $signerAddress is a live
+		// store that can change while we're mid-await (wallet switch). Every
+		// subsequent read of the store is compared back against this snapshot so
+		// a slower, stale load can never overwrite a newer wallet's data.
+		const requestAddress = $signerAddress;
+		if (!requestAddress) return;
 		// Prevent duplicate loads for the same address
-		if (isLoadingData && loadingForAddress === $signerAddress) return;
+		if (isLoadingData && loadingForAddress === requestAddress) return;
 		isLoadingData = true;
+		portfolioDataError = false;
 
 		// Only reset data if wallet address changed (prevents UI flicker on refresh)
-		const addressChanged = loadingForAddress !== $signerAddress;
-		loadingForAddress = $signerAddress;
+		const addressChanged = loadingForAddress !== requestAddress;
+		loadingForAddress = requestAddress;
 		pageLoading = true;
 
 		if (addressChanged) {
@@ -554,9 +578,13 @@ function percentageDisplay(value: number): string {
 			// Build catalog to populate stores (SFTs + metadata fetched in parallel internally)
 			const catalog = useCatalogService();
 			await catalog.build();
+			// Bail if the wallet changed while we were awaiting the catalog build.
+			// A newer loadSftData() call for the new address now owns pageLoading/
+			// isLoadingData, so don't touch component state here.
+			if (requestAddress !== $signerAddress) return;
 			catalogRef = catalog;
 
-			logDev('Wallet address:', $signerAddress);
+			logDev('Wallet address:', requestAddress);
 			logDev('$sfts length:', $sfts?.length ?? 0);
 			logDev('$sftMetadata length:', $sftMetadata?.length ?? 0);
 
@@ -568,9 +596,12 @@ function percentageDisplay(value: number): string {
 
 			const [claimsResult, depositsResult, balancesResult] = await Promise.all([
 				loadAllClaimsData(),
-				sftRepository.getDepositsForOwner($signerAddress),
-				getTokenBalancesOnchain(allTokenAddresses, $signerAddress as Hex),
+				sftRepository.getDepositsForOwner(requestAddress),
+				getTokenBalancesOnchain(allTokenAddresses, requestAddress as Hex),
 			]);
+
+			// Bail if the wallet changed while the parallel fetch was in flight.
+			if (requestAddress !== $signerAddress) return;
 
 			// Apply claims result
 			if (claimsResult) {
@@ -606,8 +637,8 @@ function percentageDisplay(value: number): string {
 				});
 			}
 
-			// Load secondary purchases from localStorage
-			secondaryPurchases = loadSecondaryPurchases();
+			// Load secondary purchases from localStorage, scoped to this wallet
+			secondaryPurchases = loadSecondaryPurchases(requestAddress);
 
 			// Apply deposits and balances from parallel fetch
 			allDepositsData = depositsResult;
@@ -776,7 +807,7 @@ function percentageDisplay(value: number): string {
 						if (Array.isArray(sft.tokenHolders)) {
 							const tokenHolder = sft.tokenHolders.find(
 								(holder) =>
-									holder.address?.toLowerCase() === $signerAddress.toLowerCase(),
+									holder.address?.toLowerCase() === requestAddress.toLowerCase(),
 							);
 							if (tokenHolder) {
 								tokensOwned = Number(
@@ -1040,11 +1071,30 @@ function percentageDisplay(value: number): string {
 
 		} catch (error) {
 			console.error('[Portfolio] Error loading data:', error);
+			// Only surface the error if it's still relevant to the currently
+			// connected wallet — a stale/aborted load for a wallet the user has
+			// since switched away from shouldn't flip the banner on.
+			if (requestAddress === $signerAddress) {
+				portfolioDataError = true;
+			}
 		} finally {
-			pageLoading = false;
-			isLoadingData = false;
-			loadingForAddress = null;
+			// Only clear the loading flags if this request still belongs to the
+			// current wallet. If the wallet changed mid-load, a newer
+			// loadSftData() call for the new address is in flight and owns these
+			// flags — clearing them here would incorrectly mark that newer load
+			// as finished (or let a third dedup-guarded call slip through).
+			if (requestAddress === $signerAddress) {
+				pageLoading = false;
+				isLoadingData = false;
+				loadingForAddress = null;
+			}
 		}
+	}
+
+	// Re-invoke the loader for whichever wallet is currently connected. Used by
+	// the data-unavailable retry banner/button.
+	function retryLoadPortfolioData() {
+		void loadSftData();
 	}
 	
 	function getPayoutChartData(holding: PortfolioHolding): HistoryPoint[] {
@@ -1106,6 +1156,19 @@ function percentageDisplay(value: number): string {
 					</div>
 				{/if}
 
+				{#if portfolioDataError}
+					<div class="mt-6 max-w-3xl mx-auto px-4 py-3 border border-yellow-400 bg-yellow-50 text-yellow-900 text-sm font-medium rounded-none flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4" role="alert" aria-live="polite">
+						<span>We couldn't load your portfolio holdings. Your data may be incomplete.</span>
+						<button
+							type="button"
+							class="underline font-bold whitespace-nowrap hover:opacity-80"
+							on:click={retryLoadPortfolioData}
+						>
+							Retry
+						</button>
+					</div>
+				{/if}
+
 				<!-- Slim payout-alerts entry point; full signup card lives on the claims page. -->
 				<div class="max-w-md mx-auto mt-4 text-center">
 					<PayoutAlertsCard address={$signerAddress ?? null} variant="row" />
@@ -1140,6 +1203,22 @@ function percentageDisplay(value: number): string {
 				<div class="space-y-3">
 					{#if pageLoading}
 						<div class="text-center py-12 text-black opacity-70">Loading portfolio holdings...</div>
+					{:else if portfolioDataError}
+						<!-- Data failed to load — do NOT show the "No holdings yet" empty state,
+							 since that would be indistinguishable from a genuinely empty wallet. -->
+						<Card hoverable={false}>
+							<CardContent>
+								<div class="text-center py-8">
+									<p class="text-lg text-black opacity-70 mb-4">Unable to load your holdings</p>
+									<p class="text-sm text-black opacity-60 mb-6">
+										Some data could not be loaded. Please try again.
+									</p>
+									<PrimaryButton on:click={retryLoadPortfolioData}>
+										Retry
+									</PrimaryButton>
+								</div>
+							</CardContent>
+						</Card>
 					{:else if holdings.length === 0}
 							<Card hoverable={false}>
 							<CardContent>
@@ -1537,12 +1616,36 @@ function percentageDisplay(value: number): string {
 					for (const holding of holdings) {
 						const payoutData = holding.pinnedMetadata?.payoutData;
 						if (Array.isArray(payoutData) && holding.tokensOwned > 0) {
+							// KNOWN LIMITATION: we don't have a per-month historical token
+							// balance for this wallet, so `payoutPerToken * tokensOwned`
+							// below uses the CURRENT balance for every past month — this
+							// overstates early cash flow for wallets that have since
+							// increased their holdings (and understates it for wallets
+							// that have since reduced them). Where we have a real claimed/
+							// earned amount for the specific payout (matched by orderHash
+							// via holding.claimHistory), use that actual dollar figure
+							// instead; only fall back to the current-balance estimate when
+							// no matching claim record exists (e.g. for payouts that
+							// predate this wallet's token acquisition and were never
+							// claimed by it).
+							const claimAmountByOrderHash: Record<string, number> = {};
+							for (const claim of holding.claimHistory) {
+								if (!claim.orderHash) continue;
+								const claimAmount = Number(claim.amount);
+								if (!Number.isFinite(claimAmount)) continue;
+								claimAmountByOrderHash[claim.orderHash.toLowerCase()] = claimAmount;
+							}
+
 							for (const payout of payoutData) {
 								const month = payout.month;
 								const payoutPerToken = payout.tokenPayout?.payoutPerToken ?? 0;
 								if (month && payoutPerToken > 0) {
 									const receivedMonth = addMonths(month, 2); // 2-month offset
-									const userPayout = payoutPerToken * holding.tokensOwned;
+									const orderHash = payout.tokenPayout?.orderHash?.toLowerCase();
+									const actualAmount = orderHash ? claimAmountByOrderHash[orderHash] : undefined;
+									const userPayout = actualAmount !== undefined
+										? actualAmount
+										: payoutPerToken * holding.tokensOwned; // estimate fallback
 									monthlyPayoutsTotals[receivedMonth] = (monthlyPayoutsTotals[receivedMonth] ?? 0) + userPayout;
 								}
 							}

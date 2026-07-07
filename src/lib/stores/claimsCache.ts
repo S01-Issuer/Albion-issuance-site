@@ -40,6 +40,14 @@ function createClaimsCache() {
       store.set(null);
     },
 
+    /** Invalidate the cache entry only if it currently belongs to `address`. */
+    delete(address: string) {
+      const cache = get(store);
+      if (cache && cache.address === address) {
+        store.set(null);
+      }
+    },
+
     isValid(address: string): boolean {
       const cache = get(store);
       if (!cache || cache.address !== address) return false;

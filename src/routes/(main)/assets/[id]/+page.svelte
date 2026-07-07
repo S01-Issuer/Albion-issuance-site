@@ -21,16 +21,28 @@
 import { calculateTokenReturns, getTokenPayoutHistory, getTokenSupply } from '$lib/utils/returnCalculations';
 import { calculateLifetimeIRR, calculateFullyDilutedReturns, calculateMonthlyTokenCashflows, calculateIRR } from '$lib/utils/returnsEstimatorHelpers';
 import { PINATA_GATEWAY, ORDERBOOK_SOURCES } from '$lib/network';
-import { catalogService } from '$lib/services';
+import { catalogService } from '$lib/services/CatalogService';
 import { getTokenTermsPath } from '$lib/utils/tokenTerms';
 import { getTxUrl, getAddressUrl } from '$lib/utils/explorer';
 import { addTokenToWallet } from '$lib/utils/walletUtils';
-import { Chart as ChartJS, registerables } from 'chart.js';
+import {
+	Chart as ChartJS,
+	BarController,
+	BarElement,
+	CategoryScale,
+	LinearScale,
+	Tooltip,
+	Legend
+} from 'chart.js';
 import { onDestroy } from 'svelte';
 import { useQueryClient } from '@tanstack/svelte-query';
 import { hasAvailableSupplySync } from '$lib/utils/supplyHelpers';
 
-ChartJS.register(...registerables);
+// Only bar charts are rendered on this page (revenue history), so register
+// just the pieces that chart needs instead of the full chart.js registerables
+// bundle: BarController/BarElement for the bars, CategoryScale/LinearScale
+// for the month labels and $ axis, Tooltip/Legend for the plugins used below.
+ChartJS.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip, Legend);
 
 // Query client for refreshing SFT data after purchase
 const queryClient = useQueryClient();
@@ -281,10 +293,20 @@ let loadedAssetId: string | null = null;
 		return dateA.localeCompare(dateB);
 	}) : [];
 
-	// Separate tokens into available, future, and sold out
-	$: availableTokens = sortedTokens.filter(t => hasAvailableSupplySync(t));
-	$: soldOutTokens = sortedTokens.filter(t => !hasAvailableSupplySync(t));
+	// Separate tokens into available, future, and sold out.
+	// hasAvailableSupplySync() reads the $sfts store internally via get(sfts), which is
+	// NOT tracked by Svelte's reactivity. Passing $sfts through `dependOn` registers it
+	// as a reactive dependency so these lists refresh after handlePurchaseSuccess()
+	// refetches SFT data post-purchase (Bug B). `dependOn` just returns its value.
+	$: availableTokens = dependOn($sfts, sortedTokens.filter(t => hasAvailableSupplySync(t)));
+	$: soldOutTokens = dependOn($sfts, sortedTokens.filter(t => !hasAvailableSupplySync(t)));
 	$: soldOutCount = soldOutTokens.length;
+
+	// Identity passthrough used to register an otherwise-untracked store read (its
+	// first arg) as a reactive dependency of the assignment. Returns `value` as-is.
+	function dependOn<T>(_dep: unknown, value: T): T {
+		return value;
+	}
 
 	// Tokens to display: available tokens, plus sold out if toggle is on
 	$: visibleTokens = showSoldOutTokens ? [...availableTokens, ...soldOutTokens] : availableTokens;
@@ -798,7 +820,7 @@ async function handleBuyTokens(tokenAddress: string, event?: Event) {
 
 	// Check if wallet is connected, if not prompt user to connect
 	if (!$connected) {
-		await $web3Modal.open();
+		if ($web3Modal) await $web3Modal.open();
 		return;
 	}
 
@@ -815,7 +837,7 @@ async function handleAddToWallet(token: TokenMetadata, event?: Event) {
 	event?.stopPropagation();
 
 	if (!$connected) {
-		await $web3Modal.open();
+		if ($web3Modal) await $web3Modal.open();
 		return;
 	}
 
@@ -1323,8 +1345,9 @@ async function handlePurchaseSuccess() {
 				{#each visibleTokens as token (token.contractAddress)}
 				{@const sft = $sfts?.find((s) => s.id.toLowerCase() === token.contractAddress.toLowerCase())}
 				{@const maxSupply = catalogService.getTokenMaxSupply(token.contractAddress) ?? undefined}
-				{@const supply = getTokenSupply(token, sft, maxSupply)}
-				{@const hasAvailableSupply = (supply?.availableSupply ?? 0) > 0}
+				{@const effectiveMaxSupply = maxSupply ?? sft?.totalShares}
+				{@const supply = getTokenSupply(token, sft, effectiveMaxSupply)}
+				{@const hasAvailableSupply = hasAvailableSupplySync(token)}
 				{@const calculatedReturns = assetData ? calculateTokenReturns(assetData, token, sft?.totalShares, maxSupply) : null}
 				{@const tokenTermsUrl = getTokenTermsPath(token.contractAddress)}
 					<div id="token-{token.contractAddress}" class="overflow-visible">

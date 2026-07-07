@@ -235,6 +235,15 @@ export class SftRepository {
       (address) => `"0x000000000000000000000000${address.slice(2)}"`,
     );
 
+    // Fetch a generous window of rows (not just one-per-subject) since a
+    // token's metadata can be re-pinned/re-emitted multiple times. Using
+    // `first: subjects.length` here would let the globally-newest rows
+    // (possibly all from one token) crowd out other tokens, leaving them
+    // with zero rows and silently dropping them (and their assets) from
+    // the catalog downstream in CatalogService. We over-fetch and then
+    // reduce to the latest row per subject below.
+    const METADATA_FETCH_LIMIT = 1000;
+
     const query = `
       query GetSftMetadata {
         metaV1S(
@@ -244,7 +253,7 @@ export class SftRepository {
           },
           orderBy: transaction__timestamp
           orderDirection: desc
-          first: ${subjects.length}
+          first: ${METADATA_FETCH_LIMIT}
         ) {
           id
           meta
@@ -270,7 +279,23 @@ export class SftRepository {
         return [];
       }
 
-      return data.metaV1S;
+      if (data.metaV1S.length >= METADATA_FETCH_LIMIT) {
+        logDev(
+          `getSftMetadata: fetched ${data.metaV1S.length} rows, hit fetch limit of ${METADATA_FETCH_LIMIT}; some historical metadata may be missing (latest-per-subject reduce below is unaffected as long as each subject's newest emission is within the window)`,
+        );
+      }
+
+      // Reduce to the latest row per subject. Rows are already ordered by
+      // transaction__timestamp desc, so keeping the first occurrence per
+      // subject keeps the newest metadata for that token.
+      const latestBySubject = new Map<string, MetaV1S>();
+      for (const row of data.metaV1S) {
+        if (!latestBySubject.has(row.subject)) {
+          latestBySubject.set(row.subject, row);
+        }
+      }
+
+      return Array.from(latestBySubject.values());
     } catch (error) {
       console.error("Error fetching SFT metadata:", error);
       return [];

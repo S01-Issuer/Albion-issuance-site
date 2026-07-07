@@ -7,7 +7,7 @@
 	import { PageLayout, HeroSection } from '$lib/components/layout';
 	import type { TokenMetadata } from '$lib/types/MetaboardTypes';
 	import { groupSftsByEnergyField, type GroupedEnergyField } from '$lib/utils/energyFieldGrouping';
-	import { useCatalogService } from '$lib/services';
+	import { useCatalogService } from '$lib/services/CatalogService';
 	import { hasAvailableSupplySync } from '$lib/utils/supplyHelpers';
 	import { ENERGY_FIELDS } from '$lib/network';
 	import { connected, web3Modal } from 'svelte-wagmi';

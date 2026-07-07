@@ -77,6 +77,18 @@ let writeQueue: Promise<unknown> = Promise.resolve();
 
 export async function loadLinkMap(): Promise<LinkMap> {
   if (linkMapMem) return linkMapMem;
+  return fetchLinkMapFromBlob();
+}
+
+/**
+ * Fetch the link map fresh from Blob, bypassing the in-memory short-circuit,
+ * and update `linkMapMem` to the result. Used by `updateLinkMap` so each write
+ * transitions off the freshest persisted state rather than a possibly-stale
+ * in-memory copy — otherwise a warm instance that raced another instance's
+ * write would base its transition on stale data and clobber that write when it
+ * overwrites the whole blob.
+ */
+async function fetchLinkMapFromBlob(): Promise<LinkMap> {
   try {
     const meta: HeadBlobResult | null = await head(LINK_MAP_BLOB_KEY).catch(
       () => null,
@@ -100,7 +112,10 @@ export async function updateLinkMap(
   transition: (map: LinkMap) => LinkMap,
 ): Promise<LinkMap> {
   const run = writeQueue.then(async () => {
-    const current = await loadLinkMap();
+    // Re-read from Blob (not the in-memory short-circuit) immediately before
+    // applying the transition, so this write is based on the freshest
+    // persisted state even if another instance wrote since our last read.
+    const current = await fetchLinkMapFromBlob();
     const next = transition(current);
     linkMapMem = next;
     try {

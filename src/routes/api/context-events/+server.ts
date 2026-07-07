@@ -20,6 +20,7 @@ import { json, type RequestEvent } from "@sveltejs/kit";
 import { put, head, type HeadBlobResult } from "@vercel/blob";
 import axios from "axios";
 import { PRIVATE_HYPERSYNC_API_KEY } from "$env/static/private";
+import { ORDERBOOK_SOURCES } from "$lib/network";
 import {
   mergeLogs,
   migrateCacheData,
@@ -72,6 +73,15 @@ function normalizeEventTopics(
   return [];
 }
 
+// Only scan known OrderBook contracts — an arbitrary address would let a caller
+// point Hypersync at anything (and force a full-history scan of it), and would
+// grow the memCache/Blob key space unboundedly.
+function isAllowedContractAddress(address: unknown): address is string {
+  if (typeof address !== "string") return false;
+  const lower = address.toLowerCase();
+  return ORDERBOOK_SOURCES.some((s) => s.address.toLowerCase() === lower);
+}
+
 // Cache key is per OrderBook + topic set — eras must not share a cache entry.
 function topicKeyOf(eventTopics: string[]): string {
   return eventTopics
@@ -99,7 +109,18 @@ function legacyBlobKey(
 }
 
 // In-memory layer (fast path, avoids Blob reads on warm instances), keyed per contract.
+// The key space is bounded (allowlisted contracts × fixed topic sets), but cap it
+// defensively anyway — if it ever somehow grows past this, just clear it rather than
+// leak memory indefinitely. A cold-start-equivalent Blob re-read is cheap.
+const MEM_CACHE_MAX_ENTRIES = 32;
 const memCache = new Map<string, BlobCacheData>();
+
+function setMemCache(key: string, value: BlobCacheData): void {
+  if (memCache.size >= MEM_CACHE_MAX_ENTRIES && !memCache.has(key)) {
+    memCache.clear();
+  }
+  memCache.set(key, value);
+}
 
 // Single-flight for full re-scans, keyed by `${blobKey}:${scanFrom}`. A cold or
 // stale-floored cache hit by several requests at once (e.g. portfolio + claims pages
@@ -138,7 +159,7 @@ async function loadCache(
 
   const v2 = await fetchBlobJson<BlobCacheData>(key);
   if (v2) {
-    memCache.set(key, v2);
+    setMemCache(key, v2);
     return v2;
   }
 
@@ -147,7 +168,16 @@ async function loadCache(
   );
   if (!legacy) return null;
 
-  const { cache } = migrateCacheData(legacy);
+  // A corrupt/malformed legacy blob (e.g. non-array `logs`) must not throw here —
+  // an uncaught error surfaces as a 500, which the client treats as claimed=0.
+  // Treat it as a cache miss instead: the caller falls through to a clean rescan.
+  let cache: BlobCacheData;
+  try {
+    ({ cache } = migrateCacheData(legacy));
+  } catch (error) {
+    console.warn("Failed to migrate legacy context-events blob:", error);
+    return null;
+  }
   // Persist the migrated compact blob fire-and-forget; serving doesn't wait on it.
   saveCache(contractAddress, eventTopics, cache).catch(() => {});
   return cache;
@@ -162,7 +192,7 @@ async function saveCache(
   data: BlobCacheData,
 ): Promise<void> {
   const key = blobKey(contractAddress, eventTopics);
-  memCache.set(key, data);
+  setMemCache(key, data);
 
   try {
     await put(key, JSON.stringify(data), {
@@ -288,12 +318,29 @@ export async function POST({ request }: RequestEvent) {
       );
     }
 
+    if (!isAllowedContractAddress(contractAddress)) {
+      return json(
+        { error: "contractAddress is not a known OrderBook address" },
+        { status: 400 },
+      );
+    }
+
+    // A huge full-history scan from block 1 (or a bogus/negative/non-numeric
+    // value) is an easy DoS against Hypersync — reject rather than serve it.
+    const fromBlockNum = Number(fromBlock);
+    if (!Number.isFinite(fromBlockNum) || fromBlockNum < 1) {
+      return json(
+        { error: "fromBlock must be a positive block number" },
+        { status: 400 },
+      );
+    }
+
     // Optional response filter: only logs whose Context sender is this wallet.
     // Purely a serialization-time filter — the shared cache stays wallet-independent.
     const ownerFilter =
       typeof owner === "string" && owner.startsWith("0x") ? owner : undefined;
 
-    const requestedFrom = Number(fromBlock);
+    const requestedFrom = fromBlockNum;
     const now = Date.now();
 
     // Try to load existing cache (in-memory → Blob), keyed per OrderBook contract

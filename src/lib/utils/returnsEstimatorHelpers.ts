@@ -225,7 +225,7 @@ export function calculateMonthlyTokenCashflows(
   // Step 7: Divide entire array by adjusted token supply and apply share percentage
   // First apply the token's share percentage, then divide by (current supply + new tokens)
   // Then multiply by numberOfTokens to get total for all purchased tokens
-  const sharePercentage = token.sharePercentage || 100; // Default to 100% if not specified
+  const sharePercentage = token.sharePercentage ?? 100; // Default to 100% if not specified
   const shareMultiplier = sharePercentage / 100;
   const normalizer =
     mintedSupply + numberOfTokens > 0 ? mintedSupply + numberOfTokens : 1;
@@ -307,7 +307,7 @@ export function getLifetimeCashflows(
   }
 
   // Convert to array and apply share percentage and adjusted token supply
-  const sharePercentage = token.sharePercentage || 100;
+  const sharePercentage = token.sharePercentage ?? 100;
   const shareMultiplier = sharePercentage / 100;
   const normalizer =
     mintedSupply + numberOfTokens > 0 ? mintedSupply + numberOfTokens : 1;
@@ -413,7 +413,7 @@ export function calculateLifetimeIRR(
   }
 
   // Convert to array and apply share percentage and adjusted token supply
-  const sharePercentage = token.sharePercentage || 100;
+  const sharePercentage = token.sharePercentage ?? 100;
   const shareMultiplier = sharePercentage / 100;
   const normalizer =
     mintedSupply + numberOfTokens > 0 ? mintedSupply + numberOfTokens : 1;

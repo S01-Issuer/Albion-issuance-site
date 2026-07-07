@@ -651,7 +651,7 @@ const PROD_ENERGY_FIELDS: EnergyField[] = [
 
 // Export a function to get the correct energy fields based on the metaboard admin
 export function getEnergyFields(metaboardAdmin: string): EnergyField[] {
-  return metaboardAdmin === PRODUCTION_METABOARD_ADMIN
+  return metaboardAdmin?.toLowerCase() === PRODUCTION_METABOARD_ADMIN.toLowerCase()
     ? PROD_ENERGY_FIELDS
     : DEV_ENERGY_FIELDS;
 }

@@ -373,3 +373,10 @@ export class CatalogService {
 }
 
 export const catalogService = new CatalogService();
+
+// Direct accessor so wallet-independent, claims-free routes (home carousel, the
+// assets listing) can use the catalog WITHOUT importing the `$lib/services`
+// barrel — that barrel also pulls the side-effecting ClaimsService singleton,
+// which transitively loads the ~9MB @rainlanguage/orderbook WASM (float.ts) and
+// would otherwise ship on those two high-traffic pages that never claim.
+export const useCatalogService = () => catalogService;

@@ -30,6 +30,11 @@ export function formatCurrency(
     compact?: boolean;
   } = {},
 ): string {
+  // Guard against NaN and Infinity
+  if (!Number.isFinite(amount)) {
+    return "US$0.00";
+  }
+
   const {
     minimumFractionDigits = amount % 1 === 0 ? 0 : 2,
     maximumFractionDigits = 2,

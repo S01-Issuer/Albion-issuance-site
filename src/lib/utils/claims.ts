@@ -407,11 +407,17 @@ export async function sortClaimsData(
     if (!log?.address || log.address.toLowerCase() !== normalizedOwnerAddress) {
       return false;
     }
-    // v6: require this order's hash so shared OB logs cannot mark another
-    // monthly order's payout as claimed/unclaimed.
-    if (encoding === "float" && normalizedOrderHash) {
-      if (!log.orderHash) return false;
-      return log.orderHash.toLowerCase() === normalizedOrderHash;
+    // Scope to this order's hash so the shared per-OrderBook log set cannot mark
+    // another monthly order's payout as claimed/unclaimed. col[1][0] is the order
+    // hash for BOTH eras, so this applies to v4 too (previously v6-only, which let
+    // v4 rows sharing an (index, amount) across months cross-contaminate). A log
+    // that carries no order hash falls through to (index, amount) matching — except
+    // on v6, where ContextV2 always emits one, so its absence means "not this order".
+    if (normalizedOrderHash) {
+      if (log.orderHash) {
+        return log.orderHash.toLowerCase() === normalizedOrderHash;
+      }
+      if (encoding === "float") return false;
     }
     return true;
   });
@@ -515,10 +521,27 @@ export async function sortClaimsData(
 }
 
 /**
+ * Thrown when a Context-event scan cannot be completed (network error, or the
+ * server's 503 scan_unavailable). Callers must treat this as "claims data could
+ * not be loaded", NOT as "no claims" — see the catch in `fetchLogs`.
+ */
+export class ContextScanError extends Error {
+  readonly code = "CONTEXT_SCAN_ERROR";
+
+  constructor(message = "Context event scan failed") {
+    super(message);
+    this.name = "ContextScanError";
+  }
+}
+
+/**
  * Fetch Context event logs via the server-side cached endpoint.
  * The server maintains a high-water-mark cache — first request does a full scan,
  * subsequent requests only fetch new blocks (delta). This reduces ~24s scans to
  * near-instant on repeat loads.
+ *
+ * Throws ContextScanError on a failed scan (so an outage isn't mistaken for
+ * "nothing claimed"); returns [] only for a genuine empty 200 or startBlock<=0.
  */
 export async function fetchLogs(
   _client: string,
@@ -552,8 +575,17 @@ export async function fetchLogs(
 
     return response.data?.logs || [];
   } catch (error) {
-    console.warn("Context events fetch error, falling back to empty:", error);
-    return [];
+    // A failed scan (network error, or the server's 503 scan_unavailable when a
+    // cold instance can't reach Hypersync) is NOT the same as "this wallet has no
+    // claim events". Returning [] here would make an outage look like claimed=0,
+    // re-offering already-claimed payouts as claimable — the exact poisoning class
+    // the server cache was hardened against, defeated client-side. Throw so the
+    // caller surfaces a load error instead of trusting an empty set. An empty set
+    // only ever comes from a genuine 200 response above.
+    console.error("Context events scan failed:", error);
+    throw new ContextScanError(
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }
 
@@ -762,13 +794,17 @@ function filterClaimedAndUnclaimed(
 
   csvClaims.forEach((claim) => {
     const decodedLog = decodedLogs.find((log) => {
-      // v6: a log only proves THIS order's row claimed if its calling-context
-      // order hash (col[1][0]) matches — multi-order claim txs emit one
-      // Context log per order, all visible in the shared per-OB log set.
+      // A log only proves THIS order's row claimed if its calling-context order
+      // hash (col[1][0]) matches — multi-order claim txs emit one Context log per
+      // order, all visible in the shared per-OB log set. Applies to BOTH eras
+      // (col[1][0] is the order hash for v4 and v6); a log without an order hash
+      // falls through to (index, amount) matching except on v6, which always
+      // emits one. Defense-in-depth: decodedLogs is already order-scoped upstream.
       if (
-        encoding === "float" &&
         normalizedOrderHash &&
-        log.orderHash?.toLowerCase() !== normalizedOrderHash
+        (log.orderHash
+          ? log.orderHash.toLowerCase() !== normalizedOrderHash
+          : encoding === "float")
       ) {
         return false;
       }
@@ -964,7 +1000,17 @@ export function buildClaimSignedContext(
   proof: string[],
   encoding: AmountEncoding = "int18",
 ): SignedContextV1Type {
-  const proofSlots = proof.slice(0, CLAIM_MERKLE_PROOF_DEPTH).map((p) => BigInt(p));
+  // Never silently truncate: a proof deeper than the fixed context depth (which
+  // happens once a CSV exceeds 2^depth rows) would build a well-formed-but-invalid
+  // signed context that the merkle root check can't catch and takeOrders reverts on
+  // with an opaque error. Fail loudly instead so the cause is obvious. Shorter
+  // proofs are zero-padded, which the on-chain convention handles.
+  if (proof.length > CLAIM_MERKLE_PROOF_DEPTH) {
+    throw new Error(
+      `Merkle proof depth ${proof.length} exceeds CLAIM_MERKLE_PROOF_DEPTH (${CLAIM_MERKLE_PROOF_DEPTH}); the signed-context layout cannot carry it`,
+    );
+  }
+  const proofSlots = proof.map((p) => BigInt(p));
   while (proofSlots.length < CLAIM_MERKLE_PROOF_DEPTH) {
     proofSlots.push(0n);
   }

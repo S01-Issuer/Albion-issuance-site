@@ -24,17 +24,14 @@ import {
   type SignedContextV1Type,
   sortClaimsData,
   fetchLogs,
+  ContextScanError,
   getStoredClaimTransactionHashes,
   HYPERSYNC_URL,
   type ClaimHistory,
   type CsvClaimRow,
   type HypersyncResult,
 } from "$lib/utils/claims";
-import { formatEther, type Hex } from "viem";
-import { wagmiConfig } from "svelte-wagmi";
-import { simulateContract, writeContract } from "@wagmi/core";
-import { get } from "svelte/store";
-import orderbookAbi from "$lib/abi/orderbook.json";
+import { formatEther } from "viem";
 
 export class ClaimsCsvLoadError extends Error {
   readonly code = "CLAIMS_CSV_LOAD_ERROR";
@@ -271,26 +268,46 @@ export class ClaimsService {
     }
 
     const logsByOb = new Map<string, HypersyncResult[]>();
-    await Promise.all(
-      ORDERBOOK_SOURCES.map(async (src) => {
-        const ob = src.address.toLowerCase();
-        const earliest = earliestByOb.get(ob);
-        if (earliest === undefined) return;
-        // Owner-scoped: the server filters the shared per-era log set down to
-        // this wallet's Context events (a few KB instead of the ~3.5MB
-        // every-wallet set). All downstream use of logsByOb — claimed-detection
-        // and claim history — is scoped to this same ownerAddress.
-        const logs = await fetchLogs(
-          HYPERSYNC_URL,
-          src.address,
-          getContextEventTopics(src),
-          earliest,
-          options?.refreshContextEvents ?? false,
-          ownerAddress,
+    try {
+      await Promise.all(
+        ORDERBOOK_SOURCES.map(async (src) => {
+          const ob = src.address.toLowerCase();
+          const earliest = earliestByOb.get(ob);
+          if (earliest === undefined) return;
+          // Owner-scoped: the server filters the shared per-era log set down to
+          // this wallet's Context events (a few KB instead of the ~3.5MB
+          // every-wallet set). All downstream use of logsByOb — claimed-detection
+          // and claim history — is scoped to this same ownerAddress.
+          const logs = await fetchLogs(
+            HYPERSYNC_URL,
+            src.address,
+            getContextEventTopics(src),
+            earliest,
+            options?.refreshContextEvents ?? false,
+            ownerAddress,
+          );
+          logsByOb.set(ob, logs);
+        }),
+      );
+    } catch (error) {
+      // A Context scan failed (Hypersync outage / server 503). We cannot tell
+      // claimed from unclaimed without the logs, so returning partial data would
+      // re-offer already-claimed payouts as claimable. Surface it as a load error
+      // (same UI path as a CSV load failure) instead of trusting an empty set.
+      if (error instanceof ContextScanError) {
+        console.error(
+          "Claims load aborted: Context scan unavailable, refusing to render claimed=0",
+          error,
         );
-        logsByOb.set(ob, logs);
-      }),
-    );
+        return {
+          holdings: [],
+          claimHistory: [],
+          totals: { earned: 0, claimed: 0, unclaimed: 0 },
+          hasCsvLoadError: true,
+        };
+      }
+      throw error;
+    }
 
     // Phase 4: Process each claim using pre-fetched data
     let claimHistory: ClaimHistory[] = [];
@@ -552,62 +569,6 @@ export class ClaimsService {
         holdings: newHoldings,
       });
     }
-  }
-
-  /**
-   * Claim all available holdings
-   */
-  async claimAll(holdings: ClaimsHoldingsGroup[]): Promise<void> {
-    if (!holdings || holdings.length === 0) {
-      throw new Error("No holdings to claim");
-    }
-
-    const cfg = get(wagmiConfig);
-    const allOrders: Array<{
-      order: ReturnType<typeof decodeOrder>;
-      inputIOIndex: number;
-      outputIOIndex: number;
-      signedContext: readonly SignedContext[];
-    }> = [];
-    let orderBookAddress: Hex | undefined;
-
-    // Prepare all orders for claiming. Holdings must carry proof fields (only the
-    // withProofs:true pre-claim refresh produces them); skip any that don't.
-    for (const group of holdings) {
-      for (const h of group.holdings) {
-        if (!h.order || !h.signedContext || !h.orderBookAddress) continue;
-        orderBookAddress = (h.orderBookAddress as Hex) || orderBookAddress;
-        allOrders.push({
-          order: h.order,
-          inputIOIndex: 0,
-          outputIOIndex: 0,
-          signedContext: [h.signedContext],
-        });
-      }
-    }
-
-    if (!orderBookAddress) {
-      throw new Error("No orderbook address found");
-    }
-
-    // Prepare transaction config
-    const takeOrdersConfig = {
-      minimumInput: 0n,
-      maximumInput: 2n ** 256n - 1n,
-      maximumIORatio: 2n ** 256n - 1n,
-      orders: allOrders,
-      data: "0x",
-    } as const;
-
-    // Simulate and execute transaction
-    const { request } = await simulateContract(cfg, {
-      abi: orderbookAbi,
-      address: orderBookAddress,
-      functionName: "takeOrders2",
-      args: [takeOrdersConfig],
-    });
-
-    await writeContract(cfg, request);
   }
 
   /**
