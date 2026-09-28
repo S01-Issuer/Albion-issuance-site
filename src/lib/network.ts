@@ -2,18 +2,18 @@ import { PUBLIC_METABOARD_ADMIN } from "$env/static/public";
 import { env as publicEnv } from "$env/dynamic/public";
 
 export const BASE_SFT_SUBGRAPH_URL =
-  "https://api.goldsky.com/api/public/project_cm153vmqi5gke01vy66p4ftzf/subgraphs/sft-offchainassetvaulttest-base/1.0.5/gn";
+  "https://api.subgraph.ormilabs.com/api/public/9f4fc2fa-4a15-44f7-a7c1-66fdaa518a71/subgraphs/sft-base/legacy/gn";
 export const BASE_ORDERBOOK_SUBGRAPH_URL =
-  "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/ob4-base/2024-12-13-9c39/gn";
+  "https://api.subgraph.ormilabs.com/api/public/9f4fc2fa-4a15-44f7-a7c1-66fdaa518a71/subgraphs/ob4-base/2024-12-13-9c39/gn";
 // Raindex v6 OrderBook subgraph (Float era), indexing the finalized v6 OB
 // 0xb05D…. Single-OB raindex schema (no `orderbook { id }` field — the era is
 // inferred per source in claimsRepository). All claim orders are resolved
 // subgraph-free from orderBytes + deployBlock in network.ts; this endpoint is
 // still used by the Context/trades scan, not for order resolution.
 export const BASE_ORDERBOOK_V6_SUBGRAPH_URL =
-  "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/raindex-base/0xb05D73E6BCc26AEB5b67Ff68C6E9C6151073e3cE-105c526/gn";
+  "https://api.subgraph.ormilabs.com/api/public/9f4fc2fa-4a15-44f7-a7c1-66fdaa518a71/subgraphs/raindex-base/legacy/gn";
 export const BASE_METADATA_SUBGRAPH_URL =
-  "https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/metadata-base/2025-07-06-594f/gn";
+  "https://api.subgraph.ormilabs.com/api/public/9f4fc2fa-4a15-44f7-a7c1-66fdaa518a71/subgraphs/metadata-base/prod/gn";
 
 const BASE_SFT_SUBGRAPH_FALLBACK_URL =
   publicEnv.PUBLIC_BASE_SFT_SUBGRAPH_FALLBACK_URL;
